@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Achates</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <button id="new-chat" class="new-chat-btn">+ New Chat</button>
+      <div id="conversation-list" class="conversation-list"></div>
+    </aside>
+    <main class="chat-area">
+      <div id="welcome" class="welcome">
+        <h1>Achates</h1>
+        <p>Your faithful assistant</p>
+      </div>
+      <div id="messages" class="messages"></div>
+      <form id="message-form" class="message-form">
+        <textarea id="message-input" placeholder="Type a message..." rows="1"></textarea>
+        <button type="submit" id="send-btn">Send</button>
+      </form>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
