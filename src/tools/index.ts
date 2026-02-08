@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '../openrouter.js';
+import logger from '../logger.js';
 
 export interface Tool {
   name: string;
@@ -11,6 +12,7 @@ const tools: Map<string, Tool> = new Map();
 
 export function registerTool(tool: Tool): void {
   tools.set(tool.name, tool);
+  logger.debug({ tool: tool.name }, 'Tool registered');
 }
 
 export function getTool(name: string): Tool | undefined {
@@ -35,11 +37,13 @@ export function getToolDefinitions(): ToolDefinition[] {
 export async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
   const tool = tools.get(name);
   if (!tool) {
+    logger.warn({ tool: name }, 'Attempted to execute unknown tool');
     return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
   try {
     return await tool.execute(args);
   } catch (err) {
+    logger.error({ err, tool: name }, 'Tool execution failed');
     return JSON.stringify({ error: `Tool execution failed: ${(err as Error).message}` });
   }
 }

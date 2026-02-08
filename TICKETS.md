@@ -73,7 +73,7 @@ Deployment, security, and operational concerns.
 - [ ] **INFRA-001: Docker configuration** — Create a `Dockerfile` and `docker-compose.yml` for easy deployment. Include volume mounts for `data/` and `.env` configuration.
 - [ ] **INFRA-002: Authentication** — Add optional authentication for the web UI. Support PIN code or password. Use session cookies. Configurable via `.env`.
 - [ ] **INFRA-003: HTTPS support** — Add HTTPS support via self-signed certificate generation or reverse proxy documentation (nginx, Caddy).
-- [ ] **INFRA-004: Logging** — Add structured logging (e.g., `pino`). Log API calls, tool executions, errors, and conversation events. Configurable log level.
+- [x] **INFRA-004: Logging** — Add structured logging (e.g., `pino`). Log API calls, tool executions, errors, and conversation events. Configurable log level.
 - [ ] **INFRA-005: Rate limiting** — Add rate limiting to API endpoints to prevent runaway API costs. Configurable limits per endpoint.
 - [ ] **INFRA-006: Token tracking** — Track token usage per conversation and in total. Display usage in the UI. Set configurable budget alerts.
 - [ ] **INFRA-007: Backup and restore** — Script to backup `data/` directory. Support restore from backup. Document backup strategies.

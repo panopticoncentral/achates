@@ -1,6 +1,7 @@
 import { chatCompletion, chatCompletionStream, type Message } from './openrouter.js';
 import { getToolDefinitions, executeTool } from './tools/index.js';
 import { saveConversation, type Conversation } from './memory.js';
+import logger from './logger.js';
 
 const SYSTEM_PROMPT = `You are Achates, a helpful and knowledgeable AI assistant. You are named after Aeneas's faithful companion in the Aeneid.
 
@@ -15,12 +16,14 @@ export async function* runAgent(
   userMessage: string
 ): AsyncGenerator<string> {
   conversation.messages.push({ role: 'user', content: userMessage });
+  logger.info({ conversationId: conversation.id }, 'Agent run started');
 
   const toolDefinitions = getToolDefinitions();
   let rounds = 0;
 
   while (rounds < MAX_TOOL_ROUNDS) {
     rounds++;
+    logger.debug({ conversationId: conversation.id, round: rounds }, 'Agent round started');
 
     const messagesForApi: Message[] = [
       { role: 'system', content: SYSTEM_PROMPT },
@@ -81,10 +84,12 @@ export async function* runAgent(
       try {
         parsedArgs = JSON.parse(tc.arguments);
       } catch {
-        // Empty args on parse failure
+        logger.warn({ tool: tc.name, rawArguments: tc.arguments }, 'Failed to parse tool call arguments');
       }
 
+      logger.info({ tool: tc.name, conversationId: conversation.id }, 'Tool execution started');
       const result = await executeTool(tc.name, parsedArgs);
+      logger.info({ tool: tc.name, conversationId: conversation.id, resultLength: result.length }, 'Tool execution completed');
       conversation.messages.push({
         role: 'tool',
         content: result,
@@ -102,14 +107,17 @@ export async function* runAgent(
     conversation.messages.filter(m => m.role === 'user').length === 1
   ) {
     try {
+      logger.debug({ conversationId: conversation.id }, 'Generating conversation title');
       conversation.title = await generateTitle(conversation.messages);
+      logger.debug({ conversationId: conversation.id, title: conversation.title }, 'Conversation title generated');
     } catch {
-      // Keep default title on failure
+      logger.warn({ conversationId: conversation.id }, 'Title generation failed, keeping default');
     }
   }
 
   conversation.updated = new Date().toISOString();
   await saveConversation(conversation);
+  logger.debug({ conversationId: conversation.id }, 'Conversation saved');
 }
 
 async function generateTitle(messages: Message[]): Promise<string> {

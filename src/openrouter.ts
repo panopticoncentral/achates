@@ -1,3 +1,5 @@
+import logger from './logger.js';
+
 export interface Message {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | null;
@@ -74,6 +76,8 @@ export async function chatCompletion(options: ChatCompletionOptions): Promise<Me
     body.tool_choice = options.tool_choice ?? 'auto';
   }
 
+  logger.debug({ model: body.model as string, messageCount: options.messages.length }, 'OpenRouter API request');
+
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -87,12 +91,14 @@ export async function chatCompletion(options: ChatCompletionOptions): Promise<Me
 
   if (!response.ok) {
     const errorBody = await response.text();
+    logger.error({ status: response.status, body: errorBody }, 'OpenRouter API error');
     throw new Error(`OpenRouter API error ${response.status}: ${errorBody}`);
   }
 
   const json = await response.json() as {
     choices: Array<{ message: Message }>;
   };
+  logger.debug({ model: body.model as string }, 'OpenRouter API response received');
   return json.choices[0].message;
 }
 
@@ -111,6 +117,8 @@ export async function* chatCompletionStream(
     body.tool_choice = options.tool_choice ?? 'auto';
   }
 
+  logger.debug({ model: body.model as string, messageCount: options.messages.length, stream: true }, 'OpenRouter API stream request');
+
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -124,6 +132,7 @@ export async function* chatCompletionStream(
 
   if (!response.ok) {
     const errorBody = await response.text();
+    logger.error({ status: response.status, body: errorBody }, 'OpenRouter API stream error');
     throw new Error(`OpenRouter API error ${response.status}: ${errorBody}`);
   }
 

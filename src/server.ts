@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { runAgent } from './agent.js';
 import { createConversation, loadConversation, listConversations } from './memory.js';
 import './tools/index.js';
+import logger from './logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -18,6 +19,7 @@ app.get('/api/conversations', async (_req, res) => {
     const conversations = await listConversations();
     res.json(conversations);
   } catch (err) {
+    logger.error({ err }, 'Failed to list conversations');
     res.status(500).json({ error: (err as Error).message });
   }
 });
@@ -28,6 +30,7 @@ app.post('/api/conversations', async (_req, res) => {
     const conversation = await createConversation();
     res.json({ id: conversation.id, title: conversation.title });
   } catch (err) {
+    logger.error({ err }, 'Failed to create conversation');
     res.status(500).json({ error: (err as Error).message });
   }
 });
@@ -38,6 +41,7 @@ app.get('/api/conversations/:id', async (req, res) => {
     const conversation = await loadConversation(req.params.id);
     res.json(conversation);
   } catch {
+    logger.warn({ conversationId: req.params.id }, 'Conversation not found');
     res.status(404).json({ error: 'Conversation not found' });
   }
 });
@@ -54,6 +58,7 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
   try {
     conversation = await loadConversation(req.params.id);
   } catch {
+    logger.warn({ conversationId: req.params.id }, 'Conversation not found for message');
     res.status(404).json({ error: 'Conversation not found' });
     return;
   }
@@ -64,11 +69,14 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
   res.flushHeaders();
 
   try {
+    logger.info({ conversationId: req.params.id }, 'Chat message received');
     for await (const token of runAgent(conversation, message)) {
       res.write(`data: ${JSON.stringify({ type: 'token', content: token })}\n\n`);
     }
+    logger.info({ conversationId: req.params.id }, 'Chat response complete');
     res.write(`data: ${JSON.stringify({ type: 'done', title: conversation.title, id: conversation.id })}\n\n`);
   } catch (err) {
+    logger.error({ err, conversationId: req.params.id }, 'Error during agent streaming');
     res.write(`data: ${JSON.stringify({ type: 'error', message: (err as Error).message })}\n\n`);
   }
 
@@ -88,11 +96,12 @@ app.delete('/api/conversations/:id', async (req, res) => {
     }
     res.json({ ok: true });
   } catch {
+    logger.warn({ conversationId: req.params.id }, 'Conversation not found for deletion');
     res.status(404).json({ error: 'Conversation not found' });
   }
 });
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 app.listen(PORT, '127.0.0.1', () => {
-  console.log(`Achates running at http://localhost:${PORT}`);
+  logger.info({ port: PORT }, 'Achates server started');
 });
