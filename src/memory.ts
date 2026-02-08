@@ -165,10 +165,16 @@ function serializeConversation(conv: Conversation): string {
     if (msg.tool_calls && msg.tool_calls.length > 0) {
       for (const tc of msg.tool_calls) {
         lines.push('```tool-call');
+        let parsedArgs = {};
+        try {
+          parsedArgs = JSON.parse(tc.function.arguments);
+        } catch {
+          // Empty or malformed arguments (e.g. tools called with no args)
+        }
         lines.push(JSON.stringify({
           id: tc.id,
           name: tc.function.name,
-          arguments: JSON.parse(tc.function.arguments),
+          arguments: parsedArgs,
         }));
         lines.push('```');
         lines.push('');
