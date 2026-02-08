@@ -12,12 +12,22 @@ const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
 const newChatBtn = document.getElementById('new-chat');
 const conversationListEl = document.getElementById('conversation-list');
+const settingsBtn = document.getElementById('settings-btn');
+const settingsPanel = document.getElementById('settings-panel');
+const settingsForm = document.getElementById('settings-form');
+const settingModel = document.getElementById('setting-model');
+const settingApiKey = document.getElementById('setting-api-key');
+const settingSystemPrompt = document.getElementById('setting-system-prompt');
+const settingsStatus = document.getElementById('settings-status');
+const themeOptions = document.querySelectorAll('.theme-option');
 
 // --- Initialize ---
 loadConversations();
+initSettings();
 
 // --- Event listeners ---
 newChatBtn.addEventListener('click', createNewChat);
+settingsBtn.addEventListener('click', showSettings);
 
 messageForm.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -172,11 +182,13 @@ function renderConversationList() {
 }
 
 function showChat() {
+  hideSettings();
   welcomeEl.style.display = 'none';
   messagesEl.classList.add('visible');
 }
 
 function hideChat() {
+  hideSettings();
   welcomeEl.style.display = '';
   messagesEl.classList.remove('visible');
   clearMessages();
@@ -218,6 +230,131 @@ function updateConversationTitle(id, title) {
 function scrollToBottom() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
+
+// --- Settings ---
+
+let selectedTheme = 'dark';
+
+async function initSettings() {
+  try {
+    const res = await fetch('/api/settings');
+    const settings = await res.json();
+    selectedTheme = settings.theme || 'dark';
+    applyTheme(selectedTheme);
+  } catch {
+    // Use defaults
+  }
+}
+
+async function showSettings() {
+  state.currentConversationId = null;
+  renderConversationList();
+
+  welcomeEl.style.display = 'none';
+  messagesEl.classList.remove('visible');
+  messageForm.style.display = 'none';
+  settingsPanel.classList.add('visible');
+
+  settingsStatus.textContent = '';
+  settingsStatus.className = 'settings-status';
+
+  try {
+    const [settingsRes, modelsRes] = await Promise.all([
+      fetch('/api/settings'),
+      fetch('/api/models'),
+    ]);
+    const settings = await settingsRes.json();
+    const models = await modelsRes.json();
+
+    // Populate model dropdown
+    settingModel.innerHTML = '';
+    if (models.length > 0) {
+      for (const m of models) {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.name;
+        settingModel.appendChild(opt);
+      }
+    } else {
+      // Fallback: just show current model as an option
+      const opt = document.createElement('option');
+      opt.value = settings.model;
+      opt.textContent = settings.model;
+      settingModel.appendChild(opt);
+    }
+    settingModel.value = settings.model;
+
+    // If current model isn't in the list, add it
+    if (settingModel.value !== settings.model) {
+      const opt = document.createElement('option');
+      opt.value = settings.model;
+      opt.textContent = settings.model;
+      settingModel.prepend(opt);
+      settingModel.value = settings.model;
+    }
+
+    settingApiKey.value = settings.apiKey;
+    settingSystemPrompt.value = settings.systemPrompt;
+    selectedTheme = settings.theme || 'dark';
+    updateThemeButtons();
+  } catch {
+    settingsStatus.textContent = 'Failed to load settings';
+    settingsStatus.className = 'settings-status error';
+  }
+}
+
+function hideSettings() {
+  settingsPanel.classList.remove('visible');
+  messageForm.style.display = '';
+}
+
+function updateThemeButtons() {
+  for (const btn of themeOptions) {
+    btn.classList.toggle('active', btn.dataset.theme === selectedTheme);
+  }
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+}
+
+for (const btn of themeOptions) {
+  btn.addEventListener('click', () => {
+    selectedTheme = btn.dataset.theme;
+    updateThemeButtons();
+    applyTheme(selectedTheme);
+  });
+}
+
+settingsForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  settingsStatus.textContent = 'Saving...';
+  settingsStatus.className = 'settings-status';
+
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: settingModel.value,
+        apiKey: settingApiKey.value,
+        systemPrompt: settingSystemPrompt.value,
+        theme: selectedTheme,
+      }),
+    });
+
+    if (!res.ok) throw new Error('Save failed');
+
+    const updated = await res.json();
+    settingApiKey.value = updated.apiKey;
+    settingsStatus.textContent = 'Saved';
+    settingsStatus.className = 'settings-status success';
+    setTimeout(() => { settingsStatus.textContent = ''; }, 2000);
+  } catch {
+    settingsStatus.textContent = 'Failed to save';
+    settingsStatus.className = 'settings-status error';
+  }
+});
 
 // --- Markdown rendering ---
 

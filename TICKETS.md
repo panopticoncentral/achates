@@ -55,7 +55,7 @@ Enhance how Achates remembers and retrieves information.
 
 Improve the web interface and user experience.
 
-- [ ] **UI-001: Settings panel** — Add a settings page accessible from the sidebar. Allow configuring: model selection (dropdown of OpenRouter models), API key, system prompt, theme. Persist settings to a config file.
+- [x] **UI-001: Settings panel** — Add a settings page accessible from the sidebar. Allow configuring: model selection (dropdown of OpenRouter models), API key, system prompt, theme. Persist settings to a config file.
 - [ ] **UI-002: Memory browser** — Add a panel to browse, search, and delete past conversations. Show conversation metadata and preview. Support full-text search.
 - [ ] **UI-003: Syntax highlighting** — Add syntax highlighting for code blocks in assistant responses. Use a lightweight library like `highlight.js` or `Prism.js`. Support common languages.
 - [ ] **UI-004: LaTeX rendering** — Render LaTeX math expressions in assistant responses using KaTeX or MathJax.

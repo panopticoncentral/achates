@@ -138,5 +138,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
-# Achates conversation data (local only)
+# Achates local data
 data/conversations/*.md
+data/settings.json

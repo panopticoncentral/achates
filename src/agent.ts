@@ -1,13 +1,8 @@
 import { chatCompletion, chatCompletionStream, type Message } from './openrouter.js';
 import { getToolDefinitions, executeTool } from './tools/index.js';
 import { saveConversation, type Conversation } from './memory.js';
+import { getSettings } from './settings.js';
 import logger from './logger.js';
-
-const SYSTEM_PROMPT = `You are Achates, a helpful and knowledgeable AI assistant. You are named after Aeneas's faithful companion in the Aeneid.
-
-You have access to tools that you can use to help answer questions. Use them when appropriate.
-
-Be concise but thorough. Use markdown formatting in your responses when it helps readability.`;
 
 const MAX_TOOL_ROUNDS = 10;
 
@@ -18,6 +13,7 @@ export async function* runAgent(
   conversation.messages.push({ role: 'user', content: userMessage });
   logger.info({ conversationId: conversation.id }, 'Agent run started');
 
+  const settings = await getSettings();
   const toolDefinitions = getToolDefinitions();
   let rounds = 0;
 
@@ -26,7 +22,7 @@ export async function* runAgent(
     logger.debug({ conversationId: conversation.id, round: rounds }, 'Agent round started');
 
     const messagesForApi: Message[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: settings.systemPrompt },
       ...conversation.messages,
     ];
 

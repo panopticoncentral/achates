@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { runAgent } from './agent.js';
 import { createConversation, loadConversation, listConversations } from './memory.js';
+import { getSettings, saveSettings, maskApiKey } from './settings.js';
 import './tools/index.js';
 import logger from './logger.js';
 
@@ -98,6 +99,97 @@ app.delete('/api/conversations/:id', async (req, res) => {
   } catch {
     logger.warn({ conversationId: req.params.id }, 'Conversation not found for deletion');
     res.status(404).json({ error: 'Conversation not found' });
+  }
+});
+
+// Get settings
+app.get('/api/settings', async (_req, res) => {
+  try {
+    const settings = await getSettings();
+    res.json({
+      model: settings.model,
+      apiKey: maskApiKey(settings.apiKey),
+      systemPrompt: settings.systemPrompt,
+      theme: settings.theme,
+    });
+  } catch (err) {
+    logger.error({ err }, 'Failed to load settings');
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// Update settings
+app.put('/api/settings', async (req, res) => {
+  try {
+    const { model, apiKey, systemPrompt, theme } = req.body;
+    const current = await getSettings();
+
+    // If the client sends back the masked key, keep the existing one
+    const resolvedApiKey =
+      apiKey && !apiKey.includes('...') && apiKey !== '****'
+        ? apiKey
+        : current.apiKey;
+
+    const updated = await saveSettings({
+      model,
+      apiKey: resolvedApiKey,
+      systemPrompt,
+      theme,
+    });
+
+    res.json({
+      model: updated.model,
+      apiKey: maskApiKey(updated.apiKey),
+      systemPrompt: updated.systemPrompt,
+      theme: updated.theme,
+    });
+  } catch (err) {
+    logger.error({ err }, 'Failed to save settings');
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// Proxy OpenRouter model list
+let modelsCache: { data: Array<{ id: string; name: string }>; fetchedAt: number } | null = null;
+const MODELS_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+app.get('/api/models', async (_req, res) => {
+  try {
+    if (modelsCache && Date.now() - modelsCache.fetchedAt < MODELS_CACHE_TTL) {
+      res.json(modelsCache.data);
+      return;
+    }
+
+    const settings = await getSettings();
+    if (!settings.apiKey) {
+      res.json([]);
+      return;
+    }
+
+    const response = await fetch('https://openrouter.ai/api/v1/models', {
+      headers: {
+        'Authorization': `Bearer ${settings.apiKey}`,
+        'HTTP-Referer': 'http://localhost:3000',
+        'X-Title': 'Achates',
+      },
+    });
+
+    if (!response.ok) {
+      logger.warn({ status: response.status }, 'Failed to fetch models from OpenRouter');
+      res.json([]);
+      return;
+    }
+
+    const json = await response.json() as { data: Array<{ id: string; name: string }> };
+    const models = json.data
+      .map(m => ({ id: m.id, name: m.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    modelsCache = { data: models, fetchedAt: Date.now() };
+    res.json(models);
+  } catch (err) {
+    logger.error({ err }, 'Failed to fetch models');
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 

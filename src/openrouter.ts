@@ -1,3 +1,4 @@
+import { getSettings } from './settings.js';
 import logger from './logger.js';
 
 export interface Message {
@@ -54,17 +55,17 @@ export interface ChatCompletionChunk {
   }>;
 }
 
-function getConfig() {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+async function getConfig() {
+  const settings = await getSettings();
+  const apiKey = settings.apiKey;
   if (!apiKey) {
-    throw new Error('OPENROUTER_API_KEY environment variable is required');
+    throw new Error('OPENROUTER_API_KEY is not configured. Set it in Settings or in your .env file.');
   }
-  const model = process.env.MODEL || 'anthropic/claude-sonnet-4';
-  return { apiKey, model };
+  return { apiKey, model: settings.model };
 }
 
 export async function chatCompletion(options: ChatCompletionOptions): Promise<Message> {
-  const { apiKey, model } = getConfig();
+  const { apiKey, model } = await getConfig();
 
   const body: Record<string, unknown> = {
     model: options.model || model,
@@ -105,7 +106,7 @@ export async function chatCompletion(options: ChatCompletionOptions): Promise<Me
 export async function* chatCompletionStream(
   options: ChatCompletionOptions
 ): AsyncGenerator<ChatCompletionChunk> {
-  const { apiKey, model } = getConfig();
+  const { apiKey, model } = await getConfig();
 
   const body: Record<string, unknown> = {
     model: options.model || model,
