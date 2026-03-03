@@ -2,8 +2,8 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Models;
 
-internal sealed record OpenRouterModelsResponse
+internal sealed record OpenRouterModelsCountResponse
 {
     [JsonPropertyName("data")]
-    public required IReadOnlyList<OpenRouterModel> Data { get; init; }
+    public required OpenRouterModelsCountData Data { get; init; }
 }
