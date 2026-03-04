@@ -6,16 +6,24 @@ using Achates.Providers.OpenRouter.Models;
 
 namespace Achates.Providers.OpenRouter;
 
-public sealed class OpenRouterClient(HttpClient httpClient)
+public sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
 {
     private const string DefaultBaseUrl = "https://openrouter.ai/api/v1";
+
+    private void SetAuth(HttpRequestMessage request) =>
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
     public async Task<IReadOnlyList<OpenRouterModel>> GetModelsAsync(CancellationToken cancellationToken = default)
     {
         var requestUri = $"{GetBaseUrl()}/models";
 
-        var response = await httpClient.GetFromJsonAsync(
-            requestUri,
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        SetAuth(request);
+
+        using var httpResponse = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        httpResponse.EnsureSuccessStatusCode();
+
+        var response = await httpResponse.Content.ReadFromJsonAsync(
             OpenRouterJsonContext.Default.OpenRouterModelsResponse,
             cancellationToken).ConfigureAwait(false);
 
@@ -26,8 +34,13 @@ public sealed class OpenRouterClient(HttpClient httpClient)
     {
         var requestUri = $"{GetBaseUrl()}/models/count";
 
-        var response = await httpClient.GetFromJsonAsync(
-            requestUri,
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        SetAuth(request);
+
+        using var httpResponse = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        httpResponse.EnsureSuccessStatusCode();
+
+        var response = await httpResponse.Content.ReadFromJsonAsync(
             OpenRouterJsonContext.Default.OpenRouterModelsCountResponse,
             cancellationToken).ConfigureAwait(false);
 
@@ -40,11 +53,13 @@ public sealed class OpenRouterClient(HttpClient httpClient)
     {
         var requestUri = $"{GetBaseUrl()}/chat/completions";
 
-        using var httpResponse = await httpClient.PostAsJsonAsync(
-            requestUri,
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri);
+        SetAuth(httpRequest);
+        httpRequest.Content = JsonContent.Create(
             request,
-            OpenRouterJsonContext.Default.ChatCompletionRequest,
-            cancellationToken).ConfigureAwait(false);
+            OpenRouterJsonContext.Default.ChatCompletionRequest);
+
+        using var httpResponse = await httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
 
         if (!httpResponse.IsSuccessStatusCode)
         {
@@ -64,6 +79,7 @@ public sealed class OpenRouterClient(HttpClient httpClient)
         var requestUri = $"{GetBaseUrl()}/chat/completions";
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri);
+        SetAuth(httpRequest);
         httpRequest.Content = JsonContent.Create(
             request,
             OpenRouterJsonContext.Default.ChatCompletionRequest);

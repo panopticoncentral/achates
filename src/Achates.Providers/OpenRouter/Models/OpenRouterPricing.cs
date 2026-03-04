@@ -30,4 +30,19 @@ public sealed record OpenRouterPricing
 
     [JsonPropertyName("input_cache_write")]
     public string? InputCacheWrite { get; init; }
+
+    [JsonPropertyName("image_token")]
+    public string? ImageToken { get; init; }
+
+    [JsonPropertyName("image_output")]
+    public string? ImageOutput { get; init; }
+
+    [JsonPropertyName("audio_output")]
+    public string? AudioOutput { get; init; }
+
+    [JsonPropertyName("input_audio_cache")]
+    public string? InputAudioCache { get; init; }
+
+    [JsonPropertyName("discount")]
+    public double? Discount { get; init; }
 }
