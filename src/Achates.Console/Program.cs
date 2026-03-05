@@ -1,4 +1,5 @@
 using System.Globalization;
+using Achates.Console;
 using Achates.Providers;
 using Achates.Providers.Models;
 
@@ -15,6 +16,7 @@ try
     return await (command switch
     {
         "models" => ListModelsAsync(args),
+        "chat" => RunChatAsync(args),
         "help" or "--help" or "-h" => Task.FromResult(PrintUsage()),
         _ => Task.FromResult(PrintUnknown(command))
     });
@@ -23,6 +25,10 @@ catch (HttpRequestException ex)
 {
     Console.Error.WriteLine($"HTTP error: {ex.Message}");
     return 1;
+}
+catch (OperationCanceledException)
+{
+    return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -52,6 +58,32 @@ async Task<int> ListModelsAsync(string[] args)
     }
 
     return 0;
+}
+
+async Task<int> RunChatAsync(string[] args)
+{
+    var modelId = GetOption(args, "--model");
+    if (modelId is null)
+    {
+        Console.Error.WriteLine("Error: --model is required for chat.");
+        return 1;
+    }
+
+    var provider = GetProvider(args);
+    var models = await provider.GetModelsAsync();
+    var model = models.FirstOrDefault(m => m.Id.Equals(modelId, StringComparison.OrdinalIgnoreCase));
+    if (model is null)
+    {
+        Console.Error.WriteLine($"Error: Model '{modelId}' not found.");
+        return 1;
+    }
+
+    var systemPrompt = GetOption(args, "--system");
+    var temperature = GetOption(args, "--temperature") is { } t
+        ? double.Parse(t, CultureInfo.InvariantCulture)
+        : (double?)null;
+
+    return await ChatCommand.RunAsync(model, systemPrompt, temperature);
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +141,8 @@ static int PrintUsage()
 
         Commands:
           models [--filter <text>]                          List available models
+          chat --model <id> [--system <prompt>] [--temperature <value>]
+                                                            Start interactive chat
 
         Options:
           --provider <id>    Provider to use (default: openrouter)

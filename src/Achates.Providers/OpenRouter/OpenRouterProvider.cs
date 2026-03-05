@@ -1,6 +1,13 @@
 using System.Globalization;
+using System.Text.Json;
+using Achates.Providers.Completions;
+using Achates.Providers.Completions.Content;
+using Achates.Providers.Completions.Events;
+using Achates.Providers.Completions.Messages;
 using Achates.Providers.Models;
+using Achates.Providers.OpenRouter.Chat;
 using Achates.Providers.OpenRouter.Models;
+using Achates.Providers.Util;
 
 namespace Achates.Providers.OpenRouter;
 
@@ -13,6 +20,13 @@ internal sealed class OpenRouterProvider : IModelProvider
     public HttpClient HttpClient { private get; set; } = null!;
 
     public string Key { private get; set; } = string.Empty;
+
+    public CompletionEventStream GetCompletions(Model model, CompletionContext completionContext, CompletionOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        var client = new OpenRouterClient(HttpClient, Key);
+        return CompletionEventStream.Create(stream =>
+            ProcessStreamAsync(client, stream, model, completionContext, options, cancellationToken));
+    }
 
     public async Task<IReadOnlyList<Model>> GetModelsAsync(CancellationToken cancellationToken = default)
     {
@@ -35,6 +49,582 @@ internal sealed class OpenRouterProvider : IModelProvider
 
         return models;
     }
+
+    // ---- Streaming ----
+
+    private sealed class BlockTracker
+    {
+        public readonly List<CompletionContent> Blocks = [];
+        public CompletionContent? Current;
+        public string? PartialArgs;
+        public int LastIndex => Blocks.Count - 1;
+    }
+
+    /// <summary>
+    /// Drives the SSE streaming loop, converting OpenRouter chat completion chunks into
+    /// provider-agnostic completion events pushed onto the stream.
+    ///
+    /// The assistant message (<paramref name="output"/>) is progressively built up:
+    /// its Content list (owned by the tracker) is mutated in place as blocks arrive,
+    /// while usage and stop reason are updated via immutable record copies.
+    ///
+    /// Each chunk may contain any combination of:
+    ///   - Usage data (typically the final chunk) → updates token counts and cost
+    ///   - A finish reason → maps to a CompletionStopReason
+    ///   - Text, reasoning, or tool call deltas → delegated to typed handlers that
+    ///     manage block lifecycle (start/delta/end events) through the BlockTracker
+    ///
+    /// On success, emits a CompletionDoneEvent with the fully-assembled message.
+    /// On failure, emits a CompletionErrorEvent and marks the reason as Error or Aborted.
+    /// The stream is always ended (via End()) so consumers never hang.
+    /// </summary>
+    private static async Task ProcessStreamAsync(
+        OpenRouterClient client,
+        CompletionEventStream stream,
+        Model model,
+        CompletionContext completionContext,
+        CompletionOptions? options,
+        CancellationToken cancellationToken)
+    {
+        var tracker = new BlockTracker();
+
+        var output = new CompletionAssistantMessage
+        {
+            Content = tracker.Blocks,
+            Model = model.Id,
+            CompletionUsage = CompletionUsage.Empty,
+            CompletionStopReason = CompletionStopReason.Stop,
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        };
+
+        try
+        {
+            var request = BuildChatRequest(model, completionContext, options);
+            stream.Push(new CompletionStartEvent { Partial = output });
+
+            await foreach (var chunk in client.StreamChatCompletionAsync(request, cancellationToken).ConfigureAwait(false))
+            {
+                if (chunk.Usage is { } usage)
+                {
+                    output = output with { CompletionUsage = MapUsage(usage, model) };
+                }
+
+                if (chunk.Choices is not { Count: > 0 })
+                {
+                    continue;
+                }
+
+                var choice = chunk.Choices[0];
+
+                if (choice.FinishReason is not null)
+                {
+                    output = output with { CompletionStopReason = MapStopReason(choice.FinishReason) };
+                }
+
+                var delta = choice.Delta;
+
+                if (delta.Content is { Length: > 0 } text)
+                {
+                    ProcessTextDelta(stream, tracker, output, text);
+                }
+
+                if (delta.Reasoning is { Length: > 0 } reasoning)
+                {
+                    ProcessThinkingDelta(stream, tracker, output, reasoning);
+                }
+
+                if (delta.ToolCalls is { Count: > 0 } toolCalls)
+                {
+                    ProcessToolCallDeltas(stream, tracker, output, toolCalls);
+                }
+            }
+
+            // Close any in-progress block and finalize the stream
+            FinishCurrentBlock(stream, tracker, output);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            stream.Push(new CompletionDoneEvent { Reason = output.CompletionStopReason, CompletionMessage = output });
+            stream.End();
+        }
+        catch (Exception ex)
+        {
+            output = output with
+            {
+                CompletionStopReason = ex is OperationCanceledException ? CompletionStopReason.Aborted : CompletionStopReason.Error,
+                ErrorMessage = ex.Message,
+            };
+            stream.Push(new CompletionErrorEvent { Reason = output.CompletionStopReason, Error = output });
+            stream.End();
+        }
+    }
+
+    // ---- Chunk processing ----
+
+    private static CompletionUsage MapUsage(ChatUsage usage, Model model)
+    {
+        var cachedTokens = 0;
+        var reasoningTokens = 0;
+
+        if (usage.PromptTokensDetails is { ValueKind: JsonValueKind.Object } ptd
+            && ptd.TryGetProperty("cached_tokens", out var ct))
+        {
+            cachedTokens = ct.GetInt32();
+        }
+
+        if (usage.CompletionTokensDetails is { ValueKind: JsonValueKind.Object } ctd
+            && ctd.TryGetProperty("reasoning_tokens", out var rt))
+        {
+            reasoningTokens = rt.GetInt32();
+        }
+
+        var inputTokens = usage.PromptTokens - cachedTokens;
+        var outputTokens = usage.CompletionTokens + reasoningTokens;
+
+        var result = new CompletionUsage
+        {
+            Input = inputTokens,
+            Output = outputTokens,
+            CacheRead = cachedTokens,
+            CacheWrite = 0,
+            TotalTokens = inputTokens + outputTokens + cachedTokens,
+            Cost = new CompletionUsageCost(),
+        };
+        return result with { Cost = result.CalculateCost(model) };
+    }
+
+    private static void FinishCurrentBlock(
+        CompletionEventStream stream, BlockTracker tracker, CompletionAssistantMessage output)
+    {
+        if (tracker.Current is null)
+        {
+            return;
+        }
+
+        switch (tracker.Current)
+        {
+            case CompletionTextContent tc:
+                stream.Push(new CompletionTextEndEvent
+                {
+                    ContentIndex = tracker.LastIndex,
+                    Content = tc.Text,
+                    Partial = output,
+                });
+                break;
+            case CompletionThinkingContent th:
+                stream.Push(new CompletionThinkingEndEvent
+                {
+                    ContentIndex = tracker.LastIndex,
+                    Content = th.Thinking,
+                    Partial = output,
+                });
+                break;
+            case CompletionToolCall tc:
+            {
+                var finalArgs = PartialJsonParser.ParseStreamingJson(tracker.PartialArgs);
+                tracker.Blocks[tracker.LastIndex] = tc with { Arguments = finalArgs };
+                stream.Push(new CompletionToolCallEndEvent
+                {
+                    ContentIndex = tracker.LastIndex,
+                    CompletionToolCall = (CompletionToolCall)tracker.Blocks[tracker.LastIndex],
+                    Partial = output,
+                });
+                break;
+            }
+        }
+
+        tracker.Current = null;
+        tracker.PartialArgs = null;
+    }
+
+    private static void ProcessTextDelta(
+        CompletionEventStream stream, BlockTracker tracker, CompletionAssistantMessage output, string delta)
+    {
+        if (tracker.Current is not CompletionTextContent)
+        {
+            FinishCurrentBlock(stream, tracker, output);
+            var block = new CompletionTextContent { Text = "" };
+            tracker.Blocks.Add(block);
+            tracker.Current = block;
+            stream.Push(new CompletionTextStartEvent { ContentIndex = tracker.LastIndex, Partial = output });
+        }
+
+        var tc = (CompletionTextContent)tracker.Current;
+        var updated = tc with { Text = tc.Text + delta };
+        tracker.Blocks[tracker.LastIndex] = updated;
+        tracker.Current = updated;
+        stream.Push(new CompletionTextDeltaEvent
+        {
+            ContentIndex = tracker.LastIndex,
+            Delta = delta,
+            Partial = output,
+        });
+    }
+
+    private static void ProcessThinkingDelta(
+        CompletionEventStream stream, BlockTracker tracker, CompletionAssistantMessage output, string delta)
+    {
+        if (tracker.Current is not CompletionThinkingContent)
+        {
+            FinishCurrentBlock(stream, tracker, output);
+            var block = new CompletionThinkingContent { Thinking = "" };
+            tracker.Blocks.Add(block);
+            tracker.Current = block;
+            stream.Push(new CompletionThinkingStartEvent { ContentIndex = tracker.LastIndex, Partial = output });
+        }
+
+        var th = (CompletionThinkingContent)tracker.Current;
+        var updated = th with { Thinking = th.Thinking + delta };
+        tracker.Blocks[tracker.LastIndex] = updated;
+        tracker.Current = updated;
+        stream.Push(new CompletionThinkingDeltaEvent
+        {
+            ContentIndex = tracker.LastIndex,
+            Delta = delta,
+            Partial = output,
+        });
+    }
+
+    private static void ProcessToolCallDeltas(
+        CompletionEventStream stream, BlockTracker tracker, CompletionAssistantMessage output,
+        IReadOnlyList<ChatDeltaToolCall> deltas)
+    {
+        foreach (var toolCallDelta in deltas)
+        {
+            var tcId = toolCallDelta.Id;
+
+            if (tracker.Current is not CompletionToolCall
+                || (tcId is not null && tracker.Current is CompletionToolCall existing && existing.Id != tcId))
+            {
+                FinishCurrentBlock(stream, tracker, output);
+                tracker.Blocks.Add(new CompletionToolCall
+                {
+                    Id = tcId ?? "",
+                    Name = toolCallDelta.Function?.Name ?? "",
+                    Arguments = [],
+                });
+                tracker.Current = tracker.Blocks[tracker.LastIndex];
+                tracker.PartialArgs = "";
+                stream.Push(new CompletionToolCallStartEvent { ContentIndex = tracker.LastIndex, Partial = output });
+            }
+
+            var currentTc = (CompletionToolCall)tracker.Current!;
+
+            if (tcId is not null)
+            {
+                currentTc = currentTc with { Id = tcId };
+                tracker.Blocks[tracker.LastIndex] = currentTc;
+                tracker.Current = currentTc;
+            }
+
+            if (toolCallDelta.Function?.Name is { } funcName)
+            {
+                currentTc = currentTc with { Name = funcName };
+                tracker.Blocks[tracker.LastIndex] = currentTc;
+                tracker.Current = currentTc;
+            }
+
+            var argsDelta = "";
+            if (toolCallDelta.Function?.Arguments is { } funcArgs)
+            {
+                argsDelta = funcArgs;
+                tracker.PartialArgs += funcArgs;
+                currentTc = currentTc with { Arguments = PartialJsonParser.ParseStreamingJson(tracker.PartialArgs) };
+                tracker.Blocks[tracker.LastIndex] = currentTc;
+                tracker.Current = currentTc;
+            }
+
+            stream.Push(new CompletionToolCallDeltaEvent
+            {
+                ContentIndex = tracker.LastIndex,
+                Delta = argsDelta,
+                Partial = output,
+            });
+        }
+    }
+
+    // ---- Request building ----
+
+    private static ChatCompletionRequest BuildChatRequest(
+        Model model,
+        CompletionContext completionContext,
+        CompletionOptions? options)
+    {
+        var messages = ConvertMessages(model, completionContext);
+        var tools = completionContext.Tools is { Count: > 0 } ? ConvertTools(completionContext.Tools) : null;
+
+        // If no tools defined but conversation has tool history, send empty tools array
+        if (tools is null && HasToolHistory(completionContext.Messages))
+        {
+            tools = [];
+        }
+
+        JsonElement? toolChoice = null;
+        if (options?.ToolChoice is not null)
+        {
+            toolChoice = options.ToolChoice.Type switch
+            {
+                ToolChoiceType.Auto => JsonSerializer.SerializeToElement("auto"),
+                ToolChoiceType.None => JsonSerializer.SerializeToElement("none"),
+                ToolChoiceType.Required => JsonSerializer.SerializeToElement("required"),
+                ToolChoiceType.Function => JsonSerializer.SerializeToElement(new
+                {
+                    type = "function", function = new { name = options.ToolChoice.Name },
+                }),
+                _ => null
+            };
+        }
+
+        ChatReasoningConfig? reasoning = null;
+        if (options?.ReasoningEffort is not null
+            && model.Parameters.HasFlag(ModelParameters.Reasoning))
+        {
+            reasoning = new ChatReasoningConfig { Effort = options.ReasoningEffort };
+        }
+
+        ChatResponseFormat? responseFormat = null;
+        if (options?.ResponseFormat is { } rf)
+        {
+            responseFormat = new ChatResponseFormat
+            {
+                Type = rf.Type,
+                JsonSchema = rf.JsonSchema is { } schema
+                    ? new ChatJsonSchema
+                    {
+                        Name = "response",
+                        Schema = schema,
+                    }
+                    : null,
+            };
+        }
+
+        return new ChatCompletionRequest
+        {
+            Model = model.Id,
+            Messages = messages,
+            Stream = true,
+            StreamOptions = new ChatStreamOptions { IncludeUsage = true },
+            Temperature = options?.Temperature,
+            TopP = options?.TopP,
+            TopK = options?.TopK,
+            MinP = options?.MinP,
+            TopA = options?.TopA,
+            LogitBias = options?.LogitBias?.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value),
+            FrequencyPenalty = options?.FrequencyPenalty,
+            PresencePenalty = options?.PresencePenalty,
+            RepetitionPenalty = options?.RepetitionPenalty,
+            MaxCompletionTokens = options?.MaxTokens,
+            Seed = options?.Seed,
+            Stop = options?.Stop,
+            Logprobs = options?.Logprobs,
+            TopLogprobs = options?.TopLogprobs,
+            Tools = tools,
+            ToolChoice = toolChoice,
+            ParallelToolCalls = options?.ParallelToolCalls,
+            ResponseFormat = responseFormat,
+            Reasoning = reasoning,
+        };
+    }
+
+    // ---- Message conversion ----
+
+    private static List<ChatMessage> ConvertMessages(Model model, CompletionContext completionContext)
+    {
+        var result = new List<ChatMessage>();
+
+        // System prompt
+        if (!string.IsNullOrEmpty(completionContext.SystemPrompt))
+        {
+            var role = model.Parameters.HasFlag(ModelParameters.Reasoning) ? "developer" : "system";
+            result.Add(new ChatMessage
+            {
+                Role = role,
+                Content = JsonSerializer.SerializeToElement(
+                    UnicodeSanitizer.SanitizeSurrogates(completionContext.SystemPrompt)),
+            });
+        }
+
+        foreach (var msg in completionContext.Messages)
+        {
+            switch (msg)
+            {
+                case CompletionUserTextMessage textMsg:
+                    result.Add(ConvertUserTextMessage(textMsg));
+                    break;
+                case CompletionUserContentMessage blocksMsg:
+                    result.Add(ConvertUserBlocksMessage(blocksMsg, model));
+                    break;
+                case CompletionAssistantMessage assistant:
+                    var converted = ConvertAssistantMessage(assistant);
+                    if (converted is not null)
+                    {
+                        result.Add(converted);
+                    }
+
+                    break;
+                case CompletionToolResultMessage toolResult:
+                    result.Add(ConvertToolResult(toolResult));
+                    break;
+            }
+        }
+
+        return result;
+    }
+
+    private static ChatMessage ConvertUserTextMessage(CompletionUserTextMessage textMsg)
+    {
+        return new ChatMessage
+        {
+            Role = "user",
+            Content = JsonSerializer.SerializeToElement(
+                UnicodeSanitizer.SanitizeSurrogates(textMsg.Text)),
+        };
+    }
+
+    private static ChatMessage ConvertUserBlocksMessage(CompletionUserContentMessage contentMsg, Model model)
+    {
+        var parts = new List<ChatContentPart>();
+        foreach (var block in contentMsg.Content)
+        {
+            switch (block)
+            {
+                case CompletionTextContent tc:
+                    parts.Add(new ChatContentPart
+                    {
+                        Type = "text",
+                        Text = UnicodeSanitizer.SanitizeSurrogates(tc.Text),
+                    });
+                    break;
+                case CompletionImageContent img when model.Input.HasFlag(ModelModalities.Image):
+                    parts.Add(new ChatContentPart
+                    {
+                        Type = "image_url",
+                        ImageUrl = new ChatImageUrl
+                        {
+                            Url = $"data:{img.MimeType};base64,{img.Data}",
+                        },
+                    });
+                    break;
+            }
+        }
+
+        return new ChatMessage
+        {
+            Role = "user",
+            Content = JsonSerializer.SerializeToElement(parts),
+        };
+    }
+
+    private static ChatMessage? ConvertAssistantMessage(CompletionAssistantMessage completionAssistant)
+    {
+        var textBlocks = completionAssistant.Content.OfType<CompletionTextContent>()
+            .Where(b => !string.IsNullOrWhiteSpace(b.Text))
+            .ToList();
+
+        var thinkingBlocks = completionAssistant.Content.OfType<CompletionThinkingContent>()
+            .Where(b => !string.IsNullOrWhiteSpace(b.Thinking))
+            .ToList();
+
+        var toolCalls = completionAssistant.Content.OfType<CompletionToolCall>().ToList();
+
+        // Skip empty assistant messages
+        if (textBlocks.Count == 0 && toolCalls.Count == 0)
+        {
+            return null;
+        }
+
+        JsonElement? content = null;
+        if (textBlocks.Count > 0)
+        {
+            var text = string.Join("\n", textBlocks.Select(b =>
+                UnicodeSanitizer.SanitizeSurrogates(b.Text)));
+            content = JsonSerializer.SerializeToElement(text);
+        }
+
+        List<ChatToolCall>? chatToolCalls = null;
+        if (toolCalls.Count > 0)
+        {
+            chatToolCalls = toolCalls.Select(tc => new ChatToolCall
+            {
+                Id = tc.Id,
+                Type = "function",
+                Function = new ChatToolCallFunction
+                {
+                    Name = tc.Name,
+                    Arguments = JsonSerializer.Serialize(tc.Arguments),
+                },
+            }).ToList();
+        }
+
+        string? reasoning = null;
+        if (thinkingBlocks.Count > 0)
+        {
+            reasoning = string.Join("\n", thinkingBlocks.Select(b => b.Thinking));
+        }
+
+        return new ChatMessage
+        {
+            Role = "assistant",
+            Content = content,
+            ToolCalls = chatToolCalls,
+            Reasoning = reasoning,
+        };
+    }
+
+    private static ChatMessage ConvertToolResult(CompletionToolResultMessage completionToolResult)
+    {
+        var text = string.Join("\n",
+            completionToolResult.Content.OfType<CompletionTextContent>().Select(c => c.Text));
+
+        return new ChatMessage
+        {
+            Role = "tool",
+            Content = JsonSerializer.SerializeToElement(
+                UnicodeSanitizer.SanitizeSurrogates(text.Length > 0 ? text : "(empty)")),
+            ToolCallId = completionToolResult.ToolCallId,
+        };
+    }
+
+    private static List<ChatTool> ConvertTools(IReadOnlyList<CompletionTool> tools)
+    {
+        return tools.Select(tool => new ChatTool
+        {
+            Type = "function",
+            Function = new ChatFunction
+            {
+                Name = tool.Name,
+                Description = tool.Description,
+                Parameters = tool.Parameters,
+            },
+        }).ToList();
+    }
+
+    // ---- Helpers ----
+
+    private static bool HasToolHistory(IReadOnlyList<CompletionMessage> messages)
+    {
+        foreach (var msg in messages)
+        {
+            switch (msg)
+            {
+                case CompletionToolResultMessage:
+                case CompletionAssistantMessage assistant
+                    when assistant.Content.Any(b => b is CompletionToolCall):
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    private static CompletionStopReason MapStopReason(string reason) => reason switch
+    {
+        "stop" => CompletionStopReason.Stop,
+        "length" => CompletionStopReason.Length,
+        "function_call" or "tool_calls" => CompletionStopReason.ToolUse,
+        "content_filter" => CompletionStopReason.Error,
+        _ => CompletionStopReason.Stop,
+    };
+
+    // ---- Model mapping ----
 
     private static ModelCost MapCost(OpenRouterPricing? pricing)
     {

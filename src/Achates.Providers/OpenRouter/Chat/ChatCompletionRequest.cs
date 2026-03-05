@@ -47,6 +47,9 @@ public sealed record ChatCompletionRequest
     [JsonPropertyName("max_completion_tokens")]
     public int? MaxCompletionTokens { get; init; }
 
+    [JsonPropertyName("logit_bias")]
+    public IReadOnlyDictionary<string, double>? LogitBias { get; init; }
+
     [JsonPropertyName("seed")]
     public int? Seed { get; init; }
 

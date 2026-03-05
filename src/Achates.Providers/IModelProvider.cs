@@ -1,3 +1,6 @@
+using Achates.Providers.Completions;
+using Achates.Providers.Completions.Events;
+using Achates.Providers.Completions.Messages;
 using Achates.Providers.Models;
 
 namespace Achates.Providers;
@@ -31,4 +34,9 @@ public interface IModelProvider
     /// Gets all models available from this provider.
     /// </summary>
     Task<IReadOnlyList<Model>> GetModelsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stream a completion, returning an event stream that emits events as content is generated.
+    /// </summary>
+    CompletionEventStream GetCompletions(Model model, CompletionContext completionContext, CompletionOptions? options = null, CancellationToken cancellationToken = default);
 }
