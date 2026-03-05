@@ -25,6 +25,9 @@ public sealed record ChatMessage
 
     [JsonPropertyName("reasoning")]
     public string? Reasoning { get; init; }
+
+    [JsonPropertyName("images")]
+    public IReadOnlyList<ChatContentPart>? Images { get; init; }
 }
 
 public sealed record ChatContentPart

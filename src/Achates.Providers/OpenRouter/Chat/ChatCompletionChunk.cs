@@ -58,6 +58,9 @@ public sealed record ChatDelta
 
     [JsonPropertyName("reasoning")]
     public string? Reasoning { get; init; }
+
+    [JsonPropertyName("images")]
+    public IReadOnlyList<ChatContentPart>? Images { get; init; }
 }
 
 public sealed record ChatDeltaToolCall

@@ -137,6 +137,11 @@ internal sealed class OpenRouterProvider : IModelProvider
                 {
                     ProcessToolCallDeltas(stream, tracker, output, toolCalls);
                 }
+
+                if (delta.Images is { Count: > 0 } images)
+                {
+                    ProcessImageBlocks(stream, tracker, output, images);
+                }
             }
 
             // Close any in-progress block and finalize the stream
@@ -342,6 +347,46 @@ internal sealed class OpenRouterProvider : IModelProvider
         }
     }
 
+    private static void ProcessImageBlocks(
+        CompletionEventStream stream, BlockTracker tracker, CompletionAssistantMessage output,
+        IReadOnlyList<ChatContentPart> images)
+    {
+        FinishCurrentBlock(stream, tracker, output);
+
+        foreach (var img in images)
+        {
+            if (img.ImageUrl?.Url is not { Length: > 0 } url)
+                continue;
+
+            var (mimeType, data) = ParseDataUrl(url);
+            var block = new CompletionImageContent { Data = data, MimeType = mimeType };
+            tracker.Blocks.Add(block);
+            stream.Push(new CompletionImageEvent
+            {
+                ContentIndex = tracker.LastIndex,
+                Image = block,
+                Partial = output,
+            });
+        }
+    }
+
+    private static (string mimeType, string data) ParseDataUrl(string url)
+    {
+        // data:image/png;base64,iVBOR...
+        if (url.StartsWith("data:", StringComparison.Ordinal))
+        {
+            var semicolon = url.IndexOf(';');
+            var comma = url.IndexOf(',');
+            if (semicolon > 5 && comma > semicolon)
+            {
+                return (url[5..semicolon], url[(comma + 1)..]);
+            }
+        }
+
+        // Fallback: treat the whole URL as data with unknown type
+        return ("image/png", url);
+    }
+
     // ---- Request building ----
 
     private static ChatCompletionRequest BuildChatRequest(
@@ -536,9 +581,10 @@ internal sealed class OpenRouterProvider : IModelProvider
             .ToList();
 
         var toolCalls = completionAssistant.Content.OfType<CompletionToolCall>().ToList();
+        var imageBlocks = completionAssistant.Content.OfType<CompletionImageContent>().ToList();
 
         // Skip empty assistant messages
-        if (textBlocks.Count == 0 && toolCalls.Count == 0)
+        if (textBlocks.Count == 0 && toolCalls.Count == 0 && imageBlocks.Count == 0)
         {
             return null;
         }
@@ -572,12 +618,26 @@ internal sealed class OpenRouterProvider : IModelProvider
             reasoning = string.Join("\n", thinkingBlocks.Select(b => b.Thinking));
         }
 
+        List<ChatContentPart>? chatImages = null;
+        if (imageBlocks.Count > 0)
+        {
+            chatImages = imageBlocks.Select(img => new ChatContentPart
+            {
+                Type = "image_url",
+                ImageUrl = new ChatImageUrl
+                {
+                    Url = $"data:{img.MimeType};base64,{img.Data}",
+                },
+            }).ToList();
+        }
+
         return new ChatMessage
         {
             Role = "assistant",
             Content = content,
             ToolCalls = chatToolCalls,
             Reasoning = reasoning,
+            Images = chatImages,
         };
     }
 
