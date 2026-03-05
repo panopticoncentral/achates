@@ -37,6 +37,9 @@ public sealed record ChatContentPart
 
     [JsonPropertyName("image_url")]
     public ChatImageUrl? ImageUrl { get; init; }
+
+    [JsonPropertyName("file")]
+    public ChatFileData? File { get; init; }
 }
 
 public sealed record ChatImageUrl
@@ -46,4 +49,13 @@ public sealed record ChatImageUrl
 
     [JsonPropertyName("detail")]
     public string? Detail { get; init; }
+}
+
+public sealed record ChatFileData
+{
+    [JsonPropertyName("filename")]
+    public required string FileName { get; init; }
+
+    [JsonPropertyName("file_data")]
+    public required string FileData { get; init; }
 }

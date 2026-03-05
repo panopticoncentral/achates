@@ -504,6 +504,17 @@ internal sealed class OpenRouterProvider : IModelProvider
                         },
                     });
                     break;
+                case CompletionFileContent file when model.Input.HasFlag(ModelModalities.File):
+                    parts.Add(new ChatContentPart
+                    {
+                        Type = "file",
+                        File = new ChatFileData
+                        {
+                            FileName = file.FileName ?? "file",
+                            FileData = $"data:{file.MimeType};base64,{file.Data}",
+                        },
+                    });
+                    break;
             }
         }
 

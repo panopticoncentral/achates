@@ -109,13 +109,25 @@ internal static class ChatCommand
         System.Console.Error.WriteLine("Warning: Maximum tool rounds reached.");
     }
 
-    private static readonly Dictionary<string, string> MimeTypes = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, string> ImageMimeTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         [".png"] = "image/png",
         [".jpg"] = "image/jpeg",
         [".jpeg"] = "image/jpeg",
         [".gif"] = "image/gif",
         [".webp"] = "image/webp",
+    };
+
+    private static readonly Dictionary<string, string> FileMimeTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [".pdf"] = "application/pdf",
+        [".txt"] = "text/plain",
+        [".csv"] = "text/csv",
+        [".json"] = "application/json",
+        [".xml"] = "application/xml",
+        [".html"] = "text/html",
+        [".htm"] = "text/html",
+        [".md"] = "text/markdown",
     };
 
     private static CompletionUserMessage BuildUserMessage(string input)
@@ -142,6 +154,28 @@ internal static class ChatCommand
             }
 
             // Fall through to plain text if image load failed
+        }
+
+        // Check for /file <path> [text] command
+        if (input.StartsWith("/file ", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = input["/file ".Length..].Trim();
+            var (path, text) = SplitPathAndText(rest);
+
+            if (TryLoadFile(path, out var fileContent))
+            {
+                var content = new List<CompletionUserContent> { fileContent };
+                if (!string.IsNullOrWhiteSpace(text))
+                    content.Add(new CompletionTextContent { Text = text });
+
+                return new CompletionUserContentMessage
+                {
+                    Content = content,
+                    Timestamp = timestamp,
+                };
+            }
+
+            // Fall through to plain text if file load failed
         }
 
         return new CompletionUserTextMessage
@@ -185,7 +219,7 @@ internal static class ChatCommand
         }
 
         var ext = Path.GetExtension(fullPath);
-        if (!MimeTypes.TryGetValue(ext, out var mime))
+        if (!ImageMimeTypes.TryGetValue(ext, out var mime))
         {
             System.Console.Error.WriteLine($"Unsupported image format: {ext}");
             return false;
@@ -193,6 +227,31 @@ internal static class ChatCommand
 
         var data = Convert.ToBase64String(File.ReadAllBytes(fullPath));
         imageContent = new CompletionImageContent { Data = data, MimeType = mime };
+        return true;
+    }
+
+    private static bool TryLoadFile(string path, out CompletionFileContent fileContent)
+    {
+        fileContent = null!;
+        var fullPath = Path.GetFullPath(path);
+
+        if (!File.Exists(fullPath))
+        {
+            System.Console.Error.WriteLine($"File not found: {fullPath}");
+            return false;
+        }
+
+        var ext = Path.GetExtension(fullPath);
+        if (!FileMimeTypes.TryGetValue(ext, out var mime))
+            mime = "application/octet-stream";
+
+        var data = Convert.ToBase64String(File.ReadAllBytes(fullPath));
+        fileContent = new CompletionFileContent
+        {
+            Data = data,
+            MimeType = mime,
+            FileName = Path.GetFileName(fullPath),
+        };
         return true;
     }
 }

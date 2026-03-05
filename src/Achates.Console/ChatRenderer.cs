@@ -27,7 +27,7 @@ internal static class ChatRenderer
             System.Console.WriteLine($"Tools: {names}");
         }
 
-        System.Console.WriteLine($"Type {Dim}/image <path> [text]{Reset} to send an image, {Dim}/exit{Reset} to quit.");
+        System.Console.WriteLine($"Type {Dim}/image <path> [text]{Reset} to send an image, {Dim}/file <path> [text]{Reset} to send a file, {Dim}/exit{Reset} to quit.");
         System.Console.WriteLine();
     }
 
