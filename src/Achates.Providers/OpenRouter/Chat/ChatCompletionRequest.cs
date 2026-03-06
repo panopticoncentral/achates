@@ -11,6 +11,12 @@ public sealed record ChatCompletionRequest
     [JsonPropertyName("messages")]
     public required IReadOnlyList<ChatMessage> Messages { get; init; }
 
+    [JsonPropertyName("modalities")]
+    public IReadOnlyList<string>? Modalities { get; init; }
+
+    [JsonPropertyName("audio")]
+    public ChatAudioConfig? Audio { get; init; }
+
     [JsonPropertyName("stream")]
     public bool? Stream { get; init; }
 
@@ -85,6 +91,15 @@ public sealed record ChatCompletionRequest
 
     [JsonPropertyName("metadata")]
     public JsonElement? Metadata { get; init; }
+}
+
+public sealed record ChatAudioConfig
+{
+    [JsonPropertyName("voice")]
+    public required string Voice { get; init; }
+
+    [JsonPropertyName("format")]
+    public required string Format { get; init; }
 }
 
 public sealed record ChatStreamOptions

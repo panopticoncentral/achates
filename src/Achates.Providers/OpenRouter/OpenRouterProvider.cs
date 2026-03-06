@@ -57,6 +57,10 @@ internal sealed class OpenRouterProvider : IModelProvider
         public readonly List<CompletionContent> Blocks = [];
         public CompletionContent? Current;
         public string? PartialArgs;
+        public string? AudioId;
+        public string? AudioData;
+        public string? AudioTranscript;
+        public string? AudioFormat;
         public int LastIndex => Blocks.Count - 1;
     }
 
@@ -141,6 +145,11 @@ internal sealed class OpenRouterProvider : IModelProvider
                 if (delta.Images is { Count: > 0 } images)
                 {
                     ProcessImageBlocks(stream, tracker, output, images);
+                }
+
+                if (delta.Audio is { } audio)
+                {
+                    ProcessAudioDelta(stream, tracker, output, audio, options);
                 }
             }
 
@@ -235,10 +244,31 @@ internal sealed class OpenRouterProvider : IModelProvider
                 });
                 break;
             }
+            case CompletionAudioContent ac:
+            {
+                var final = ac with
+                {
+                    Id = tracker.AudioId,
+                    Data = tracker.AudioData ?? "",
+                    Transcript = string.IsNullOrEmpty(tracker.AudioTranscript) ? null : tracker.AudioTranscript,
+                };
+                tracker.Blocks[tracker.LastIndex] = final;
+                stream.Push(new CompletionAudioEndEvent
+                {
+                    ContentIndex = tracker.LastIndex,
+                    Content = final,
+                    Partial = output,
+                });
+                break;
+            }
         }
 
         tracker.Current = null;
         tracker.PartialArgs = null;
+        tracker.AudioId = null;
+        tracker.AudioData = null;
+        tracker.AudioTranscript = null;
+        tracker.AudioFormat = null;
     }
 
     private static void ProcessTextDelta(
@@ -370,6 +400,64 @@ internal sealed class OpenRouterProvider : IModelProvider
         }
     }
 
+    private static void ProcessAudioDelta(
+        CompletionEventStream stream, BlockTracker tracker, CompletionAssistantMessage output,
+        ChatAudioDelta audio, CompletionOptions? options)
+    {
+        if (tracker.Current is not CompletionAudioContent)
+        {
+            FinishCurrentBlock(stream, tracker, output);
+            var format = options?.Audio?.Format ?? "pcm16";
+            var block = new CompletionAudioContent { Data = "", Format = format };
+            tracker.Blocks.Add(block);
+            tracker.Current = block;
+            tracker.AudioData = "";
+            tracker.AudioTranscript = "";
+            tracker.AudioFormat = format;
+            stream.Push(new CompletionAudioStartEvent { ContentIndex = tracker.LastIndex, Partial = output });
+        }
+
+        if (audio.Id is { Length: > 0 } id)
+        {
+            tracker.AudioId = id;
+        }
+
+        string? dataDelta = null;
+        string? transcriptDelta = null;
+
+        if (audio.Data is { Length: > 0 } data)
+        {
+            dataDelta = data;
+            tracker.AudioData += data;
+        }
+
+        if (audio.Transcript is { Length: > 0 } transcript)
+        {
+            transcriptDelta = transcript;
+            tracker.AudioTranscript += transcript;
+        }
+
+        if (dataDelta is not null || transcriptDelta is not null)
+        {
+            var ac = (CompletionAudioContent)tracker.Current!;
+            var updated = ac with
+            {
+                Data = tracker.AudioData ?? "",
+                Transcript = tracker.AudioTranscript,
+            };
+            tracker.Blocks[tracker.LastIndex] = updated;
+            tracker.Current = updated;
+
+            stream.Push(new CompletionAudioDeltaEvent
+            {
+                ContentIndex = tracker.LastIndex,
+                DataDelta = dataDelta,
+                TranscriptDelta = transcriptDelta,
+                Partial = output,
+            });
+        }
+    }
+
     private static (string mimeType, string data) ParseDataUrl(string url)
     {
         // data:image/png;base64,iVBOR...
@@ -442,10 +530,24 @@ internal sealed class OpenRouterProvider : IModelProvider
             };
         }
 
+        IReadOnlyList<string>? modalities = null;
+        ChatAudioConfig? audioConfig = null;
+        if (options?.Audio is not null && model.Output.HasFlag(ModelModalities.Audio))
+        {
+            modalities = ["text", "audio"];
+            audioConfig = new ChatAudioConfig
+            {
+                Voice = options.Audio.Voice ?? "alloy",
+                Format = options.Audio.Format ?? "pcm16",
+            };
+        }
+
         return new ChatCompletionRequest
         {
             Model = model.Id,
             Messages = messages,
+            Modalities = modalities,
+            Audio = audioConfig,
             Stream = true,
             StreamOptions = new ChatStreamOptions { IncludeUsage = true },
             Temperature = options?.Temperature,
@@ -560,13 +662,24 @@ internal sealed class OpenRouterProvider : IModelProvider
                         },
                     });
                     break;
+                case CompletionAudioInputContent audio when model.Input.HasFlag(ModelModalities.Audio):
+                    parts.Add(new ChatContentPart
+                    {
+                        Type = "input_audio",
+                        InputAudio = new ChatInputAudio
+                        {
+                            Data = audio.Data,
+                            Format = audio.Format,
+                        },
+                    });
+                    break;
             }
         }
 
         return new ChatMessage
         {
             Role = "user",
-            Content = JsonSerializer.SerializeToElement(parts),
+            Content = JsonSerializer.SerializeToElement(parts, OpenRouterJsonContext.Default.IReadOnlyListChatContentPart),
         };
     }
 
@@ -582,9 +695,10 @@ internal sealed class OpenRouterProvider : IModelProvider
 
         var toolCalls = completionAssistant.Content.OfType<CompletionToolCall>().ToList();
         var imageBlocks = completionAssistant.Content.OfType<CompletionImageContent>().ToList();
+        var audioBlocks = completionAssistant.Content.OfType<CompletionAudioContent>().ToList();
 
         // Skip empty assistant messages
-        if (textBlocks.Count == 0 && toolCalls.Count == 0 && imageBlocks.Count == 0)
+        if (textBlocks.Count == 0 && toolCalls.Count == 0 && imageBlocks.Count == 0 && audioBlocks.Count == 0)
         {
             return null;
         }
@@ -629,6 +743,22 @@ internal sealed class OpenRouterProvider : IModelProvider
                     Url = $"data:{img.MimeType};base64,{img.Data}",
                 },
             }).ToList();
+        }
+
+        // For audio responses, include the transcript as text content rather than
+        // referencing by audio ID — IDs are OpenAI-specific and may not survive proxying.
+        if (audioBlocks.Count > 0)
+        {
+            var transcript = string.Join("\n", audioBlocks
+                .Where(a => !string.IsNullOrWhiteSpace(a.Transcript))
+                .Select(a => a.Transcript));
+            if (!string.IsNullOrWhiteSpace(transcript))
+            {
+                var existingText = content?.ValueKind == JsonValueKind.String
+                    ? content.Value.GetString() + "\n"
+                    : "";
+                content = JsonSerializer.SerializeToElement(existingText + transcript);
+            }
         }
 
         return new ChatMessage

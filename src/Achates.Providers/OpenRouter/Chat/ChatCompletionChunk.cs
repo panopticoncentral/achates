@@ -61,6 +61,24 @@ public sealed record ChatDelta
 
     [JsonPropertyName("images")]
     public IReadOnlyList<ChatContentPart>? Images { get; init; }
+
+    [JsonPropertyName("audio")]
+    public ChatAudioDelta? Audio { get; init; }
+}
+
+public sealed record ChatAudioDelta
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("data")]
+    public string? Data { get; init; }
+
+    [JsonPropertyName("transcript")]
+    public string? Transcript { get; init; }
+
+    [JsonPropertyName("expires_at")]
+    public long? ExpiresAt { get; init; }
 }
 
 public sealed record ChatDeltaToolCall

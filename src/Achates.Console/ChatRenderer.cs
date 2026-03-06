@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Achates.Providers.Completions;
 using Achates.Providers.Completions.Content;
 using Achates.Providers.Completions.Events;
@@ -27,7 +28,8 @@ internal static class ChatRenderer
             System.Console.WriteLine($"Tools: {names}");
         }
 
-        System.Console.WriteLine($"Type {Dim}/image <path> [text]{Reset} to send an image, {Dim}/file <path> [text]{Reset} to send a file, {Dim}/exit{Reset} to quit.");
+        System.Console.WriteLine($"Type {Dim}/image <path> [text]{Reset} to send an image, {Dim}/file <path> [text]{Reset} to send a file, {Dim}/audio <path> [text]{Reset} to send audio,");
+        System.Console.WriteLine($"     {Dim}/record [text]{Reset} to record from microphone, {Dim}/exit{Reset} to quit.");
         System.Console.WriteLine();
     }
 
@@ -41,6 +43,7 @@ internal static class ChatRenderer
         CancellationToken cancellationToken)
     {
         var inThinking = false;
+        StreamingAudioPlayer? audioPlayer = null;
 
         await foreach (var evt in stream.WithCancellation(cancellationToken))
         {
@@ -78,13 +81,34 @@ internal static class ChatRenderer
                     WriteInlineImage(e.Image);
                     break;
 
+                case CompletionAudioStartEvent:
+                    audioPlayer = StreamingAudioPlayer.TryStart();
+                    break;
+
+                case CompletionAudioDeltaEvent e:
+                    if (e.DataDelta is not null)
+                        audioPlayer?.WriteChunk(e.DataDelta);
+                    if (e.TranscriptDelta is not null)
+                        System.Console.Write(e.TranscriptDelta);
+                    break;
+
+                case CompletionAudioEndEvent e:
+                    System.Console.WriteLine();
+                    audioPlayer?.Finish();
+                    audioPlayer = null;
+                    SaveAudioFile(e.Content);
+                    break;
+
                 case CompletionErrorEvent e:
                     if (inThinking) System.Console.Write(Reset);
+                    audioPlayer?.Finish();
+                    audioPlayer = null;
                     System.Console.Error.WriteLine($"{Red}Error: {e.Error.ErrorMessage}{Reset}");
                     break;
             }
         }
 
+        audioPlayer?.Finish();
         return await stream.ResultAsync;
     }
 
@@ -169,6 +193,176 @@ internal static class ChatRenderer
             "iTerm.app" or "WezTerm" or "vscode" => ImageProtocol.Iterm2,
             _ => ImageProtocol.None,
         };
+    }
+
+    private static void SaveAudioFile(CompletionAudioContent audio)
+    {
+        var bytes = Convert.FromBase64String(audio.Data);
+
+        if (audio.Format == "pcm16")
+            bytes = WrapPcm16AsWav(bytes, sampleRate: 24000, channels: 1);
+
+        var ext = audio.Format switch
+        {
+            "mp3" => ".mp3",
+            "opus" => ".ogg",
+            "flac" => ".flac",
+            _ => ".wav",
+        };
+
+        var path = Path.Combine(Path.GetTempPath(), $"achates-{Guid.NewGuid():N}{ext}");
+        File.WriteAllBytes(path, bytes);
+        System.Console.WriteLine($"{Dim}  [audio: {path}]{Reset}");
+    }
+
+    private static byte[] WrapPcm16AsWav(byte[] pcmData, int sampleRate, int channels)
+    {
+        const int bitsPerSample = 16;
+        var byteRate = sampleRate * channels * bitsPerSample / 8;
+        var blockAlign = channels * bitsPerSample / 8;
+        var dataSize = pcmData.Length;
+
+        using var ms = new MemoryStream(44 + dataSize);
+        using var bw = new BinaryWriter(ms);
+
+        bw.Write("RIFF"u8);
+        bw.Write(36 + dataSize);
+        bw.Write("WAVE"u8);
+        bw.Write("fmt "u8);
+        bw.Write(16);
+        bw.Write((short)1);
+        bw.Write((short)channels);
+        bw.Write(sampleRate);
+        bw.Write(byteRate);
+        bw.Write((short)blockAlign);
+        bw.Write((short)bitsPerSample);
+        bw.Write("data"u8);
+        bw.Write(dataSize);
+        bw.Write(pcmData);
+
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Streams raw PCM16 audio to a player process via stdin as chunks arrive.
+    /// Falls back gracefully if no suitable player is found.
+    /// </summary>
+    private sealed class StreamingAudioPlayer
+    {
+        private readonly Process _process;
+        private readonly Stream _stdin;
+
+        private StreamingAudioPlayer(Process process)
+        {
+            _process = process;
+            _stdin = process.StandardInput.BaseStream;
+        }
+
+        public static StreamingAudioPlayer? TryStart()
+        {
+            var (fileName, args) = FindStreamingPlayer();
+            if (fileName is null)
+                return null;
+
+            try
+            {
+                var psi = new ProcessStartInfo(fileName, args ?? "")
+                {
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                };
+                var process = Process.Start(psi);
+                return process is not null ? new StreamingAudioPlayer(process) : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public void WriteChunk(string base64Delta)
+        {
+            try
+            {
+                var bytes = Convert.FromBase64String(base64Delta);
+                _stdin.Write(bytes);
+                _stdin.Flush();
+            }
+            catch
+            {
+                // Player may have exited early
+            }
+        }
+
+        public void Finish()
+        {
+            try
+            {
+                _stdin.Close();
+                _process.WaitForExit(10_000);
+            }
+            catch
+            {
+                // Best effort
+            }
+            finally
+            {
+                _process.Dispose();
+            }
+        }
+
+        private static (string? fileName, string? args) FindStreamingPlayer()
+        {
+            // All players receive raw signed 16-bit LE PCM at 24kHz mono on stdin
+            if (OperatingSystem.IsMacOS())
+            {
+                // sox play supports stdin
+                if (ExistsOnPath("play"))
+                    return ("play", "-t raw -r 24000 -e signed -b 16 -c 1 -");
+                // ffplay as fallback
+                if (ExistsOnPath("ffplay"))
+                    return ("ffplay", "-f s16le -ar 24000 -ac 1 -nodisp -autoexit -loglevel quiet -i pipe:0");
+            }
+            else if (OperatingSystem.IsLinux())
+            {
+                if (ExistsOnPath("aplay"))
+                    return ("aplay", "-f S16_LE -r 24000 -c 1 -t raw -q");
+                if (ExistsOnPath("play"))
+                    return ("play", "-t raw -r 24000 -e signed -b 16 -c 1 -");
+                if (ExistsOnPath("ffplay"))
+                    return ("ffplay", "-f s16le -ar 24000 -ac 1 -nodisp -autoexit -loglevel quiet -i pipe:0");
+            }
+            else if (OperatingSystem.IsWindows())
+            {
+                if (ExistsOnPath("ffplay"))
+                    return ("ffplay", "-f s16le -ar 24000 -ac 1 -nodisp -autoexit -loglevel quiet -i pipe:0");
+            }
+
+            return (null, null);
+        }
+
+        private static bool ExistsOnPath(string command)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo(
+                    OperatingSystem.IsWindows() ? "where" : "which", command)
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                };
+                var p = Process.Start(psi);
+                p?.WaitForExit(3000);
+                return p?.ExitCode == 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
     }
 
     public static void WriteUsage(CompletionUsage? usage)

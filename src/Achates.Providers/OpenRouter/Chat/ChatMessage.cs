@@ -28,6 +28,24 @@ public sealed record ChatMessage
 
     [JsonPropertyName("images")]
     public IReadOnlyList<ChatContentPart>? Images { get; init; }
+
+    [JsonPropertyName("audio")]
+    public ChatAudioResponse? Audio { get; init; }
+}
+
+public sealed record ChatAudioResponse
+{
+    [JsonPropertyName("id")]
+    public required string Id { get; init; }
+
+    [JsonPropertyName("data")]
+    public string? Data { get; init; }
+
+    [JsonPropertyName("transcript")]
+    public string? Transcript { get; init; }
+
+    [JsonPropertyName("expires_at")]
+    public long? ExpiresAt { get; init; }
 }
 
 public sealed record ChatContentPart
@@ -43,6 +61,18 @@ public sealed record ChatContentPart
 
     [JsonPropertyName("file")]
     public ChatFileData? File { get; init; }
+
+    [JsonPropertyName("input_audio")]
+    public ChatInputAudio? InputAudio { get; init; }
+}
+
+public sealed record ChatInputAudio
+{
+    [JsonPropertyName("data")]
+    public required string Data { get; init; }
+
+    [JsonPropertyName("format")]
+    public required string Format { get; init; }
 }
 
 public sealed record ChatImageUrl

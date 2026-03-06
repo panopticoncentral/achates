@@ -10,6 +10,11 @@ namespace Achates.Providers.OpenRouter;
 [JsonSerializable(typeof(ChatCompletionResponse))]
 [JsonSerializable(typeof(ChatCompletionChunk))]
 [JsonSerializable(typeof(ChatCompletionError))]
+[JsonSerializable(typeof(ChatErrorDetail))]
 [JsonSerializable(typeof(IReadOnlyList<ChatContentPart>))]
+[JsonSerializable(typeof(ChatInputAudio))]
+[JsonSerializable(typeof(ChatAudioConfig))]
+[JsonSerializable(typeof(ChatAudioDelta))]
+[JsonSerializable(typeof(ChatAudioResponse))]
 [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 internal sealed partial class OpenRouterJsonContext : JsonSerializerContext;

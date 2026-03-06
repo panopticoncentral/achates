@@ -33,4 +33,7 @@ public sealed record CompletionOptions
 
     // Reasoning
     public string? ReasoningEffort { get; init; }
+
+    // Audio
+    public CompletionAudioOptions? Audio { get; init; }
 }

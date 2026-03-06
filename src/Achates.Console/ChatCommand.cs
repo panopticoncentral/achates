@@ -50,7 +50,11 @@ internal static class ChatCommand
             if (string.IsNullOrWhiteSpace(input))
                 continue;
 
-            messages.Add(BuildUserMessage(input));
+            var userMessage = BuildUserMessage(input, cts.Token);
+            if (userMessage is null)
+                continue;
+
+            messages.Add(userMessage);
 
             try
             {
@@ -87,6 +91,14 @@ internal static class ChatCommand
 
             var stream = model.Provider.GetCompletions(model, context, options, cancellationToken);
             var result = await ChatRenderer.RenderStreamAsync(stream, cancellationToken);
+
+            // Don't add error/aborted responses to history — they'd corrupt subsequent requests
+            if (result.CompletionStopReason is CompletionStopReason.Error or CompletionStopReason.Aborted)
+            {
+                messages.RemoveAt(messages.Count - 1); // remove the user message too
+                return;
+            }
+
             messages.Add(result);
 
             if (result.CompletionStopReason != CompletionStopReason.ToolUse)
@@ -118,6 +130,14 @@ internal static class ChatCommand
         [".webp"] = "image/webp",
     };
 
+    private static readonly Dictionary<string, string> AudioFormats = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [".wav"] = "wav",
+        [".mp3"] = "mp3",
+        [".ogg"] = "opus",
+        [".flac"] = "flac",
+    };
+
     private static readonly Dictionary<string, string> FileMimeTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         [".pdf"] = "application/pdf",
@@ -130,7 +150,7 @@ internal static class ChatCommand
         [".md"] = "text/markdown",
     };
 
-    private static CompletionUserMessage BuildUserMessage(string input)
+    private static CompletionUserMessage? BuildUserMessage(string input, CancellationToken cancellationToken)
     {
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
@@ -176,6 +196,53 @@ internal static class ChatCommand
             }
 
             // Fall through to plain text if file load failed
+        }
+
+        // Check for /audio <path> [text] command
+        if (input.StartsWith("/audio ", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = input["/audio ".Length..].Trim();
+            var (path, text) = SplitPathAndText(rest);
+
+            if (TryLoadAudio(path, out var audioContent))
+            {
+                var content = new List<CompletionUserContent> { audioContent };
+                if (!string.IsNullOrWhiteSpace(text))
+                    content.Add(new CompletionTextContent { Text = text });
+
+                return new CompletionUserContentMessage
+                {
+                    Content = content,
+                    Timestamp = timestamp,
+                };
+            }
+
+            // Fall through to plain text if audio load failed
+        }
+
+        // Check for /record [text] command
+        if (input.Equals("/record", StringComparison.OrdinalIgnoreCase) ||
+            input.StartsWith("/record ", StringComparison.OrdinalIgnoreCase))
+        {
+            var text = input.Length > "/record".Length
+                ? input["/record ".Length..].Trim()
+                : null;
+
+            if (TryRecordAudio(cancellationToken, out var audioContent))
+            {
+                var content = new List<CompletionUserContent> { audioContent };
+                if (!string.IsNullOrWhiteSpace(text))
+                    content.Add(new CompletionTextContent { Text = text });
+
+                return new CompletionUserContentMessage
+                {
+                    Content = content,
+                    Timestamp = timestamp,
+                };
+            }
+
+            // Fall through — recording failed, return null to skip
+            return null;
         }
 
         return new CompletionUserTextMessage
@@ -227,6 +294,43 @@ internal static class ChatCommand
 
         var data = Convert.ToBase64String(File.ReadAllBytes(fullPath));
         imageContent = new CompletionImageContent { Data = data, MimeType = mime };
+        return true;
+    }
+
+    private static bool TryLoadAudio(string path, out CompletionAudioInputContent audioContent)
+    {
+        audioContent = null!;
+        var fullPath = Path.GetFullPath(path);
+
+        if (!File.Exists(fullPath))
+        {
+            System.Console.Error.WriteLine($"File not found: {fullPath}");
+            return false;
+        }
+
+        var ext = Path.GetExtension(fullPath);
+        if (!AudioFormats.TryGetValue(ext, out var format))
+        {
+            System.Console.Error.WriteLine($"Unsupported audio format: {ext}");
+            return false;
+        }
+
+        var data = Convert.ToBase64String(File.ReadAllBytes(fullPath));
+        audioContent = new CompletionAudioInputContent { Data = data, Format = format };
+        return true;
+    }
+
+    private static bool TryRecordAudio(CancellationToken cancellationToken, out CompletionAudioInputContent audioContent)
+    {
+        audioContent = null!;
+
+        System.Console.WriteLine("Recording... speak now (stops after silence)");
+        var wavBytes = MicrophoneRecorder.Record(cancellationToken);
+        if (wavBytes is null)
+            return false;
+
+        var data = Convert.ToBase64String(wavBytes);
+        audioContent = new CompletionAudioInputContent { Data = data, Format = "wav" };
         return true;
     }
 

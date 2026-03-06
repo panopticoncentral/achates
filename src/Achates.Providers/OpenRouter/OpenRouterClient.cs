@@ -120,8 +120,22 @@ public sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
                 yield break;
             }
 
-            var chunk = JsonSerializer.Deserialize(
-                data,
+            // Check for inline error events before parsing as a chunk.
+            // OpenRouter can send errors mid-stream as: data: {"error":{...}}
+            using var doc = JsonDocument.Parse(data.ToString());
+            if (doc.RootElement.TryGetProperty("error", out var errorElement))
+            {
+                var error = errorElement.Deserialize(
+                    OpenRouterJsonContext.Default.ChatErrorDetail);
+                throw new OpenRouterException(
+                    FormatErrorMessage(
+                        error?.Message ?? "Unknown streaming error",
+                        error?.Metadata),
+                    error?.Code ?? 0,
+                    error?.Metadata);
+            }
+
+            var chunk = doc.RootElement.Deserialize(
                 OpenRouterJsonContext.Default.ChatCompletionChunk);
 
             if (chunk is not null)
@@ -149,9 +163,35 @@ public sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
         }
 
         throw new OpenRouterException(
-            error?.Error.Message ?? $"HTTP {(int)httpResponse.StatusCode} {httpResponse.ReasonPhrase}",
+            FormatErrorMessage(
+                error?.Error.Message ?? $"HTTP {(int)httpResponse.StatusCode} {httpResponse.ReasonPhrase}",
+                error?.Error.Metadata),
             error?.Error.Code ?? (int)httpResponse.StatusCode,
             error?.Error.Metadata);
+    }
+
+    internal static string FormatErrorMessage(string message, JsonElement? metadata)
+    {
+        if (metadata is not { ValueKind: JsonValueKind.Object } meta)
+            return message;
+
+        // OpenRouter often puts the upstream provider's error in metadata.raw
+        if (meta.TryGetProperty("raw", out var raw) && raw.ValueKind == JsonValueKind.String)
+        {
+            var rawText = raw.GetString();
+            if (!string.IsNullOrWhiteSpace(rawText) && rawText != message)
+                return $"{message} — {rawText}";
+        }
+
+        // Some errors include a provider_name
+        if (meta.TryGetProperty("provider_name", out var provider) && provider.ValueKind == JsonValueKind.String)
+        {
+            var providerName = provider.GetString();
+            if (!string.IsNullOrWhiteSpace(providerName))
+                return $"{message} (via {providerName})";
+        }
+
+        return message;
     }
 
     private string GetBaseUrl()
