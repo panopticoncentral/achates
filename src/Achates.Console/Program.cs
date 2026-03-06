@@ -9,6 +9,7 @@ if (args.Length == 0)
     return 1;
 }
 
+using var httpClient = new HttpClient();
 var command = args[0].ToLowerInvariant();
 
 try
@@ -38,7 +39,7 @@ catch (OperationCanceledException)
 async Task<int> ListModelsAsync(string[] args)
 {
     var filter = GetOption(args, "--filter");
-    var provider = GetProvider(args);
+    var provider = GetProvider(args, httpClient);
     var models = await provider.GetModelsAsync();
 
     var filtered = filter is not null
@@ -69,7 +70,7 @@ async Task<int> RunChatAsync(string[] args)
         return 1;
     }
 
-    var provider = GetProvider(args);
+    var provider = GetProvider(args, httpClient);
     var models = await provider.GetModelsAsync();
     var model = models.FirstOrDefault(m => m.Id.Equals(modelId, StringComparison.OrdinalIgnoreCase));
     if (model is null)
@@ -90,7 +91,7 @@ async Task<int> RunChatAsync(string[] args)
 // Helpers
 // ---------------------------------------------------------------------------
 
-static IModelProvider GetProvider(string[] args)
+static IModelProvider GetProvider(string[] args, HttpClient httpClient)
 {
     var id = GetOption(args, "--provider") ?? "openrouter";
 
@@ -109,7 +110,7 @@ static IModelProvider GetProvider(string[] args)
     }
 
     provider.Key = apiKey;
-    provider.HttpClient = new HttpClient();
+    provider.HttpClient = httpClient;
 
     return provider;
 }

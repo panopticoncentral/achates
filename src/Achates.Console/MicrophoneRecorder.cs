@@ -16,7 +16,7 @@ internal static class MicrophoneRecorder
     /// </summary>
     public static byte[]? Record(CancellationToken cancellationToken)
     {
-        if (!ExistsOnPath("rec"))
+        if (!ProcessHelper.ExistsOnPath("rec"))
         {
             System.Console.Error.WriteLine("No recording tool found. Install sox (brew install sox / apt install sox).");
             return null;
@@ -75,28 +75,6 @@ internal static class MicrophoneRecorder
         finally
         {
             try { File.Delete(tempFile); } catch { }
-        }
-    }
-
-
-    private static bool ExistsOnPath(string command)
-    {
-        try
-        {
-            var psi = new ProcessStartInfo(
-                OperatingSystem.IsWindows() ? "where" : "which", command)
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            };
-            var p = Process.Start(psi);
-            p?.WaitForExit(3000);
-            return p?.ExitCode == 0;
-        }
-        catch
-        {
-            return false;
         }
     }
 }

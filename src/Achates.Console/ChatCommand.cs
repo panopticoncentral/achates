@@ -1,7 +1,6 @@
 using Achates.Console.Tools;
 using Achates.Providers.Completions;
 using Achates.Providers.Completions.Content;
-using Achates.Providers.Completions.Events;
 using Achates.Providers.Completions.Messages;
 using Achates.Providers.Models;
 
@@ -158,108 +157,78 @@ internal static class ChatCommand
     {
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        // Check for /image <path> [text] command
-        if (input.StartsWith("/image ", StringComparison.OrdinalIgnoreCase))
+        if (TryParseSlashCommand(input, "/image", out var rest))
         {
-            var rest = input["/image ".Length..].Trim();
             var (path, text) = SplitPathAndText(rest);
-
             if (TryLoadImage(path, out var imageContent))
-            {
-                var content = new List<CompletionUserContent> { imageContent };
-                if (!string.IsNullOrWhiteSpace(text))
-                {
-                    content.Add(new CompletionTextContent { Text = text });
-                }
-
-                return new CompletionUserContentMessage
-                {
-                    Content = content,
-                    Timestamp = timestamp,
-                };
-            }
-
-            // Fall through to plain text if image load failed
+                return BuildContentMessage(imageContent, text, timestamp);
         }
-
-        // Check for /file <path> [text] command
-        if (input.StartsWith("/file ", StringComparison.OrdinalIgnoreCase))
+        else if (TryParseSlashCommand(input, "/file", out rest))
         {
-            var rest = input["/file ".Length..].Trim();
             var (path, text) = SplitPathAndText(rest);
-
             if (TryLoadFile(path, out var fileContent))
-            {
-                var content = new List<CompletionUserContent> { fileContent };
-                if (!string.IsNullOrWhiteSpace(text))
-                {
-                    content.Add(new CompletionTextContent { Text = text });
-                }
-
-                return new CompletionUserContentMessage
-                {
-                    Content = content,
-                    Timestamp = timestamp,
-                };
-            }
-
-            // Fall through to plain text if file load failed
+                return BuildContentMessage(fileContent, text, timestamp);
         }
-
-        // Check for /audio <path> [text] command
-        if (input.StartsWith("/audio ", StringComparison.OrdinalIgnoreCase))
+        else if (TryParseSlashCommand(input, "/audio", out rest))
         {
-            var rest = input["/audio ".Length..].Trim();
             var (path, text) = SplitPathAndText(rest);
-
             if (TryLoadAudio(path, out var audioContent))
-            {
-                var content = new List<CompletionUserContent> { audioContent };
-                if (!string.IsNullOrWhiteSpace(text))
-                {
-                    content.Add(new CompletionTextContent { Text = text });
-                }
-
-                return new CompletionUserContentMessage
-                {
-                    Content = content,
-                    Timestamp = timestamp,
-                };
-            }
-
-            // Fall through to plain text if audio load failed
+                return BuildContentMessage(audioContent, text, timestamp);
         }
-
-        // Check for /record [text] command
-        if (input.Equals("/record", StringComparison.OrdinalIgnoreCase) ||
-            input.StartsWith("/record ", StringComparison.OrdinalIgnoreCase))
+        else if (input.Equals("/record", StringComparison.OrdinalIgnoreCase) ||
+                 input.StartsWith("/record ", StringComparison.OrdinalIgnoreCase))
         {
             var text = input.Length > "/record".Length
                 ? input["/record ".Length..].Trim()
                 : null;
 
             if (TryRecordAudio(cancellationToken, out var audioContent))
-            {
-                var content = new List<CompletionUserContent> { audioContent };
-                if (!string.IsNullOrWhiteSpace(text))
-                {
-                    content.Add(new CompletionTextContent { Text = text });
-                }
+                return BuildContentMessage(audioContent, text, timestamp);
 
-                return new CompletionUserContentMessage
-                {
-                    Content = content,
-                    Timestamp = timestamp,
-                };
-            }
-
-            // Fall through — recording failed, return null to skip
             return null;
         }
+        else
+        {
+            return new CompletionUserTextMessage
+            {
+                Text = input,
+                Timestamp = timestamp,
+            };
+        }
 
+        // Slash command recognized but content load failed — fall through to plain text
         return new CompletionUserTextMessage
         {
             Text = input,
+            Timestamp = timestamp,
+        };
+    }
+
+    private static bool TryParseSlashCommand(string input, string command, out string rest)
+    {
+        var prefix = command + " ";
+        if (input.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            rest = input[prefix.Length..].Trim();
+            return rest.Length > 0;
+        }
+
+        rest = "";
+        return false;
+    }
+
+    private static CompletionUserContentMessage BuildContentMessage(
+        CompletionUserContent primary, string? text, long timestamp)
+    {
+        var content = new List<CompletionUserContent> { primary };
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            content.Add(new CompletionTextContent { Text = text });
+        }
+
+        return new CompletionUserContentMessage
+        {
+            Content = content,
             Timestamp = timestamp,
         };
     }
