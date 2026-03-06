@@ -1,16 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>Achates.Console</RootNamespace>
+    <RootNamespace>Achates.Agent</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Achates.Providers\Achates.Providers.csproj" />
-    <ProjectReference Include="..\Achates.Agent\Achates.Agent.csproj" />
   </ItemGroup>
 
 </Project>

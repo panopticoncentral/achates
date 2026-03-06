@@ -138,7 +138,7 @@ internal static class ChatRenderer
 
     private enum ImageProtocol { None, Iterm2, Kitty }
 
-    private static void WriteInlineImage(CompletionImageContent image)
+    public static void WriteInlineImage(CompletionImageContent image)
     {
         var ext = image.MimeType switch
         {

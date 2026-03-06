@@ -18,6 +18,7 @@ try
     {
         "models" => ListModelsAsync(args),
         "chat" => RunChatAsync(args),
+        "agent" => RunAgentAsync(args),
         "help" or "--help" or "-h" => Task.FromResult(PrintUsage()),
         _ => Task.FromResult(PrintUnknown(command))
     });
@@ -61,12 +62,18 @@ async Task<int> ListModelsAsync(string[] args)
     return 0;
 }
 
-async Task<int> RunChatAsync(string[] args)
+async Task<int> RunChatAsync(string[] args) =>
+    await RunWithModel(args, ChatCommand.RunAsync);
+
+async Task<int> RunAgentAsync(string[] args) =>
+    await RunWithModel(args, AgentCommand.RunAsync);
+
+async Task<int> RunWithModel(string[] args, Func<Model, string?, double?, Task<int>> run)
 {
     var modelId = GetOption(args, "--model");
     if (modelId is null)
     {
-        Console.Error.WriteLine("Error: --model is required for chat.");
+        Console.Error.WriteLine("Error: --model is required.");
         return 1;
     }
 
@@ -84,7 +91,7 @@ async Task<int> RunChatAsync(string[] args)
         ? double.Parse(t, CultureInfo.InvariantCulture)
         : (double?)null;
 
-    return await ChatCommand.RunAsync(model, systemPrompt, temperature);
+    return await run(model, systemPrompt, temperature);
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +151,8 @@ static int PrintUsage()
           models [--filter <text>]                          List available models
           chat --model <id> [--system <prompt>] [--temperature <value>]
                                                             Start interactive chat
+          agent --model <id> [--system <prompt>] [--temperature <value>]
+                                                            Start agent chat (with tool loop)
 
         Options:
           --provider <id>    Provider to use (default: openrouter)
