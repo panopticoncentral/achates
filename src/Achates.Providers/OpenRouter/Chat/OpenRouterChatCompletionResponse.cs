@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Chat;
 
-public sealed record ChatCompletionResponse
+internal sealed record OpenRouterChatCompletionResponse
 {
     [JsonPropertyName("id")]
     public required string Id { get; init; }
@@ -21,19 +21,19 @@ public sealed record ChatCompletionResponse
     public string? SystemFingerprint { get; init; }
 
     [JsonPropertyName("choices")]
-    public required IReadOnlyList<ChatChoice> Choices { get; init; }
+    public required IReadOnlyList<OpenRouterChatChoice> Choices { get; init; }
 
     [JsonPropertyName("usage")]
-    public ChatUsage? Usage { get; init; }
+    public OpenRouterChatUsage? Usage { get; init; }
 }
 
-public sealed record ChatChoice
+internal sealed record OpenRouterChatChoice
 {
     [JsonPropertyName("index")]
     public int Index { get; init; }
 
     [JsonPropertyName("message")]
-    public required ChatMessage Message { get; init; }
+    public required OpenRouterChatMessage Message { get; init; }
 
     [JsonPropertyName("finish_reason")]
     public string? FinishReason { get; init; }

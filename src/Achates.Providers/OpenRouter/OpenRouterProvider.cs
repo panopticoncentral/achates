@@ -103,10 +103,10 @@ internal sealed class OpenRouterProvider : IModelProvider
 
         try
         {
-            var request = BuildChatRequest(model, completionContext, options);
+            var request = BuildOpenRouterChatRequest(model, completionContext, options);
             stream.Push(new CompletionStartEvent { Partial = output });
 
-            await foreach (var chunk in client.StreamChatCompletionAsync(request, cancellationToken).ConfigureAwait(false))
+            await foreach (var chunk in client.StreamOpenRouterChatCompletionAsync(request, cancellationToken).ConfigureAwait(false))
             {
                 if (chunk.Usage is { } usage)
                 {
@@ -174,7 +174,7 @@ internal sealed class OpenRouterProvider : IModelProvider
 
     // ---- Chunk processing ----
 
-    private static CompletionUsage MapUsage(ChatUsage usage, Model model)
+    private static CompletionUsage MapUsage(OpenRouterChatUsage usage, Model model)
     {
         var cachedTokens = 0;
         var reasoningTokens = 0;
@@ -321,7 +321,7 @@ internal sealed class OpenRouterProvider : IModelProvider
 
     private static void ProcessToolCallDeltas(
         CompletionEventStream stream, BlockTracker tracker, CompletionAssistantMessage output,
-        IReadOnlyList<ChatDeltaToolCall> deltas)
+        IReadOnlyList<OpenRouterChatDeltaToolCall> deltas)
     {
         foreach (var toolCallDelta in deltas)
         {
@@ -379,14 +379,16 @@ internal sealed class OpenRouterProvider : IModelProvider
 
     private static void ProcessImageBlocks(
         CompletionEventStream stream, BlockTracker tracker, CompletionAssistantMessage output,
-        IReadOnlyList<ChatContentPart> images)
+        IReadOnlyList<OpenRouterChatContentPart> images)
     {
         FinishCurrentBlock(stream, tracker, output);
 
         foreach (var img in images)
         {
             if (img.ImageUrl?.Url is not { Length: > 0 } url)
+            {
                 continue;
+            }
 
             var (mimeType, data) = ParseDataUrl(url);
             var block = new CompletionImageContent { Data = data, MimeType = mimeType };
@@ -402,7 +404,7 @@ internal sealed class OpenRouterProvider : IModelProvider
 
     private static void ProcessAudioDelta(
         CompletionEventStream stream, BlockTracker tracker, CompletionAssistantMessage output,
-        ChatAudioDelta audio, CompletionOptions? options)
+        OpenRouterChatAudioDelta audio, CompletionOptions? options)
     {
         if (tracker.Current is not CompletionAudioContent)
         {
@@ -477,7 +479,7 @@ internal sealed class OpenRouterProvider : IModelProvider
 
     // ---- Request building ----
 
-    private static ChatCompletionRequest BuildChatRequest(
+    private static OpenRouterChatCompletionRequest BuildOpenRouterChatRequest(
         Model model,
         CompletionContext completionContext,
         CompletionOptions? options)
@@ -507,21 +509,21 @@ internal sealed class OpenRouterProvider : IModelProvider
             };
         }
 
-        ChatReasoningConfig? reasoning = null;
+        OpenRouterChatReasoningConfig? reasoning = null;
         if (options?.ReasoningEffort is not null
             && model.Parameters.HasFlag(ModelParameters.Reasoning))
         {
-            reasoning = new ChatReasoningConfig { Effort = options.ReasoningEffort };
+            reasoning = new OpenRouterChatReasoningConfig { Effort = options.ReasoningEffort };
         }
 
-        ChatResponseFormat? responseFormat = null;
+        OpenRouterChatResponseFormat? responseFormat = null;
         if (options?.ResponseFormat is { } rf)
         {
-            responseFormat = new ChatResponseFormat
+            responseFormat = new OpenRouterChatResponseFormat
             {
                 Type = rf.Type,
                 JsonSchema = rf.JsonSchema is { } schema
-                    ? new ChatJsonSchema
+                    ? new OpenRouterChatJsonSchema
                     {
                         Name = "response",
                         Schema = schema,
@@ -531,25 +533,25 @@ internal sealed class OpenRouterProvider : IModelProvider
         }
 
         IReadOnlyList<string>? modalities = null;
-        ChatAudioConfig? audioConfig = null;
+        OpenRouterChatAudioConfig? audioConfig = null;
         if (options?.Audio is not null && model.Output.HasFlag(ModelModalities.Audio))
         {
             modalities = ["text", "audio"];
-            audioConfig = new ChatAudioConfig
+            audioConfig = new OpenRouterChatAudioConfig
             {
                 Voice = options.Audio.Voice ?? "alloy",
                 Format = options.Audio.Format ?? "pcm16",
             };
         }
 
-        return new ChatCompletionRequest
+        return new OpenRouterChatCompletionRequest
         {
             Model = model.Id,
             Messages = messages,
             Modalities = modalities,
             Audio = audioConfig,
             Stream = true,
-            StreamOptions = new ChatStreamOptions { IncludeUsage = true },
+            StreamOptions = new OpenRouterChatStreamOptions { IncludeUsage = true },
             Temperature = options?.Temperature,
             TopP = options?.TopP,
             TopK = options?.TopK,
@@ -574,15 +576,15 @@ internal sealed class OpenRouterProvider : IModelProvider
 
     // ---- Message conversion ----
 
-    private static List<ChatMessage> ConvertMessages(Model model, CompletionContext completionContext)
+    private static List<OpenRouterChatMessage> ConvertMessages(Model model, CompletionContext completionContext)
     {
-        var result = new List<ChatMessage>();
+        var result = new List<OpenRouterChatMessage>();
 
         // System prompt
         if (!string.IsNullOrEmpty(completionContext.SystemPrompt))
         {
             var role = model.Parameters.HasFlag(ModelParameters.Reasoning) ? "developer" : "system";
-            result.Add(new ChatMessage
+            result.Add(new OpenRouterChatMessage
             {
                 Role = role,
                 Content = JsonSerializer.SerializeToElement(
@@ -617,9 +619,9 @@ internal sealed class OpenRouterProvider : IModelProvider
         return result;
     }
 
-    private static ChatMessage ConvertUserTextMessage(CompletionUserTextMessage textMsg)
+    private static OpenRouterChatMessage ConvertUserTextMessage(CompletionUserTextMessage textMsg)
     {
-        return new ChatMessage
+        return new OpenRouterChatMessage
         {
             Role = "user",
             Content = JsonSerializer.SerializeToElement(
@@ -627,35 +629,35 @@ internal sealed class OpenRouterProvider : IModelProvider
         };
     }
 
-    private static ChatMessage ConvertUserBlocksMessage(CompletionUserContentMessage contentMsg, Model model)
+    private static OpenRouterChatMessage ConvertUserBlocksMessage(CompletionUserContentMessage contentMsg, Model model)
     {
-        var parts = new List<ChatContentPart>();
+        var parts = new List<OpenRouterChatContentPart>();
         foreach (var block in contentMsg.Content)
         {
             switch (block)
             {
                 case CompletionTextContent tc:
-                    parts.Add(new ChatContentPart
+                    parts.Add(new OpenRouterChatContentPart
                     {
                         Type = "text",
                         Text = UnicodeSanitizer.SanitizeSurrogates(tc.Text),
                     });
                     break;
                 case CompletionImageContent img when model.Input.HasFlag(ModelModalities.Image):
-                    parts.Add(new ChatContentPart
+                    parts.Add(new OpenRouterChatContentPart
                     {
                         Type = "image_url",
-                        ImageUrl = new ChatImageUrl
+                        ImageUrl = new OpenRouterChatImageUrl
                         {
                             Url = $"data:{img.MimeType};base64,{img.Data}",
                         },
                     });
                     break;
                 case CompletionFileContent file when model.Input.HasFlag(ModelModalities.File):
-                    parts.Add(new ChatContentPart
+                    parts.Add(new OpenRouterChatContentPart
                     {
                         Type = "file",
-                        File = new ChatFileData
+                        File = new OpenRouterChatFileData
                         {
                             FileName = file.FileName ?? "file",
                             FileData = $"data:{file.MimeType};base64,{file.Data}",
@@ -663,10 +665,10 @@ internal sealed class OpenRouterProvider : IModelProvider
                     });
                     break;
                 case CompletionAudioInputContent audio when model.Input.HasFlag(ModelModalities.Audio):
-                    parts.Add(new ChatContentPart
+                    parts.Add(new OpenRouterChatContentPart
                     {
                         Type = "input_audio",
-                        InputAudio = new ChatInputAudio
+                        InputAudio = new OpenRouterChatInputAudio
                         {
                             Data = audio.Data,
                             Format = audio.Format,
@@ -676,14 +678,14 @@ internal sealed class OpenRouterProvider : IModelProvider
             }
         }
 
-        return new ChatMessage
+        return new OpenRouterChatMessage
         {
             Role = "user",
-            Content = JsonSerializer.SerializeToElement(parts, OpenRouterJsonContext.Default.IReadOnlyListChatContentPart),
+            Content = JsonSerializer.SerializeToElement(parts, OpenRouterJsonContext.Default.IReadOnlyListOpenRouterChatContentPart),
         };
     }
 
-    private static ChatMessage? ConvertAssistantMessage(CompletionAssistantMessage completionAssistant)
+    private static OpenRouterChatMessage? ConvertAssistantMessage(CompletionAssistantMessage completionAssistant)
     {
         var textBlocks = completionAssistant.Content.OfType<CompletionTextContent>()
             .Where(b => !string.IsNullOrWhiteSpace(b.Text))
@@ -711,14 +713,14 @@ internal sealed class OpenRouterProvider : IModelProvider
             content = JsonSerializer.SerializeToElement(text);
         }
 
-        List<ChatToolCall>? chatToolCalls = null;
+        List<OpenRouterChatToolCall>? chatToolCalls = null;
         if (toolCalls.Count > 0)
         {
-            chatToolCalls = toolCalls.Select(tc => new ChatToolCall
+            chatToolCalls = toolCalls.Select(tc => new OpenRouterChatToolCall
             {
                 Id = tc.Id,
                 Type = "function",
-                Function = new ChatToolCallFunction
+                Function = new OpenRouterChatToolCallFunction
                 {
                     Name = tc.Name,
                     Arguments = JsonSerializer.Serialize(tc.Arguments),
@@ -732,13 +734,13 @@ internal sealed class OpenRouterProvider : IModelProvider
             reasoning = string.Join("\n", thinkingBlocks.Select(b => b.Thinking));
         }
 
-        List<ChatContentPart>? chatImages = null;
+        List<OpenRouterChatContentPart>? chatImages = null;
         if (imageBlocks.Count > 0)
         {
-            chatImages = imageBlocks.Select(img => new ChatContentPart
+            chatImages = imageBlocks.Select(img => new OpenRouterChatContentPart
             {
                 Type = "image_url",
-                ImageUrl = new ChatImageUrl
+                ImageUrl = new OpenRouterChatImageUrl
                 {
                     Url = $"data:{img.MimeType};base64,{img.Data}",
                 },
@@ -761,7 +763,7 @@ internal sealed class OpenRouterProvider : IModelProvider
             }
         }
 
-        return new ChatMessage
+        return new OpenRouterChatMessage
         {
             Role = "assistant",
             Content = content,
@@ -771,12 +773,12 @@ internal sealed class OpenRouterProvider : IModelProvider
         };
     }
 
-    private static ChatMessage ConvertToolResult(CompletionToolResultMessage completionToolResult)
+    private static OpenRouterChatMessage ConvertToolResult(CompletionToolResultMessage completionToolResult)
     {
         var text = string.Join("\n",
             completionToolResult.Content.OfType<CompletionTextContent>().Select(c => c.Text));
 
-        return new ChatMessage
+        return new OpenRouterChatMessage
         {
             Role = "tool",
             Content = JsonSerializer.SerializeToElement(
@@ -785,12 +787,12 @@ internal sealed class OpenRouterProvider : IModelProvider
         };
     }
 
-    private static List<ChatTool> ConvertTools(IReadOnlyList<CompletionTool> tools)
+    private static List<OpenRouterChatTool> ConvertTools(IReadOnlyList<CompletionTool> tools)
     {
-        return tools.Select(tool => new ChatTool
+        return tools.Select(tool => new OpenRouterChatTool
         {
             Type = "function",
-            Function = new ChatFunction
+            Function = new OpenRouterChatFunction
             {
                 Name = tool.Name,
                 Description = tool.Description,
@@ -891,12 +893,12 @@ internal sealed class OpenRouterProvider : IModelProvider
             {
                 "temperature" => ModelParameters.Temperature,
                 "top_p" => ModelParameters.TopP,
-                "top_k" => ModelParameters.TokK,
+                "top_k" => ModelParameters.TopK,
                 "min_p" => ModelParameters.MinP,
                 "top_a" => ModelParameters.TopA,
-                "frequency_penalty" => ModelParameters.FrequencyPenality,
-                "presence_penalty" => ModelParameters.PresencePenality,
-                "repetition_penalty" => ModelParameters.RepetitionPenality,
+                "frequency_penalty" => ModelParameters.FrequencyPenalty,
+                "presence_penalty" => ModelParameters.PresencePenalty,
+                "repetition_penalty" => ModelParameters.RepetitionPenalty,
                 "max_tokens" => ModelParameters.MaxTokens,
                 "logit_bias" => ModelParameters.LogitBias,
                 "logprobs" => ModelParameters.LogProbs,

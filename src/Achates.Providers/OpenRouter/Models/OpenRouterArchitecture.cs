@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Models;
 
-public sealed record OpenRouterArchitecture
+internal sealed record OpenRouterArchitecture
 {
     [JsonPropertyName("modality")]
     public string? Modality { get; init; }

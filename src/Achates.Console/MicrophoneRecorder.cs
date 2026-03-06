@@ -53,7 +53,9 @@ internal static class MicrophoneRecorder
             process.WaitForExit();
 
             if (cancellationToken.IsCancellationRequested)
+            {
                 return null;
+            }
 
             if (process.ExitCode != 0)
             {

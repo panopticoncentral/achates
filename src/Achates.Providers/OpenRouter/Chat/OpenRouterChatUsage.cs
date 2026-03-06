@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Chat;
 
-public sealed record ChatUsage
+internal sealed record OpenRouterChatUsage
 {
     [JsonPropertyName("prompt_tokens")]
     public int PromptTokens { get; init; }

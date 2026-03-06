@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Models;
 
-public sealed record OpenRouterTopProvider
+internal sealed record OpenRouterTopProvider
 {
     [JsonPropertyName("context_length")]
     public int? ContextLength { get; init; }

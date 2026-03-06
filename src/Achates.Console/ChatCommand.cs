@@ -48,11 +48,15 @@ internal static class ChatCommand
             }
 
             if (string.IsNullOrWhiteSpace(input))
+            {
                 continue;
+            }
 
             var userMessage = BuildUserMessage(input, cts.Token);
             if (userMessage is null)
+            {
                 continue;
+            }
 
             messages.Add(userMessage);
 
@@ -164,7 +168,9 @@ internal static class ChatCommand
             {
                 var content = new List<CompletionUserContent> { imageContent };
                 if (!string.IsNullOrWhiteSpace(text))
+                {
                     content.Add(new CompletionTextContent { Text = text });
+                }
 
                 return new CompletionUserContentMessage
                 {
@@ -186,7 +192,9 @@ internal static class ChatCommand
             {
                 var content = new List<CompletionUserContent> { fileContent };
                 if (!string.IsNullOrWhiteSpace(text))
+                {
                     content.Add(new CompletionTextContent { Text = text });
+                }
 
                 return new CompletionUserContentMessage
                 {
@@ -208,7 +216,9 @@ internal static class ChatCommand
             {
                 var content = new List<CompletionUserContent> { audioContent };
                 if (!string.IsNullOrWhiteSpace(text))
+                {
                     content.Add(new CompletionTextContent { Text = text });
+                }
 
                 return new CompletionUserContentMessage
                 {
@@ -232,7 +242,9 @@ internal static class ChatCommand
             {
                 var content = new List<CompletionUserContent> { audioContent };
                 if (!string.IsNullOrWhiteSpace(text))
+                {
                     content.Add(new CompletionTextContent { Text = text });
+                }
 
                 return new CompletionUserContentMessage
                 {
@@ -269,7 +281,9 @@ internal static class ChatCommand
         // Unquoted: split on first space after the path
         var spaceIdx = input.IndexOf(' ');
         if (spaceIdx < 0)
+        {
             return (input, null);
+        }
 
         return (input[..spaceIdx], input[(spaceIdx + 1)..].Trim());
     }
@@ -327,7 +341,9 @@ internal static class ChatCommand
         System.Console.WriteLine("Recording... speak now (stops after silence)");
         var wavBytes = MicrophoneRecorder.Record(cancellationToken);
         if (wavBytes is null)
+        {
             return false;
+        }
 
         var data = Convert.ToBase64String(wavBytes);
         audioContent = new CompletionAudioInputContent { Data = data, Format = "wav" };
@@ -347,7 +363,9 @@ internal static class ChatCommand
 
         var ext = Path.GetExtension(fullPath);
         if (!FileMimeTypes.TryGetValue(ext, out var mime))
+        {
             mime = "application/octet-stream";
+        }
 
         var data = Convert.ToBase64String(File.ReadAllBytes(fullPath));
         fileContent = new CompletionFileContent

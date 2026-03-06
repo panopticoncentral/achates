@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Chat;
 
-public sealed record ChatProviderPreferences
+internal sealed record OpenRouterChatProviderPreferences
 {
     [JsonPropertyName("allow_fallbacks")]
     public bool? AllowFallbacks { get; init; }
@@ -26,10 +26,10 @@ public sealed record ChatProviderPreferences
     public IReadOnlyList<string>? Quantizations { get; init; }
 
     [JsonPropertyName("max_price")]
-    public ChatMaxPrice? MaxPrice { get; init; }
+    public OpenRouterChatMaxPrice? MaxPrice { get; init; }
 }
 
-public sealed record ChatMaxPrice
+internal sealed record OpenRouterChatMaxPrice
 {
     [JsonPropertyName("prompt")]
     public double? Prompt { get; init; }

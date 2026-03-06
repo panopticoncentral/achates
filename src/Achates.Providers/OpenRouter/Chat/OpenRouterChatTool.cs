@@ -3,16 +3,16 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Chat;
 
-public sealed record ChatTool
+internal sealed record OpenRouterChatTool
 {
     [JsonPropertyName("type")]
     public required string Type { get; init; }
 
     [JsonPropertyName("function")]
-    public required ChatFunction Function { get; init; }
+    public required OpenRouterChatFunction Function { get; init; }
 }
 
-public sealed record ChatFunction
+internal sealed record OpenRouterChatFunction
 {
     [JsonPropertyName("name")]
     public required string Name { get; init; }
@@ -27,7 +27,7 @@ public sealed record ChatFunction
     public bool? Strict { get; init; }
 }
 
-public sealed record ChatToolCall
+internal sealed record OpenRouterChatToolCall
 {
     [JsonPropertyName("id")]
     public required string Id { get; init; }
@@ -36,10 +36,10 @@ public sealed record ChatToolCall
     public required string Type { get; init; }
 
     [JsonPropertyName("function")]
-    public required ChatToolCallFunction Function { get; init; }
+    public required OpenRouterChatToolCallFunction Function { get; init; }
 }
 
-public sealed record ChatToolCallFunction
+internal sealed record OpenRouterChatToolCallFunction
 {
     [JsonPropertyName("name")]
     public required string Name { get; init; }

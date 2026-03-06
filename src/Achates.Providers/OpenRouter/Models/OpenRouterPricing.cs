@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Models;
 
-public sealed record OpenRouterPricing
+internal sealed record OpenRouterPricing
 {
     [JsonPropertyName("prompt")]
     public string? Prompt { get; init; }

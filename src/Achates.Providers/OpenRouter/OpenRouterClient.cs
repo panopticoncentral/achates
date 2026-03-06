@@ -6,7 +6,7 @@ using Achates.Providers.OpenRouter.Models;
 
 namespace Achates.Providers.OpenRouter;
 
-public sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
+internal sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
 {
     private const string DefaultBaseUrl = "https://openrouter.ai/api/v1";
 
@@ -47,8 +47,8 @@ public sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
         return response?.Data.Count ?? -1;
     }
 
-    public async Task<ChatCompletionResponse?> CreateChatCompletionAsync(
-        ChatCompletionRequest request,
+    public async Task<OpenRouterChatCompletionResponse?> CreateOpenRouterChatCompletionAsync(
+        OpenRouterChatCompletionRequest request,
         CancellationToken cancellationToken = default)
     {
         var requestUri = $"{GetBaseUrl()}/chat/completions";
@@ -57,7 +57,7 @@ public sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
         SetAuth(httpRequest);
         httpRequest.Content = JsonContent.Create(
             request,
-            OpenRouterJsonContext.Default.ChatCompletionRequest);
+            OpenRouterJsonContext.Default.OpenRouterChatCompletionRequest);
 
         using var httpResponse = await httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
 
@@ -68,12 +68,12 @@ public sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
         }
 
         return await httpResponse.Content.ReadFromJsonAsync(
-            OpenRouterJsonContext.Default.ChatCompletionResponse,
+            OpenRouterJsonContext.Default.OpenRouterChatCompletionResponse,
             cancellationToken).ConfigureAwait(false);
     }
 
-    public async IAsyncEnumerable<ChatCompletionChunk> StreamChatCompletionAsync(
-        ChatCompletionRequest request,
+    public async IAsyncEnumerable<OpenRouterChatCompletionChunk> StreamOpenRouterChatCompletionAsync(
+        OpenRouterChatCompletionRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var requestUri = $"{GetBaseUrl()}/chat/completions";
@@ -82,7 +82,7 @@ public sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
         SetAuth(httpRequest);
         httpRequest.Content = JsonContent.Create(
             request,
-            OpenRouterJsonContext.Default.ChatCompletionRequest);
+            OpenRouterJsonContext.Default.OpenRouterChatCompletionRequest);
 
         using var httpResponse = await httpClient.SendAsync(
             httpRequest,
@@ -126,7 +126,7 @@ public sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
             if (doc.RootElement.TryGetProperty("error", out var errorElement))
             {
                 var error = errorElement.Deserialize(
-                    OpenRouterJsonContext.Default.ChatErrorDetail);
+                    OpenRouterJsonContext.Default.OpenRouterChatErrorDetail);
                 throw new OpenRouterException(
                     FormatErrorMessage(
                         error?.Message ?? "Unknown streaming error",
@@ -136,7 +136,7 @@ public sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
             }
 
             var chunk = doc.RootElement.Deserialize(
-                OpenRouterJsonContext.Default.ChatCompletionChunk);
+                OpenRouterJsonContext.Default.OpenRouterChatCompletionChunk);
 
             if (chunk is not null)
             {
@@ -149,12 +149,12 @@ public sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
         HttpResponseMessage httpResponse,
         CancellationToken cancellationToken)
     {
-        ChatCompletionError? error = null;
+        OpenRouterChatCompletionError? error = null;
 
         try
         {
             error = await httpResponse.Content.ReadFromJsonAsync(
-                OpenRouterJsonContext.Default.ChatCompletionError,
+                OpenRouterJsonContext.Default.OpenRouterChatCompletionError,
                 cancellationToken).ConfigureAwait(false);
         }
         catch (JsonException)
@@ -170,28 +170,31 @@ public sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
             error?.Error.Metadata);
     }
 
-    internal static string FormatErrorMessage(string message, JsonElement? metadata)
+    private static string FormatErrorMessage(string message, JsonElement? metadata)
     {
         if (metadata is not { ValueKind: JsonValueKind.Object } meta)
+        {
             return message;
+        }
 
         // OpenRouter often puts the upstream provider's error in metadata.raw
         if (meta.TryGetProperty("raw", out var raw) && raw.ValueKind == JsonValueKind.String)
         {
             var rawText = raw.GetString();
             if (!string.IsNullOrWhiteSpace(rawText) && rawText != message)
+            {
                 return $"{message} — {rawText}";
+            }
         }
 
         // Some errors include a provider_name
-        if (meta.TryGetProperty("provider_name", out var provider) && provider.ValueKind == JsonValueKind.String)
+        if (!meta.TryGetProperty("provider_name", out var provider) || provider.ValueKind != JsonValueKind.String)
         {
-            var providerName = provider.GetString();
-            if (!string.IsNullOrWhiteSpace(providerName))
-                return $"{message} (via {providerName})";
+            return message;
         }
 
-        return message;
+        var providerName = provider.GetString();
+        return !string.IsNullOrWhiteSpace(providerName) ? $"{message} (via {providerName})" : message;
     }
 
     private string GetBaseUrl()

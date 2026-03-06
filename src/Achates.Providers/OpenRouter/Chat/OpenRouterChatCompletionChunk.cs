@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Chat;
 
-public sealed record ChatCompletionChunk
+internal sealed record OpenRouterChatCompletionChunk
 {
     [JsonPropertyName("id")]
     public required string Id { get; init; }
@@ -21,19 +21,19 @@ public sealed record ChatCompletionChunk
     public string? SystemFingerprint { get; init; }
 
     [JsonPropertyName("choices")]
-    public required IReadOnlyList<ChatChunkChoice> Choices { get; init; }
+    public required IReadOnlyList<OpenRouterChatChunkChoice> Choices { get; init; }
 
     [JsonPropertyName("usage")]
-    public ChatUsage? Usage { get; init; }
+    public OpenRouterChatUsage? Usage { get; init; }
 }
 
-public sealed record ChatChunkChoice
+internal sealed record OpenRouterChatChunkChoice
 {
     [JsonPropertyName("index")]
     public int Index { get; init; }
 
     [JsonPropertyName("delta")]
-    public required ChatDelta Delta { get; init; }
+    public required OpenRouterChatDelta Delta { get; init; }
 
     [JsonPropertyName("finish_reason")]
     public string? FinishReason { get; init; }
@@ -42,7 +42,7 @@ public sealed record ChatChunkChoice
     public JsonElement? Logprobs { get; init; }
 }
 
-public sealed record ChatDelta
+internal sealed record OpenRouterChatDelta
 {
     [JsonPropertyName("role")]
     public string? Role { get; init; }
@@ -51,7 +51,7 @@ public sealed record ChatDelta
     public string? Content { get; init; }
 
     [JsonPropertyName("tool_calls")]
-    public IReadOnlyList<ChatDeltaToolCall>? ToolCalls { get; init; }
+    public IReadOnlyList<OpenRouterChatDeltaToolCall>? ToolCalls { get; init; }
 
     [JsonPropertyName("refusal")]
     public string? Refusal { get; init; }
@@ -60,13 +60,13 @@ public sealed record ChatDelta
     public string? Reasoning { get; init; }
 
     [JsonPropertyName("images")]
-    public IReadOnlyList<ChatContentPart>? Images { get; init; }
+    public IReadOnlyList<OpenRouterChatContentPart>? Images { get; init; }
 
     [JsonPropertyName("audio")]
-    public ChatAudioDelta? Audio { get; init; }
+    public OpenRouterChatAudioDelta? Audio { get; init; }
 }
 
-public sealed record ChatAudioDelta
+internal sealed record OpenRouterChatAudioDelta
 {
     [JsonPropertyName("id")]
     public string? Id { get; init; }
@@ -81,7 +81,7 @@ public sealed record ChatAudioDelta
     public long? ExpiresAt { get; init; }
 }
 
-public sealed record ChatDeltaToolCall
+internal sealed record OpenRouterChatDeltaToolCall
 {
     [JsonPropertyName("index")]
     public int Index { get; init; }
@@ -93,10 +93,10 @@ public sealed record ChatDeltaToolCall
     public string? Type { get; init; }
 
     [JsonPropertyName("function")]
-    public ChatDeltaToolCallFunction? Function { get; init; }
+    public OpenRouterChatDeltaToolCallFunction? Function { get; init; }
 }
 
-public sealed record ChatDeltaToolCallFunction
+internal sealed record OpenRouterChatDeltaToolCallFunction
 {
     [JsonPropertyName("name")]
     public string? Name { get; init; }

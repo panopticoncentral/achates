@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Chat;
 
-public sealed record ChatReasoningConfig
+internal sealed record OpenRouterChatReasoningConfig
 {
     [JsonPropertyName("effort")]
     public string? Effort { get; init; }

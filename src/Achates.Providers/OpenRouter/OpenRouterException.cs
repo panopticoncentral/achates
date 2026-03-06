@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Achates.Providers.OpenRouter;
 
-public sealed class OpenRouterException(
+internal sealed class OpenRouterException(
     string message,
     int code,
     JsonElement? metadata = null) : Exception(message)

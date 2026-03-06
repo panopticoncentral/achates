@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Models;
 
-public sealed record OpenRouterModel
+internal sealed record OpenRouterModel
 {
     [JsonPropertyName("id")]
     public required string Id { get; init; }

@@ -3,25 +3,25 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Chat;
 
-public sealed record ChatCompletionRequest
+internal sealed record OpenRouterChatCompletionRequest
 {
     [JsonPropertyName("model")]
     public required string Model { get; init; }
 
     [JsonPropertyName("messages")]
-    public required IReadOnlyList<ChatMessage> Messages { get; init; }
+    public required IReadOnlyList<OpenRouterChatMessage> Messages { get; init; }
 
     [JsonPropertyName("modalities")]
     public IReadOnlyList<string>? Modalities { get; init; }
 
     [JsonPropertyName("audio")]
-    public ChatAudioConfig? Audio { get; init; }
+    public OpenRouterChatAudioConfig? Audio { get; init; }
 
     [JsonPropertyName("stream")]
     public bool? Stream { get; init; }
 
     [JsonPropertyName("stream_options")]
-    public ChatStreamOptions? StreamOptions { get; init; }
+    public OpenRouterChatStreamOptions? StreamOptions { get; init; }
 
     [JsonPropertyName("temperature")]
     public double? Temperature { get; init; }
@@ -63,7 +63,7 @@ public sealed record ChatCompletionRequest
     public IReadOnlyList<string>? Stop { get; init; }
 
     [JsonPropertyName("tools")]
-    public IReadOnlyList<ChatTool>? Tools { get; init; }
+    public IReadOnlyList<OpenRouterChatTool>? Tools { get; init; }
 
     [JsonPropertyName("tool_choice")]
     public JsonElement? ToolChoice { get; init; }
@@ -72,7 +72,7 @@ public sealed record ChatCompletionRequest
     public bool? ParallelToolCalls { get; init; }
 
     [JsonPropertyName("response_format")]
-    public ChatResponseFormat? ResponseFormat { get; init; }
+    public OpenRouterChatResponseFormat? ResponseFormat { get; init; }
 
     [JsonPropertyName("logprobs")]
     public bool? Logprobs { get; init; }
@@ -81,10 +81,10 @@ public sealed record ChatCompletionRequest
     public int? TopLogprobs { get; init; }
 
     [JsonPropertyName("provider")]
-    public ChatProviderPreferences? Provider { get; init; }
+    public OpenRouterChatProviderPreferences? Provider { get; init; }
 
     [JsonPropertyName("reasoning")]
-    public ChatReasoningConfig? Reasoning { get; init; }
+    public OpenRouterChatReasoningConfig? Reasoning { get; init; }
 
     [JsonPropertyName("user")]
     public string? User { get; init; }
@@ -93,7 +93,7 @@ public sealed record ChatCompletionRequest
     public JsonElement? Metadata { get; init; }
 }
 
-public sealed record ChatAudioConfig
+internal sealed record OpenRouterChatAudioConfig
 {
     [JsonPropertyName("voice")]
     public required string Voice { get; init; }
@@ -102,7 +102,7 @@ public sealed record ChatAudioConfig
     public required string Format { get; init; }
 }
 
-public sealed record ChatStreamOptions
+internal sealed record OpenRouterChatStreamOptions
 {
     [JsonPropertyName("include_usage")]
     public bool? IncludeUsage { get; init; }

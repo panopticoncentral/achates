@@ -19,7 +19,7 @@ public enum ModelParameters
     /// <summary>
     /// Limits token selection to the top K most probable tokens.
     /// </summary>
-    TokK = 0x00000002,
+    TopK = 0x00000002,
 
     /// <summary>
     /// Minimum probability threshold for token selection.
@@ -34,17 +34,17 @@ public enum ModelParameters
     /// <summary>
     /// Penalizes tokens based on their frequency in the generated text so far.
     /// </summary>
-    FrequencyPenality = 0x00000010,
+    FrequencyPenalty = 0x00000010,
 
     /// <summary>
     /// Penalizes tokens that have already appeared in the generated text.
     /// </summary>
-    PresencePenality = 0x00000020,
+    PresencePenalty = 0x00000020,
 
     /// <summary>
     /// Penalizes repeated sequences of tokens to reduce repetitive output.
     /// </summary>
-    RepetitionPenality = 0x00000040,
+    RepetitionPenalty = 0x00000040,
 
     /// <summary>
     /// Maximum number of tokens to generate in the response.

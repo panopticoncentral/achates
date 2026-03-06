@@ -3,13 +3,13 @@ using System.Text;
 namespace Achates.Providers.Util;
 
 /// <summary>
-/// Removes unpaired Unicode surrogate characters from strings.
-/// Valid emoji and supplementary characters (properly paired surrogates) are preserved.
+/// Strips unpaired UTF-16 surrogates that cause JSON serialization failures.
 /// </summary>
 internal static class UnicodeSanitizer
 {
     /// <summary>
-    /// Remove unpaired Unicode surrogates that cause JSON serialization errors.
+    /// Returns the input with any unpaired UTF-16 surrogates replaced by U+FFFD.
+    /// Fast-path: if no surrogates are found, returns the original string with zero allocations.
     /// </summary>
     public static string SanitizeSurrogates(string text)
     {
@@ -18,26 +18,27 @@ internal static class UnicodeSanitizer
             return text;
         }
 
-        var hasUnpaired = false;
+        var needsSanitization = false;
         for (var i = 0; i < text.Length; i++)
         {
-            if (char.IsHighSurrogate(text[i]))
+            if (!char.IsSurrogate(text[i]))
             {
-                if (i + 1 >= text.Length || !char.IsLowSurrogate(text[i + 1]))
-                {
-                    hasUnpaired = true;
-                    break;
-                }
-                i++; // skip the low surrogate
+                continue;
             }
-            else if (char.IsLowSurrogate(text[i]))
+
+            if (char.IsHighSurrogate(text[i])
+                && i + 1 < text.Length
+                && char.IsLowSurrogate(text[i + 1]))
             {
-                hasUnpaired = true;
-                break;
+                i++; // valid pair, skip low surrogate
+                continue;
             }
+
+            needsSanitization = true;
+            break;
         }
 
-        if (!hasUnpaired)
+        if (!needsSanitization)
         {
             return text;
         }
@@ -45,23 +46,27 @@ internal static class UnicodeSanitizer
         var sb = new StringBuilder(text.Length);
         for (var i = 0; i < text.Length; i++)
         {
-            if (char.IsHighSurrogate(text[i]))
+            var c = text[i];
+            if (char.IsHighSurrogate(c))
             {
                 if (i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
                 {
-                    sb.Append(text[i]);
+                    sb.Append(c);
                     sb.Append(text[i + 1]);
                     i++;
                 }
-                // else: unpaired high surrogate, skip
+                else
+                {
+                    sb.Append('\uFFFD');
+                }
             }
-            else if (char.IsLowSurrogate(text[i]))
+            else if (char.IsLowSurrogate(c))
             {
-                // Unpaired low surrogate, skip
+                sb.Append('\uFFFD');
             }
             else
             {
-                sb.Append(text[i]);
+                sb.Append(c);
             }
         }
 

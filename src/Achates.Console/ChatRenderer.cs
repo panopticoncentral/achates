@@ -87,9 +87,15 @@ internal static class ChatRenderer
 
                 case CompletionAudioDeltaEvent e:
                     if (e.DataDelta is not null)
+                    {
                         audioPlayer?.WriteChunk(e.DataDelta);
+                    }
+
                     if (e.TranscriptDelta is not null)
+                    {
                         System.Console.Write(e.TranscriptDelta);
+                    }
+
                     break;
 
                 case CompletionAudioEndEvent e:
@@ -100,7 +106,11 @@ internal static class ChatRenderer
                     break;
 
                 case CompletionErrorEvent e:
-                    if (inThinking) System.Console.Write(Reset);
+                    if (inThinking)
+                    {
+                        System.Console.Write(Reset);
+                    }
+
                     audioPlayer?.Finish();
                     audioPlayer = null;
                     System.Console.Error.WriteLine($"{Red}Error: {e.Error.ErrorMessage}{Reset}");
@@ -176,9 +186,13 @@ internal static class ChatRenderer
             var isLast = offset + length >= span.Length;
 
             if (isFirst)
+            {
                 System.Console.Write($"\x1b_Ga=T,f=100,m={(isLast ? 0 : 1)};{chunk}\x1b\\");
+            }
             else
+            {
                 System.Console.Write($"\x1b_Gm={(isLast ? 0 : 1)};{chunk}\x1b\\");
+            }
         }
 
         System.Console.WriteLine();
@@ -200,7 +214,9 @@ internal static class ChatRenderer
         var bytes = Convert.FromBase64String(audio.Data);
 
         if (audio.Format == "pcm16")
+        {
             bytes = WrapPcm16AsWav(bytes, sampleRate: 24000, channels: 1);
+        }
 
         var ext = audio.Format switch
         {
@@ -262,7 +278,9 @@ internal static class ChatRenderer
         {
             var (fileName, args) = FindStreamingPlayer();
             if (fileName is null)
+            {
                 return null;
+            }
 
             try
             {
@@ -320,24 +338,39 @@ internal static class ChatRenderer
             {
                 // sox play supports stdin
                 if (ExistsOnPath("play"))
+                {
                     return ("play", "-t raw -r 24000 -e signed -b 16 -c 1 -");
+                }
+
                 // ffplay as fallback
                 if (ExistsOnPath("ffplay"))
+                {
                     return ("ffplay", "-f s16le -ar 24000 -ac 1 -nodisp -autoexit -loglevel quiet -i pipe:0");
+                }
             }
             else if (OperatingSystem.IsLinux())
             {
                 if (ExistsOnPath("aplay"))
+                {
                     return ("aplay", "-f S16_LE -r 24000 -c 1 -t raw -q");
+                }
+
                 if (ExistsOnPath("play"))
+                {
                     return ("play", "-t raw -r 24000 -e signed -b 16 -c 1 -");
+                }
+
                 if (ExistsOnPath("ffplay"))
+                {
                     return ("ffplay", "-f s16le -ar 24000 -ac 1 -nodisp -autoexit -loglevel quiet -i pipe:0");
+                }
             }
             else if (OperatingSystem.IsWindows())
             {
                 if (ExistsOnPath("ffplay"))
+                {
                     return ("ffplay", "-f s16le -ar 24000 -ac 1 -nodisp -autoexit -loglevel quiet -i pipe:0");
+                }
             }
 
             return (null, null);
@@ -367,7 +400,11 @@ internal static class ChatRenderer
 
     public static void WriteUsage(CompletionUsage? usage)
     {
-        if (usage is null) return;
+        if (usage is null)
+        {
+            return;
+        }
+
         System.Console.WriteLine(
             $"{Dim}[{usage.Input} in / {usage.Output} out | ${usage.Cost.Total:F6}]{Reset}");
         System.Console.WriteLine();

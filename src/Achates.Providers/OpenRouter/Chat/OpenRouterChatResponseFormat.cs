@@ -3,16 +3,16 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Chat;
 
-public sealed record ChatResponseFormat
+internal sealed record OpenRouterChatResponseFormat
 {
     [JsonPropertyName("type")]
     public required string Type { get; init; }
 
     [JsonPropertyName("json_schema")]
-    public ChatJsonSchema? JsonSchema { get; init; }
+    public OpenRouterChatJsonSchema? JsonSchema { get; init; }
 }
 
-public sealed record ChatJsonSchema
+internal sealed record OpenRouterChatJsonSchema
 {
     [JsonPropertyName("name")]
     public required string Name { get; init; }

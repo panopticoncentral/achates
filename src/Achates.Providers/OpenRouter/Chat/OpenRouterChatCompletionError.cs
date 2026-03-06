@@ -3,13 +3,13 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Chat;
 
-public sealed record ChatCompletionError
+internal sealed record OpenRouterChatCompletionError
 {
     [JsonPropertyName("error")]
-    public required ChatErrorDetail Error { get; init; }
+    public required OpenRouterChatErrorDetail Error { get; init; }
 }
 
-public sealed record ChatErrorDetail
+internal sealed record OpenRouterChatErrorDetail
 {
     [JsonPropertyName("code")]
     public int Code { get; init; }

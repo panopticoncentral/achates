@@ -120,7 +120,11 @@ internal sealed class ChatToolRegistry
 
     private static string? GetString(Dictionary<string, object?> args, string key)
     {
-        if (!args.TryGetValue(key, out var val) || val is null) return null;
+        if (!args.TryGetValue(key, out var val) || val is null)
+        {
+            return null;
+        }
+
         return val is JsonElement je ? je.GetString() : val.ToString();
     }
 

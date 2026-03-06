@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace Achates.Providers.OpenRouter.Chat;
 
-public sealed record ChatMessage
+internal sealed record OpenRouterChatMessage
 {
     [JsonPropertyName("role")]
     public required string Role { get; init; }
@@ -15,7 +15,7 @@ public sealed record ChatMessage
     public string? Name { get; init; }
 
     [JsonPropertyName("tool_calls")]
-    public IReadOnlyList<ChatToolCall>? ToolCalls { get; init; }
+    public IReadOnlyList<OpenRouterChatToolCall>? ToolCalls { get; init; }
 
     [JsonPropertyName("tool_call_id")]
     public string? ToolCallId { get; init; }
@@ -27,13 +27,13 @@ public sealed record ChatMessage
     public string? Reasoning { get; init; }
 
     [JsonPropertyName("images")]
-    public IReadOnlyList<ChatContentPart>? Images { get; init; }
+    public IReadOnlyList<OpenRouterChatContentPart>? Images { get; init; }
 
     [JsonPropertyName("audio")]
-    public ChatAudioResponse? Audio { get; init; }
+    public OpenRouterChatAudioResponse? Audio { get; init; }
 }
 
-public sealed record ChatAudioResponse
+internal sealed record OpenRouterChatAudioResponse
 {
     [JsonPropertyName("id")]
     public required string Id { get; init; }
@@ -48,7 +48,7 @@ public sealed record ChatAudioResponse
     public long? ExpiresAt { get; init; }
 }
 
-public sealed record ChatContentPart
+internal sealed record OpenRouterChatContentPart
 {
     [JsonPropertyName("type")]
     public required string Type { get; init; }
@@ -57,16 +57,16 @@ public sealed record ChatContentPart
     public string? Text { get; init; }
 
     [JsonPropertyName("image_url")]
-    public ChatImageUrl? ImageUrl { get; init; }
+    public OpenRouterChatImageUrl? ImageUrl { get; init; }
 
     [JsonPropertyName("file")]
-    public ChatFileData? File { get; init; }
+    public OpenRouterChatFileData? File { get; init; }
 
     [JsonPropertyName("input_audio")]
-    public ChatInputAudio? InputAudio { get; init; }
+    public OpenRouterChatInputAudio? InputAudio { get; init; }
 }
 
-public sealed record ChatInputAudio
+internal sealed record OpenRouterChatInputAudio
 {
     [JsonPropertyName("data")]
     public required string Data { get; init; }
@@ -75,7 +75,7 @@ public sealed record ChatInputAudio
     public required string Format { get; init; }
 }
 
-public sealed record ChatImageUrl
+internal sealed record OpenRouterChatImageUrl
 {
     [JsonPropertyName("url")]
     public required string Url { get; init; }
@@ -84,7 +84,7 @@ public sealed record ChatImageUrl
     public string? Detail { get; init; }
 }
 
-public sealed record ChatFileData
+internal sealed record OpenRouterChatFileData
 {
     [JsonPropertyName("filename")]
     public required string FileName { get; init; }
