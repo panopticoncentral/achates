@@ -1,125 +1,188 @@
-using System.Globalization;
-using Achates.Console;
-using Achates.Providers;
-using Achates.Providers.Models;
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json;
 
-if (args.Length == 0)
+const string DefaultUrl = "ws://localhost:5000/ws";
+
+var url = GetOption(args, "--url") ?? DefaultUrl;
+var channel = GetOption(args, "--channel") ?? "console";
+var peer = GetOption(args, "--peer") ?? "local";
+
+if (args is ["help" or "--help" or "-h", ..])
 {
     PrintUsage();
-    return 1;
+    return 0;
 }
 
-using var httpClient = new HttpClient();
-var command = args[0].ToLowerInvariant();
+var wsUrl = $"{url}?channel={Uri.EscapeDataString(channel)}&peer={Uri.EscapeDataString(peer)}";
+
+using var cts = new CancellationTokenSource();
+Console.CancelKeyPress += (_, e) =>
+{
+    e.Cancel = true;
+    cts.Cancel();
+};
+
+using var ws = new ClientWebSocket();
 
 try
 {
-    return await (command switch
-    {
-        "models" => ListModelsAsync(args),
-        "chat" => RunChatAsync(args),
-        "agent" => RunAgentAsync(args),
-        "help" or "--help" or "-h" => Task.FromResult(PrintUsage()),
-        _ => Task.FromResult(PrintUnknown(command))
-    });
+    await ws.ConnectAsync(new Uri(wsUrl), cts.Token);
 }
-catch (HttpRequestException ex)
+catch (Exception ex)
 {
-    Console.Error.WriteLine($"HTTP error: {ex.Message}");
+    Console.Error.WriteLine($"Failed to connect to {url}: {ex.Message}");
+    Console.Error.WriteLine("Is the server running? Start it with: dotnet run --project src/Achates.Server -- --model <id>");
     return 1;
 }
-catch (OperationCanceledException)
+
+WriteHeader(url, channel, peer);
+
+// Read events from server in background
+var receiveTask = Task.Run(async () =>
 {
-    return 0;
+    var buffer = new byte[8192];
+    try
+    {
+        while (ws.State == WebSocketState.Open && !cts.Token.IsCancellationRequested)
+        {
+            var result = await ws.ReceiveAsync(buffer, cts.Token);
+            if (result.MessageType == WebSocketMessageType.Close)
+                break;
+
+            var json = Encoding.UTF8.GetString(buffer, 0, result.Count);
+            RenderEvent(json);
+        }
+    }
+    catch (OperationCanceledException) { }
+    catch (WebSocketException) { }
+}, cts.Token);
+
+// Send user input
+try
+{
+    while (!cts.Token.IsCancellationRequested && ws.State == WebSocketState.Open)
+    {
+        WritePrompt();
+        var input = await Task.Run(Console.ReadLine, cts.Token);
+
+        if (input is null || string.Equals(input.Trim(), "/exit", StringComparison.OrdinalIgnoreCase))
+            break;
+
+        if (string.IsNullOrWhiteSpace(input))
+            continue;
+
+        var bytes = Encoding.UTF8.GetBytes(input);
+        await ws.SendAsync(bytes, WebSocketMessageType.Text, true, cts.Token);
+    }
+}
+catch (OperationCanceledException) { }
+
+if (ws.State == WebSocketState.Open)
+{
+    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
 }
 
+await receiveTask;
+return 0;
+
 // ---------------------------------------------------------------------------
-// Commands
+// Rendering
 // ---------------------------------------------------------------------------
 
-async Task<int> ListModelsAsync(string[] args)
+static void RenderEvent(string json)
 {
-    var filter = GetOption(args, "--filter");
-    var provider = GetProvider(args, httpClient);
-    var models = await provider.GetModelsAsync();
+    const string Reset = "\x1b[0m";
+    const string Dim = "\x1b[2m";
+    const string Yellow = "\x1b[33m";
+    const string Green = "\x1b[32m";
+    const string Red = "\x1b[31m";
 
-    var filtered = filter is not null
-        ? models.Where(m => m.Id.Contains(filter, StringComparison.OrdinalIgnoreCase)
-                            || m.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
-            .ToList()
-        : models;
+    try
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var type = root.GetProperty("type").GetString();
 
-    Console.WriteLine($"Found {filtered.Count} models.");
+        switch (type)
+        {
+            case "text.delta":
+                Console.Write(root.GetProperty("delta").GetString());
+                break;
+
+            case "text.end":
+                Console.WriteLine();
+                break;
+
+            case "thinking.delta":
+                Console.Write($"{Dim}{root.GetProperty("delta").GetString()}{Reset}");
+                break;
+
+            case "tool.start":
+                var tool = root.GetProperty("tool").GetString();
+                var arguments = root.GetProperty("arguments");
+                var argsStr = string.Join(", ",
+                    arguments.EnumerateObject().Select(p => $"{p.Name}={p.Value}"));
+                Console.WriteLine($"{Yellow}  {tool}({argsStr}){Reset}");
+                break;
+
+            case "tool.end":
+                var result = root.GetProperty("result").GetString();
+                var isError = root.GetProperty("error").GetBoolean();
+                var color = isError ? Red : Green;
+                Console.WriteLine($"{color}  → {result}{Reset}");
+                Console.WriteLine();
+                break;
+
+            case "message.end":
+                if (root.TryGetProperty("usage", out var usage) &&
+                    usage.ValueKind != JsonValueKind.Null)
+                {
+                    var input = usage.GetProperty("input").GetInt32();
+                    var output = usage.GetProperty("output").GetInt32();
+                    var cost = usage.GetProperty("cost").GetDecimal();
+                    Console.WriteLine($"{Dim}[{input} in / {output} out | ${cost:F6}]{Reset}");
+                    Console.WriteLine();
+                }
+                break;
+        }
+    }
+    catch
+    {
+        // Malformed event — ignore
+    }
+}
+
+static void WritePrompt()
+{
+    Console.Write("\x1b[1m\x1b[36m> \x1b[0m");
+}
+
+static void WriteHeader(string url, string channel, string peer)
+{
+    const string Bold = "\x1b[1m";
+    const string Dim = "\x1b[2m";
+    const string Reset = "\x1b[0m";
+
+    Console.WriteLine($"{Bold}Achates Console{Reset}");
+    Console.WriteLine($"Connected to {url}");
+    Console.WriteLine($"Session: {channel}:{peer}");
+    Console.WriteLine($"Type {Dim}/exit{Reset} to quit.");
     Console.WriteLine();
-    Console.WriteLine($"{"ID",-42} {"Name",-32} {"Context",10}  $/M prompt");
-    Console.WriteLine($"{new string('-', 42)} {new string('-', 32)} {new string('-', 10)}  {new string('-', 10)}");
-
-    foreach (var model in filtered)
-    {
-        Console.WriteLine($"{model.Id,-42} {Truncate(model.Name, 32),-32} {model.ContextWindow,10}  {FormatCost(model.Cost.Prompt)}");
-    }
-
-    return 0;
 }
 
-async Task<int> RunChatAsync(string[] args) =>
-    await RunWithModel(args, ChatCommand.RunAsync);
-
-async Task<int> RunAgentAsync(string[] args) =>
-    await RunWithModel(args, AgentCommand.RunAsync);
-
-async Task<int> RunWithModel(string[] args, Func<Model, string?, double?, Task<int>> run)
+static void PrintUsage()
 {
-    var modelId = GetOption(args, "--model");
-    if (modelId is null)
-    {
-        Console.Error.WriteLine("Error: --model is required.");
-        return 1;
-    }
+    Console.WriteLine("""
+        Usage: achates [options]
 
-    var provider = GetProvider(args, httpClient);
-    var models = await provider.GetModelsAsync();
-    var model = models.FirstOrDefault(m => m.Id.Equals(modelId, StringComparison.OrdinalIgnoreCase));
-    if (model is null)
-    {
-        Console.Error.WriteLine($"Error: Model '{modelId}' not found.");
-        return 1;
-    }
+        Connects to a running Achates server via WebSocket.
 
-    var systemPrompt = GetOption(args, "--system");
-    var temperature = GetOption(args, "--temperature") is { } t
-        ? double.Parse(t, CultureInfo.InvariantCulture)
-        : (double?)null;
-
-    return await run(model, systemPrompt, temperature);
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-static IModelProvider GetProvider(string[] args, HttpClient httpClient)
-{
-    var id = GetOption(args, "--provider") ?? "openrouter";
-
-    var provider = ModelProviders.Create(id);
-    if (provider is null)
-    {
-        Console.Error.WriteLine($"Error: Unknown provider '{id}'.");
-        Environment.Exit(1);
-    }
-
-    var apiKey = GetOption(args, "--key") ?? Environment.GetEnvironmentVariable(provider.EnvironmentKey);
-    if (string.IsNullOrWhiteSpace(apiKey))
-    {
-        Console.Error.WriteLine($"Error: No API key provided. Use --key or set {provider.EnvironmentKey}.");
-        Environment.Exit(1);
-    }
-
-    provider.Key = apiKey;
-    provider.HttpClient = httpClient;
-
-    return provider;
+        Options:
+          --url <ws-url>       Server WebSocket URL (default: ws://localhost:5000/ws)
+          --channel <id>       Channel identifier (default: console)
+          --peer <id>          Peer identifier (default: local)
+        """);
 }
 
 static string? GetOption(string[] args, string name)
@@ -127,43 +190,7 @@ static string? GetOption(string[] args, string name)
     for (var i = 0; i < args.Length - 1; i++)
     {
         if (string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase))
-        {
             return args[i + 1];
-        }
     }
     return null;
-}
-
-static string FormatCost(decimal perTokenRate)
-{
-    return perTokenRate == 0 ? "free" : $"${perTokenRate * 1_000_000m:F2}";
-}
-
-static string Truncate(string value, int maxLength) =>
-    value.Length <= maxLength ? value : string.Concat(value.AsSpan(0, maxLength - 1), "…");
-
-static int PrintUsage()
-{
-    Console.WriteLine("""
-        Usage: achates <command> [options]
-
-        Commands:
-          models [--filter <text>]                          List available models
-          chat --model <id> [--system <prompt>] [--temperature <value>]
-                                                            Start interactive chat
-          agent --model <id> [--system <prompt>] [--temperature <value>]
-                                                            Start agent chat (with tool loop)
-
-        Options:
-          --provider <id>    Provider to use (default: openrouter)
-          --key <key>        API key (falls back to provider environment variable)
-        """);
-    return 0;
-}
-
-static int PrintUnknown(string command)
-{
-    Console.Error.WriteLine($"Unknown command: {command}");
-    Console.Error.WriteLine("Run 'achates help' for usage.");
-    return 1;
 }

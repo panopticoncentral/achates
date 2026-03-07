@@ -2,7 +2,7 @@ using System.Text.Json;
 using Achates.Agent.Tools;
 using Achates.Providers.Completions.Content;
 
-namespace Achates.Console.Tools;
+namespace Achates.Server.Tools;
 
 internal sealed class WeatherTool : AgentTool
 {

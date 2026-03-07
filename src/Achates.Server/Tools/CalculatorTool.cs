@@ -1,27 +1,28 @@
+using System.Data;
 using System.Text.Json;
 using Achates.Agent.Tools;
 using Achates.Providers.Completions.Content;
 
-namespace Achates.Console.Tools;
+namespace Achates.Server.Tools;
 
-internal sealed class TimeTool : AgentTool
+internal sealed class CalculatorTool : AgentTool
 {
     private static readonly JsonElement Schema = JsonDocument.Parse("""
         {
             "type": "object",
             "properties": {
-                "timezone": {
+                "expression": {
                     "type": "string",
-                    "description": "IANA timezone (e.g., 'America/New_York', 'Asia/Tokyo'). Defaults to local time."
+                    "description": "A mathematical expression to evaluate (e.g., '2 + 3 * 4', '100 / 7')."
                 }
             },
-            "required": []
+            "required": ["expression"]
         }
         """).RootElement.Clone();
 
-    public override string Name => "get_current_time";
-    public override string Description => "Get the current date and time, optionally in a specific timezone.";
-    public override string Label => "Current Time";
+    public override string Name => "calculate";
+    public override string Description => "Evaluate a mathematical expression.";
+    public override string Label => "Calculator";
     public override JsonElement Parameters => Schema;
 
     public override Task<AgentToolResult> ExecuteAsync(
@@ -30,16 +31,15 @@ internal sealed class TimeTool : AgentTool
         CancellationToken cancellationToken = default,
         Func<AgentToolResult, Task>? onProgress = null)
     {
-        var tzName = GetString(arguments, "timezone");
-        var tz = tzName is not null
-            ? TimeZoneInfo.FindSystemTimeZoneById(tzName)
-            : TimeZoneInfo.Local;
+        var expr = GetString(arguments, "expression")
+                   ?? throw new ArgumentException("Missing 'expression' argument.");
 
-        var now = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
+        var table = new DataTable();
+        var result = table.Compute(expr, null);
 
         return Task.FromResult(new AgentToolResult
         {
-            Content = [new CompletionTextContent { Text = now.ToString("yyyy-MM-dd HH:mm:ss zzz") }],
+            Content = [new CompletionTextContent { Text = result?.ToString() ?? "null" }],
         });
     }
 

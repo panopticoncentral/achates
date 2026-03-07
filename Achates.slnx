@@ -2,6 +2,8 @@
   <Folder Name="/src/">
     <Project Path="src/Achates.Providers/Achates.Providers.csproj" />
     <Project Path="src/Achates.Agent/Achates.Agent.csproj" />
+    <Project Path="src/Achates.Channels/Achates.Channels.csproj" />
+<Project Path="src/Achates.Server/Achates.Server.csproj" />
     <Project Path="src/Achates.Console/Achates.Console.csproj" />
   </Folder>
 </Solution>
