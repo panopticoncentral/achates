@@ -4,16 +4,10 @@ namespace Achates.Channels;
 /// A channel that reads from stdin and writes to stdout.
 /// The simplest possible channel — useful for development and testing.
 /// </summary>
-public sealed class ConsoleChannel : IChannel
+public sealed class ConsoleChannel(string prompt = "> ") : IChannel
 {
-    private readonly string _prompt;
     private Task? _readLoop;
     private CancellationTokenSource? _cts;
-
-    public ConsoleChannel(string prompt = "> ")
-    {
-        _prompt = prompt;
-    }
 
     public string Id => "console";
     public string DisplayName => "Console";
@@ -54,7 +48,7 @@ public sealed class ConsoleChannel : IChannel
     /// </summary>
     public void WritePrompt()
     {
-        Console.Write(_prompt);
+        Console.Write(prompt);
     }
 
     private async Task ReadLoopAsync(CancellationToken cancellationToken)
@@ -65,13 +59,19 @@ public sealed class ConsoleChannel : IChannel
             var line = await Task.Run(Console.ReadLine, cancellationToken);
 
             if (line is null)
+            {
                 break;
+            }
 
             if (string.Equals(line.Trim(), "/exit", StringComparison.OrdinalIgnoreCase))
+            {
                 break;
+            }
 
             if (string.IsNullOrWhiteSpace(line))
+            {
                 continue;
+            }
 
             if (MessageReceived is { } handler)
             {

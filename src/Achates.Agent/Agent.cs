@@ -97,7 +97,9 @@ public sealed class Agent
     public AgentEventStream PromptAsync(IReadOnlyList<UserMessage> messages)
     {
         if (_model is null)
+        {
             throw new InvalidOperationException("Model must be set before prompting.");
+        }
 
         _state = AgentState.Running;
         _lastError = null;
@@ -136,7 +138,9 @@ public sealed class Agent
     public AgentEventStream ContinueAsync()
     {
         if (_model is null)
+        {
             throw new InvalidOperationException("Model must be set before continuing.");
+        }
 
         _state = AgentState.Running;
         _lastError = null;
@@ -177,7 +181,10 @@ public sealed class Agent
     /// </summary>
     public void Steer(UserMessage message)
     {
-        lock (_queueLock) _steeringQueue.Enqueue(message);
+        lock (_queueLock)
+        {
+            _steeringQueue.Enqueue(message);
+        }
     }
 
     /// <summary>
@@ -185,12 +192,19 @@ public sealed class Agent
     /// </summary>
     public void FollowUp(UserMessage message)
     {
-        lock (_queueLock) _followUpQueue.Enqueue(message);
+        lock (_queueLock)
+        {
+            _followUpQueue.Enqueue(message);
+        }
     }
 
     public bool HasQueuedMessages
     {
-        get { lock (_queueLock) return _steeringQueue.Count > 0 || _followUpQueue.Count > 0; }
+        get { lock (_queueLock)
+            {
+                return _steeringQueue.Count > 0 || _followUpQueue.Count > 0;
+            }
+        }
     }
 
     public void ClearQueues()
@@ -215,7 +229,9 @@ public sealed class Agent
     public async Task WaitForIdleAsync()
     {
         if (_runningLoop is not null)
+        {
             await _runningLoop.ConfigureAwait(false);
+        }
     }
 
     // --- Event subscription ---
@@ -266,7 +282,11 @@ public sealed class Agent
     {
         lock (_queueLock)
         {
-            if (_steeringQueue.Count == 0) return [];
+            if (_steeringQueue.Count == 0)
+            {
+                return [];
+            }
+
             var result = _steeringQueue.ToList();
             _steeringQueue.Clear();
             return result;
@@ -277,7 +297,11 @@ public sealed class Agent
     {
         lock (_queueLock)
         {
-            if (_followUpQueue.Count == 0) return [];
+            if (_followUpQueue.Count == 0)
+            {
+                return [];
+            }
+
             var result = _followUpQueue.ToList();
             _followUpQueue.Clear();
             return result;

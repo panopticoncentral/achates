@@ -6,29 +6,21 @@ using Achates.Agent.Messages;
 using Achates.Providers.Completions;
 using Achates.Providers.Completions.Content;
 using Achates.Providers.Completions.Events;
+using Achates.Configuration;
 using Achates.Server;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Bind config
-var serverOptions = new ServerOptions();
-builder.Configuration.GetSection("Achates").Bind(serverOptions);
+// Load user config (~/.achates/config.yaml)
+var userConfig = ConfigLoader.Load();
 
-// Allow CLI overrides: --model, --provider, --system
-if (builder.Configuration["model"] is { Length: > 0 } model)
-    serverOptions.Model = model;
-if (builder.Configuration["provider"] is { Length: > 0 } provider)
-    serverOptions.Provider = provider;
-if (builder.Configuration["system"] is { Length: > 0 } system)
-    serverOptions.SystemPrompt = system;
-
-if (string.IsNullOrEmpty(serverOptions.Model))
+if (string.IsNullOrEmpty(userConfig.Model))
 {
-    Console.Error.WriteLine("Error: Model is required. Set Achates:Model in config or pass --model <id>.");
+    Console.Error.WriteLine("Error: Model is required. Set model in ~/.achates/config.yaml.");
     return 1;
 }
 
-builder.Services.AddSingleton(serverOptions);
+builder.Services.AddSingleton(userConfig);
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<GatewayService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GatewayService>());
@@ -38,27 +30,6 @@ app.UseWebSockets();
 
 // --- Health check ---
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-
-// --- REST: send a message and get the complete response ---
-app.MapPost("/chat", async (ChatRequest request, GatewayService gatewayService, CancellationToken ct) =>
-{
-    var gateway = gatewayService.Gateway;
-    var key = new SessionKey(request.Channel ?? "api", request.Peer ?? "default");
-    var agent = gateway.GetOrCreateSession(key);
-
-    var stream = agent.PromptAsync(request.Message);
-    var responseText = "";
-
-    await foreach (var evt in stream.WithCancellation(ct))
-    {
-        if (evt is MessageStreamEvent { Inner: CompletionTextDeltaEvent delta })
-        {
-            responseText += delta.Delta;
-        }
-    }
-
-    return Results.Ok(new ChatResponse(responseText.Trim(), key.ToString()));
-});
 
 // --- WebSocket: stream events in real time ---
 app.Map("/ws", async (HttpContext context, GatewayService gatewayService) =>
@@ -82,11 +53,15 @@ app.Map("/ws", async (HttpContext context, GatewayService gatewayService) =>
     {
         var result = await ws.ReceiveAsync(buffer, cts.Token);
         if (result.MessageType == WebSocketMessageType.Close)
+        {
             break;
+        }
 
         var text = Encoding.UTF8.GetString(buffer, 0, result.Count);
         if (string.IsNullOrWhiteSpace(text))
+        {
             continue;
+        }
 
         var stream = agent.PromptAsync(text);
 
@@ -110,8 +85,6 @@ app.Map("/ws", async (HttpContext context, GatewayService gatewayService) =>
 app.Run();
 return 0;
 
-// --- Request/response types ---
-
 static string? SerializeEvent(AgentEvent evt)
 {
     return evt switch
@@ -122,14 +95,14 @@ static string? SerializeEvent(AgentEvent evt)
             JsonSerializer.Serialize(new { type = "text.end" }),
         MessageStreamEvent { Inner: CompletionThinkingDeltaEvent e } =>
             JsonSerializer.Serialize(new { type = "thinking.delta", delta = e.Delta }),
-        MessageEndEvent { Message: AssistantMessage a } when a.StopReason is not CompletionStopReason.ToolUse =>
+        MessageEndEvent { Message: AssistantMessage { StopReason: not CompletionStopReason.ToolUse } a } =>
             JsonSerializer.Serialize(new
             {
                 type = "message.end",
-                usage = a.Usage is { } u ? new { u.Input, u.Output, cost = u.Cost.Total } : null,
+                usage = a.Usage is { } u ? new { input = u.Input, output = u.Output, cost = u.Cost.Total } : null,
             }),
         ToolStartEvent e =>
-            JsonSerializer.Serialize(new { type = "tool.start", tool = e.ToolName, e.Arguments }),
+            JsonSerializer.Serialize(new { type = "tool.start", tool = e.ToolName, arguments = e.Arguments }),
         ToolEndEvent e =>
             JsonSerializer.Serialize(new
             {
@@ -138,9 +111,9 @@ static string? SerializeEvent(AgentEvent evt)
                 result = string.Join("\n", e.Result.Content.OfType<CompletionTextContent>().Select(c => c.Text)),
                 error = e.IsError,
             }),
+        AgentEndEvent =>
+            JsonSerializer.Serialize(new { type = "done" }),
         _ => null,
     };
 }
 
-record ChatRequest(string Message, string? Channel = null, string? Peer = null);
-record ChatResponse(string Reply, string Session);

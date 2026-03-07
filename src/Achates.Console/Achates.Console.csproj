@@ -8,4 +8,12 @@
     <RootNamespace>Achates.Console</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Spectre.Console" Version="0.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Achates.Configuration\Achates.Configuration.csproj" />
+  </ItemGroup>
+
 </Project>

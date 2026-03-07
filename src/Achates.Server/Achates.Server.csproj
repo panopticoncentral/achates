@@ -10,6 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Achates.Agent\Achates.Agent.csproj" />
     <ProjectReference Include="..\Achates.Channels\Achates.Channels.csproj" />
+    <ProjectReference Include="..\Achates.Configuration\Achates.Configuration.csproj" />
   </ItemGroup>
 
 </Project>

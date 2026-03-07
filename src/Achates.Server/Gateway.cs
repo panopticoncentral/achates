@@ -13,11 +13,10 @@ namespace Achates.Server;
 /// The gateway wires channels to agents. It manages channel lifecycle,
 /// routes inbound messages to per-session agents, and delivers responses back.
 /// </summary>
-public sealed class Gateway : IAsyncDisposable
+public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
 {
     private readonly List<IChannel> _channels = [];
     private readonly ConcurrentDictionary<SessionKey, Agent.Agent> _sessions = new();
-    private readonly GatewayOptions _options;
     private readonly CancellationTokenSource _cts = new();
 
     /// <summary>
@@ -25,11 +24,6 @@ public sealed class Gateway : IAsyncDisposable
     /// Useful for logging, rendering, or broadcasting.
     /// </summary>
     public event Func<SessionKey, AgentEvent, Task>? AgentEvent;
-
-    public Gateway(GatewayOptions options)
-    {
-        _options = options;
-    }
 
     public IReadOnlyList<IChannel> Channels => _channels;
 
@@ -83,10 +77,10 @@ public sealed class Gateway : IAsyncDisposable
     {
         return new Agent.Agent(new AgentOptions
         {
-            Model = _options.Model,
-            SystemPrompt = _options.SystemPrompt,
-            Tools = _options.Tools,
-            CompletionOptions = _options.CompletionOptions,
+            Model = options.Model,
+            SystemPrompt = options.SystemPrompt,
+            Tools = options.Tools,
+            CompletionOptions = options.CompletionOptions,
         });
     }
 
