@@ -36,6 +36,12 @@ public sealed record AgentOptions
     public CompletionOptions? CompletionOptions { get; init; }
 
     /// <summary>
+    /// Host-specific metadata (workspace path, user info, etc.).
+    /// Available to tools and event handlers but not sent to the model.
+    /// </summary>
+    public IReadOnlyDictionary<string, object>? Metadata { get; init; }
+
+    /// <summary>
     /// Converts agent messages to provider-level completion messages.
     /// Override this to filter, transform, or inject messages before they reach the model.
     /// Default: straightforward mapping of User/Assistant/ToolResult messages.

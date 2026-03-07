@@ -18,6 +18,7 @@ public sealed class Agent
     private readonly Queue<UserMessage> _steeringQueue = new();
     private readonly Queue<UserMessage> _followUpQueue = new();
     private readonly object _queueLock = new();
+    private readonly IReadOnlyDictionary<string, object>? _metadata;
 
     private Model? _model;
     private string? _systemPrompt;
@@ -29,6 +30,8 @@ public sealed class Agent
 
     private CancellationTokenSource? _cts;
     private Task? _runningLoop;
+    private AgentState _state = AgentState.Idle;
+    private string? _lastError;
 
     public Agent(AgentOptions? options = null)
     {
@@ -42,6 +45,7 @@ public sealed class Agent
         _convertToLlm = options.ConvertToLlm;
         _transformContext = options.TransformContext;
         _completionProvider = options.CompletionProvider;
+        _metadata = options.Metadata;
     }
 
     // --- State access ---
@@ -51,6 +55,8 @@ public sealed class Agent
     public string? SystemPrompt => _systemPrompt;
     public IReadOnlyList<AgentTool> Tools => _tools;
     public bool IsRunning => _runningLoop is { IsCompleted: false };
+    public AgentState State => _state;
+    public string? LastError => _lastError;
 
     // --- State mutation ---
 
@@ -58,6 +64,12 @@ public sealed class Agent
     public void SetSystemPrompt(string? prompt) => _systemPrompt = prompt;
     public void SetTools(IReadOnlyList<AgentTool> tools) => _tools = tools;
     public void SetCompletionOptions(CompletionOptions? options) => _completionOptions = options;
+
+    /// <summary>
+    /// Get a metadata value by key.
+    /// </summary>
+    public T? GetMetadata<T>(string key) where T : class =>
+        _metadata is not null && _metadata.TryGetValue(key, out var value) ? value as T : null;
 
     public void ClearMessages()
     {
@@ -87,14 +99,32 @@ public sealed class Agent
         if (_model is null)
             throw new InvalidOperationException("Model must be set before prompting.");
 
+        _state = AgentState.Running;
+        _lastError = null;
+
         var stream = new AgentEventStream(NotifySubscribersAsync);
         var config = BuildLoopConfig();
         _cts = new CancellationTokenSource();
 
         _runningLoop = Task.Run(async () =>
         {
-            await AgentLoop.RunAsync(messages, _messages, config, stream, _cts.Token)
-                .ConfigureAwait(false);
+            try
+            {
+                await AgentLoop.RunAsync(messages, _messages, config, stream, _cts.Token)
+                    .ConfigureAwait(false);
+                _state = AgentState.Idle;
+            }
+            catch (OperationCanceledException)
+            {
+                _state = AgentState.Idle;
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _state = AgentState.Error;
+                _lastError = ex.Message;
+                throw;
+            }
         });
 
         return stream;
@@ -108,14 +138,32 @@ public sealed class Agent
         if (_model is null)
             throw new InvalidOperationException("Model must be set before continuing.");
 
+        _state = AgentState.Running;
+        _lastError = null;
+
         var stream = new AgentEventStream(NotifySubscribersAsync);
         var config = BuildLoopConfig();
         _cts = new CancellationTokenSource();
 
         _runningLoop = Task.Run(async () =>
         {
-            await AgentLoop.ContinueAsync(_messages, config, stream, _cts.Token)
-                .ConfigureAwait(false);
+            try
+            {
+                await AgentLoop.ContinueAsync(_messages, config, stream, _cts.Token)
+                    .ConfigureAwait(false);
+                _state = AgentState.Idle;
+            }
+            catch (OperationCanceledException)
+            {
+                _state = AgentState.Idle;
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _state = AgentState.Error;
+                _lastError = ex.Message;
+                throw;
+            }
         });
 
         return stream;
