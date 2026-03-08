@@ -24,6 +24,8 @@ public sealed class GatewayService(
     public Gateway Gateway =>
         _gateway ?? throw new InvalidOperationException("Gateway has not started yet.");
 
+    public WebSocketChannel WebSocketChannel { get; } = new();
+
     public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -32,11 +34,13 @@ public sealed class GatewayService(
 
         AgentTool[] tools = [new TimeTool(), new CalculatorTool(), new WeatherTool()];
 
+        var activeTools = model.Parameters.HasFlag(ModelParameters.Tools) ? tools : null;
+
         var gatewayOptions = new GatewayOptions
         {
             Model = model,
-            SystemPrompt = config.SystemPrompt,
-            Tools = model.Parameters.HasFlag(ModelParameters.Tools) ? tools : null,
+            SystemPrompt = SystemPrompt.Build(activeTools),
+            Tools = activeTools,
             CompletionOptions = new CompletionOptions
             {
                 Temperature = config.Completion?.Temperature,
@@ -48,6 +52,7 @@ public sealed class GatewayService(
         };
 
         _gateway = new Gateway(gatewayOptions);
+        _gateway.AddChannel(WebSocketChannel);
 
         var telegramToken = config.Telegram?.Token
             ?? Environment.GetEnvironmentVariable("TELEGRAM_BOT_TOKEN");

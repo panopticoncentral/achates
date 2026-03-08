@@ -4,7 +4,6 @@ public sealed class AchatesConfig
 {
     public string? Provider { get; set; }
     public string? Model { get; set; }
-    public string? SystemPrompt { get; set; }
     public CompletionConfig? Completion { get; set; }
     public ConsoleConfig? Console { get; set; }
     public TelegramConfig? Telegram { get; set; }

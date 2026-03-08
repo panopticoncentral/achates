@@ -1,14 +1,10 @@
 using System.Net.WebSockets;
-using Achates.Configuration;
 using Achates.Console;
 using Spectre.Console;
 
-const string DefaultUrl = "ws://localhost:5000/ws";
-
-var userConfig = ConfigLoader.Load();
-var url = GetOption(args, "--url") ?? userConfig.Console?.Url ?? DefaultUrl;
-var channelId = GetOption(args, "--channel") ?? userConfig.Console?.Channel ?? "console";
-var peer = GetOption(args, "--peer") ?? userConfig.Console?.Peer ?? "local";
+var url = GetOption(args, "--url") ?? "ws://localhost:5000/ws";
+var channelId = GetOption(args, "--channel") ?? "console";
+var peer = GetOption(args, "--peer") ?? "local";
 
 if (args is ["help" or "--help" or "-h", ..])
 {
