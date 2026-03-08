@@ -1,4 +1,5 @@
 using Achates.Agent.Tools;
+using Achates.Channels;
 using Achates.Configuration;
 using Achates.Providers;
 using Achates.Providers.Completions;
@@ -14,6 +15,7 @@ namespace Achates.Server;
 public sealed class GatewayService(
     AchatesConfig config,
     IHttpClientFactory httpClientFactory,
+    ILoggerFactory loggerFactory,
     ILogger<GatewayService> logger)
     : IHostedLifecycleService, IAsyncDisposable
 {
@@ -46,6 +48,19 @@ public sealed class GatewayService(
         };
 
         _gateway = new Gateway(gatewayOptions);
+
+        var telegramToken = config.Telegram?.Token
+            ?? Environment.GetEnvironmentVariable("TELEGRAM_BOT_TOKEN");
+
+        if (!string.IsNullOrEmpty(telegramToken))
+        {
+            var telegramChannel = new TelegramChannel(
+                telegramToken,
+                config.Telegram?.AllowedChatIds,
+                loggerFactory.CreateLogger<TelegramChannel>());
+            _gateway.AddChannel(telegramChannel);
+        }
+
         await _gateway.StartAsync(cancellationToken);
 
         logger.LogInformation("Gateway started with model {Model} ({Name})", model.Id, model.Name);
