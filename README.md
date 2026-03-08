@@ -37,8 +37,7 @@ Console (WebSocket client)
 
 - **`IChannel`** — Start/Stop lifecycle, `MessageReceived` event, `SendAsync`. One implementation per platform.
 - **`ChannelMessage`** — Normalized message: `ChannelId`, `PeerId`, `Text`, `Timestamp`.
-- **`Gateway`** — Owns channels and sessions. Routes messages, subscribes to agent events.
-- **`SessionKey`** — `(ChannelId, PeerId)` tuple that maps to a persistent agent conversation.
+- **`Gateway`** — Owns channels and a single shared agent. Routes messages, subscribes to agent events.
 - **`Agent`** — Stateful conversation thread. Manages message history, tool execution, mid-run steering.
 - **`AgentTool`** — Base class for tools the agent can invoke. Subclass and implement `ExecuteAsync`.
 - **`IModelProvider`** — Abstraction over LLM APIs. Currently implemented by `OpenRouterProvider`.

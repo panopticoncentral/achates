@@ -41,10 +41,7 @@ app.Map("/ws", async (HttpContext context, GatewayService gatewayService) =>
     }
 
     var ws = await context.WebSockets.AcceptWebSocketAsync();
-    var key = new SessionKey(
-        context.Request.Query["channel"].FirstOrDefault() ?? "ws",
-        context.Request.Query["peer"].FirstOrDefault() ?? "default");
-    var agent = gatewayService.Gateway.GetOrCreateSession(key);
+    var agent = gatewayService.Gateway.Agent;
     var cts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
 
     // Read messages from the client, stream events back

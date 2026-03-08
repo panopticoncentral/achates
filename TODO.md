@@ -18,7 +18,7 @@
 
 ## Sessions
 
-- [ ] **Session persistence** — Save/load agent message history to disk or SQLite, keyed by `SessionKey`. Conversations should survive restarts.
+- [ ] **Session persistence** — Save/load agent message history to disk or SQLite. Conversations should survive restarts.
 - [ ] **Session expiry/cleanup** — TTL or max message count to bound memory and storage.
 - [ ] **Session context windowing** — Prune old messages when approaching the model's context limit.
 
