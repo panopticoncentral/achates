@@ -63,8 +63,8 @@ Console (standalone, no config dependency)
 ### Tool System (`AgentTool` subclasses)
 - `AgentTool` is the preferred pattern (class-based). Subclass and implement `Name`, `Description`, `Parameters` (JSON Schema as `JsonElement`), `ExecuteAsync()`.
 - Returns `AgentToolResult` with `Content` (list of `CompletionContent`) and optional `Details` (for UI display).
-- Tools live in `src/Achates.Server/Tools/`. Current tools: `TimeTool`, `CalculatorTool`, `WeatherTool`.
-- Tool schema pattern: static `JsonElement` parsed from raw JSON string, `.RootElement.Clone()`.
+- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`.
+- Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
 
 ### Channel System (`Achates.Channels`)
 - `IChannel` — `SendAsync()`, `StartAsync()`, `StopAsync()`, `MessageReceived` event

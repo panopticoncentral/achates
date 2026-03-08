@@ -24,6 +24,15 @@
 - [ ] **Session context windowing** — Prune old messages when approaching the model's context limit.
 - [ ] **Thread bindings** — Associate sessions with platform threads (Slack threads, Discord threads, Telegram reply chains). OpenClaw supports idle timeout, max age, and per-channel thread policies.
 
+## Session Tool
+
+- [ ] **Usage tracking** — Token counts (input/output) and estimated cost per session.
+- [ ] **Cache metrics** — Prompt cache hit rate and cached token count.
+- [ ] **Context utilization** — Show current token usage vs. model context window.
+- [ ] **Session info** — Session key, last activity timestamp, compaction count (once per-peer sessions exist).
+- [ ] **Model override** — Accept a `model` parameter to switch the active model mid-conversation.
+- [ ] **User timezone detection** — Detect 12h/24h preference from OS settings (macOS `defaults read`, etc.).
+
 ## Skills / Tools
 
 - [ ] **Skills directory** — Load tool definitions from a `skills/` directory (markdown + code, like OpenClaw). Discoverable, configurable, filterable.

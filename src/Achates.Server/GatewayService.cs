@@ -32,7 +32,7 @@ public sealed class GatewayService(
     {
         var model = await ResolveModelAsync(cancellationToken);
 
-        AgentTool[] tools = [new TimeTool(), new CalculatorTool(), new WeatherTool()];
+        AgentTool[] tools = [new SessionTool(model)];
 
         var activeTools = model.Parameters.HasFlag(ModelParameters.Tools) ? tools : null;
 
