@@ -18,7 +18,7 @@
 
 ## Sessions
 
-- [ ] **Per-peer sessions** — Each channel+peer pair should get its own conversation history, not a shared agent. Currently all channels share one agent.
+- [x] **Per-peer sessions** — Each channel+peer pair gets its own agent instance with independent conversation history. Session key: `channelId:peerId`.
 - [ ] **Session persistence** — Save/load agent message history to disk or SQLite. Conversations should survive restarts.
 - [ ] **Session expiry/cleanup** — TTL or max message count to bound memory and storage.
 - [ ] **Session context windowing** — Prune old messages when approaching the model's context limit.

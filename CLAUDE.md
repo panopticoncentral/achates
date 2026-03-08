@@ -30,7 +30,7 @@ dotnet run --project src/Achates.Console -- --url ws://localhost:5000/ws
 src/
   Achates.Providers/     LLM provider abstraction + OpenRouter implementation
   Achates.Agent/         Stateful agent engine (messages, tools, event streaming)
-  Achates.Channels/      Channel interface + implementations (Console, Telegram, WebSocket)
+  Achates.Channels/      Channel interface + implementations (Telegram)
   Achates.Configuration/ YAML config loading (YamlDotNet, underscore naming)
   Achates.Server/        ASP.NET Core gateway service, tools, system prompt
   Achates.Console/       CLI WebSocket client (Spectre.Console)
@@ -69,10 +69,10 @@ Console (standalone, no config dependency)
 ### Channel System (`Achates.Channels`)
 - `IChannel` — `SendAsync()`, `StartAsync()`, `StopAsync()`, `MessageReceived` event
 - `ChannelMessage` — ChannelId, PeerId, Text, Timestamp
-- Implementations: `ConsoleChannel`, `TelegramChannel`, `WebSocketChannel`
+- Implementations: `TelegramChannel` (in Channels project), `WebSocketChannel` (in Server project)
 
 ### Gateway (`Achates.Server`)
-- `Gateway` — wires channels to a single shared agent. Routes inbound messages, accumulates text deltas, sends responses back.
+- `Gateway` — wires channels to per-peer agent sessions. Each `channelId:peerId` pair gets its own `Agent` instance (created on first message). Routes inbound messages, accumulates text deltas, sends responses back.
 - `GatewayService` — ASP.NET Core `IHostedLifecycleService`. Resolves model at startup, creates gateway, registers channels.
 - WebSocket endpoint: `/ws` (query params: `channel`, `peer`)
 - Health check: `GET /health`

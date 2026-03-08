@@ -1,32 +1,22 @@
+using System.Collections.Concurrent;
 using Achates.Agent;
 using Achates.Agent.Events;
 using Achates.Agent.Messages;
 using Achates.Channels;
 using Achates.Providers.Completions;
-using Achates.Providers.Completions.Content;
 using Achates.Providers.Completions.Events;
 
 namespace Achates.Server;
 
 /// <summary>
-/// The gateway wires channels to a single shared agent. It manages channel lifecycle,
-/// routes inbound messages to the agent, and delivers responses back.
+/// The gateway wires channels to per-peer agent sessions. Each unique channel+peer
+/// combination gets its own agent with independent conversation history.
 /// </summary>
 public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
 {
     private readonly List<IChannel> _channels = [];
+    private readonly ConcurrentDictionary<string, Agent.Agent> _sessions = new();
     private readonly CancellationTokenSource _cts = new();
-
-    /// <summary>
-    /// The shared agent that handles all conversations.
-    /// </summary>
-    public Agent.Agent Agent { get; } = new(new AgentOptions
-    {
-        Model = options.Model,
-        SystemPrompt = options.SystemPrompt,
-        Tools = options.Tools,
-        CompletionOptions = options.CompletionOptions,
-    });
 
     /// <summary>
     /// Raised for every agent event.
@@ -68,19 +58,34 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
             await channel.StopAsync();
         }
 
-        Agent.Abort();
+        foreach (var agent in _sessions.Values)
+        {
+            agent.Abort();
+        }
     }
+
+    private Agent.Agent GetOrCreateSession(string sessionKey) =>
+        _sessions.GetOrAdd(sessionKey, _ => new Agent.Agent(new AgentOptions
+        {
+            Model = options.Model,
+            SystemPrompt = options.SystemPrompt,
+            Tools = options.Tools,
+            CompletionOptions = options.CompletionOptions,
+        }));
 
     private async Task OnMessageReceivedAsync(IChannel channel, ChannelMessage message)
     {
+        var sessionKey = $"{message.ChannelId}:{message.PeerId}";
+        var agent = GetOrCreateSession(sessionKey);
+
         // If the agent is already running, queue as a follow-up
-        if (Agent.IsRunning)
+        if (agent.IsRunning)
         {
-            Agent.FollowUp(new UserMessage { Text = message.Text });
+            agent.FollowUp(new UserMessage { Text = message.Text });
             return;
         }
 
-        var stream = Agent.PromptAsync(message.Text);
+        var stream = agent.PromptAsync(message.Text);
         var responseText = "";
 
         await foreach (var evt in stream.WithCancellation(_cts.Token))

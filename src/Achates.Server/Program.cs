@@ -32,8 +32,9 @@ app.Map("/ws", async (HttpContext context, GatewayService gatewayService) =>
         return;
     }
 
+    var peer = context.Request.Query["peer"].FirstOrDefault();
     var ws = await context.WebSockets.AcceptWebSocketAsync();
-    await gatewayService.WebSocketChannel.AcceptAsync(ws, context.RequestAborted);
+    await gatewayService.WebSocketChannel.AcceptAsync(ws, peer, context.RequestAborted);
 });
 
 app.Run();

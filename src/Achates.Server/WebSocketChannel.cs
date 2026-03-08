@@ -52,9 +52,9 @@ public sealed class WebSocketChannel : IChannel
     /// Accept a WebSocket connection and process messages until it closes.
     /// Call this from the endpoint handler.
     /// </summary>
-    public async Task AcceptAsync(WebSocket ws, CancellationToken cancellationToken)
+    public async Task AcceptAsync(WebSocket ws, string? peerId = null, CancellationToken cancellationToken = default)
     {
-        var peerId = Interlocked.Increment(ref _nextPeerId).ToString();
+        peerId ??= Interlocked.Increment(ref _nextPeerId).ToString();
         _connections[peerId] = ws;
 
         try
