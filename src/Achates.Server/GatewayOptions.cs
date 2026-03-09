@@ -1,3 +1,4 @@
+using Achates.Agent;
 using Achates.Agent.Tools;
 using Achates.Providers.Completions;
 using Achates.Providers.Models;
@@ -25,4 +26,9 @@ public sealed record GatewayOptions
     /// Completion options (temperature, reasoning effort, etc.).
     /// </summary>
     public CompletionOptions? CompletionOptions { get; init; }
+
+    /// <summary>
+    /// Optional session store for persisting conversation history across restarts.
+    /// </summary>
+    public ISessionStore? SessionStore { get; init; }
 }

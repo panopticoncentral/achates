@@ -67,6 +67,14 @@ internal static class MessageConversion
                     });
                     break;
 
+                case SummaryMessage summary:
+                    result.Add(new CompletionUserTextMessage
+                    {
+                        Text = $"[Summary of earlier conversation]\n{summary.Summary}",
+                        Timestamp = summary.Timestamp,
+                    });
+                    break;
+
                 // Custom message types are silently skipped — they exist
                 // for the application layer, not the LLM.
             }

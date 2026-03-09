@@ -55,6 +55,11 @@ internal static class AgentLoop
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                // Compact if approaching context limit
+                await SessionCompactor.CompactIfNeededAsync(
+                    messages, config.Model, config.GetCompletions, cancellationToken)
+                    .ConfigureAwait(false);
+
                 // Inner loop: processes tool calls and steering
                 await RunTurnAsync(messages, config, stream, newMessages, cancellationToken)
                     .ConfigureAwait(false);
@@ -107,6 +112,11 @@ internal static class AgentLoop
             while (hasMore)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // Compact if approaching context limit
+                await SessionCompactor.CompactIfNeededAsync(
+                    messages, config.Model, config.GetCompletions, cancellationToken)
+                    .ConfigureAwait(false);
 
                 await RunTurnAsync(messages, config, stream, newMessages, cancellationToken)
                     .ConfigureAwait(false);

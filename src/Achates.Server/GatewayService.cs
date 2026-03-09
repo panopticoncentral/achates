@@ -36,6 +36,11 @@ public sealed class GatewayService(
 
         var activeTools = model.Parameters.HasFlag(ModelParameters.Tools) ? tools : null;
 
+        var sessionsPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".achates", "sessions");
+        var sessionStore = new FileSessionStore(sessionsPath);
+
         var gatewayOptions = new GatewayOptions
         {
             Model = model,
@@ -49,6 +54,7 @@ public sealed class GatewayService(
                     ? config.Completion?.ReasoningEffort ?? "medium"
                     : null,
             },
+            SessionStore = sessionStore,
         };
 
         _gateway = new Gateway(gatewayOptions);

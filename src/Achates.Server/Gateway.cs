@@ -64,19 +64,33 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
         }
     }
 
-    private Agent.Agent GetOrCreateSession(string sessionKey) =>
-        _sessions.GetOrAdd(sessionKey, _ => new Agent.Agent(new AgentOptions
+    private async Task<Agent.Agent> GetOrCreateSessionAsync(string sessionKey)
+    {
+        if (_sessions.TryGetValue(sessionKey, out var existing))
+            return existing;
+
+        IReadOnlyList<AgentMessage>? savedMessages = null;
+        if (options.SessionStore is { } store)
+        {
+            savedMessages = await store.LoadAsync(sessionKey, _cts.Token);
+        }
+
+        var agent = new Agent.Agent(new AgentOptions
         {
             Model = options.Model,
             SystemPrompt = options.SystemPrompt,
             Tools = options.Tools,
             CompletionOptions = options.CompletionOptions,
-        }));
+            Messages = savedMessages,
+        });
+
+        return _sessions.GetOrAdd(sessionKey, agent);
+    }
 
     private async Task OnMessageReceivedAsync(IChannel channel, ChannelMessage message)
     {
         var sessionKey = $"{message.ChannelId}:{message.PeerId}";
-        var agent = GetOrCreateSession(sessionKey);
+        var agent = await GetOrCreateSessionAsync(sessionKey);
 
         // If the agent is already running, queue as a follow-up
         if (agent.IsRunning)
@@ -128,6 +142,12 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
                 PeerId = message.PeerId,
                 Text = responseText.Trim(),
             }, _cts.Token);
+        }
+
+        // Persist the updated conversation history
+        if (options.SessionStore is { } sessionStore)
+        {
+            await sessionStore.SaveAsync(sessionKey, agent.Messages, _cts.Token);
         }
     }
 }

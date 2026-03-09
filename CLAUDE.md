@@ -59,6 +59,8 @@ Console (standalone, no config dependency)
 - `PromptAsync()` returns `AgentEventStream`; `ContinueAsync()` resumes after tool results
 - `Steer()` interrupts current tool execution; `FollowUp()` queues for after current turn
 - `AgentOptions` — model, system prompt, tools, completion options, metadata, context transform hooks
+- `ISessionStore` — interface for persisting conversation history by session key (Load/Save/Delete)
+- `SessionCompactor` — proactive compaction before each turn. Estimates tokens (uses provider's reported input count + char heuristic), summarizes oldest messages via LLM when over 80% of context window, falls back to truncation on failure. Preserves tool call/result pairs. `SummaryMessage` type holds the summary.
 
 ### Tool System (`AgentTool` subclasses)
 - `AgentTool` is the preferred pattern (class-based). Subclass and implement `Name`, `Description`, `Parameters` (JSON Schema as `JsonElement`), `ExecuteAsync()`.
@@ -72,7 +74,8 @@ Console (standalone, no config dependency)
 - Implementations: `TelegramChannel` (in Channels project), `WebSocketChannel` (in Server project)
 
 ### Gateway (`Achates.Server`)
-- `Gateway` — wires channels to per-peer agent sessions. Each `channelId:peerId` pair gets its own `Agent` instance (created on first message). Routes inbound messages, accumulates text deltas, sends responses back.
+- `Gateway` — wires channels to per-peer agent sessions. Each `channelId:peerId` pair gets its own `Agent` instance (created on first message). Routes inbound messages, accumulates text deltas, sends responses back. Persists sessions via `ISessionStore` after each completed response.
+- `FileSessionStore` — stores conversation history as JSON files in `~/.achates/sessions/{channelId}/{peerId}.json`.
 - `GatewayService` — ASP.NET Core `IHostedLifecycleService`. Resolves model at startup, creates gateway, registers channels.
 - WebSocket endpoint: `/ws` (query params: `channel`, `peer`)
 - Health check: `GET /health`

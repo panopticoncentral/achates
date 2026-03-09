@@ -19,10 +19,10 @@
 ## Sessions
 
 - [x] **Per-peer sessions** — Each channel+peer pair gets its own agent instance with independent conversation history. Session key: `channelId:peerId`.
-- [ ] **Session persistence** — Save/load agent message history to disk or SQLite. Conversations should survive restarts.
-- [ ] **Session expiry/cleanup** — TTL or max message count to bound memory and storage.
-- [ ] **Session context windowing** — Prune old messages when approaching the model's context limit.
-- [ ] **Thread bindings** — Associate sessions with platform threads (Slack threads, Discord threads, Telegram reply chains). OpenClaw supports idle timeout, max age, and per-channel thread policies.
+- [x] **Session persistence** — Save/load agent message history to disk or SQLite. Conversations should survive restarts.
+- [x] **Session compaction** — When conversation approaches the model's context limit, summarize older messages via the LLM and replace them with the summary. Preserve identifiers and key facts. Progressive fallback if summarization fails.
+- [ ] **Session reset** — Start a fresh session via `/new` command or idle timeout (e.g. no activity for N hours → next message starts fresh). Old session archived, user preferences carry over.
+- [ ] **Session cleanup** — TTL or max count to bound accumulated sessions on disk. Least urgent — files are small.
 
 ## Session Tool
 
