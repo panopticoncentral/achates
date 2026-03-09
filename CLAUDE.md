@@ -71,7 +71,7 @@ Console (standalone, no config dependency)
 ### Tool System (`AgentTool` subclasses)
 - `AgentTool` is the preferred pattern (class-based). Subclass and implement `Name`, `Description`, `Parameters` (JSON Schema as `JsonElement`), `ExecuteAsync()`.
 - Returns `AgentToolResult` with `Content` (list of `CompletionContent`) and optional `Details` (for UI display).
-- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`.
+- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`.
 - Tools can be shared (same instance for all sessions) or per-session. The Gateway builds per-session tool lists via `BuildSessionTools()` (e.g. `MemoryTool` uses per-agent memory path).
 - Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
 
@@ -109,7 +109,8 @@ agents:
   paul:
     description: Personal assistant
     model: anthropic/claude-sonnet-4
-    tools: [session, memory]
+    tools: [session, memory, todo]
+    todo_file: ~/path/to/todo.md
     completion:
       reasoning_effort: medium
 
@@ -117,7 +118,7 @@ channels:
   telegram:
     transport: telegram
     agent: paul
-    token: ${TELEGRAM_BOT_TOKEN}
+    token: your-bot-token  # env var expansion not yet supported
     allowed_chat_ids: [12345]
   console:
     transport: websocket
@@ -127,7 +128,7 @@ console:
   url: ws://localhost:5000/ws
 ```
 
-Loaded by `ConfigLoader.Load()`. Env var override: `ACHATES_CONFIG_PATH`. YAML uses underscore naming convention (C# PascalCase <-> YAML snake_case).
+Loaded by `ConfigLoader.Load()`. Env var override: `ACHATES_CONFIG_PATH`. YAML uses underscore naming convention (C# PascalCase <-> YAML snake_case). `~` is expanded in file paths (e.g. `todo_file`). `${ENV_VAR}` expansion is **not yet supported** — use literal values or env vars directly.
 
 ### Data paths
 

@@ -55,7 +55,8 @@ public sealed class GatewayService(
                 cancellationToken);
 
             var tools = ResolveTools(agentConfig, model);
-            var systemPrompt = SystemPrompt.Build(agentConfig.Description, agentConfig.Prompt, tools);
+            var systemPrompt = SystemPrompt.Build(agentConfig.Description, agentConfig.Prompt, tools,
+                hasTodo: agentConfig.TodoFile is not null);
             var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
 
             agents[name] = new AgentDefinition
@@ -65,6 +66,7 @@ public sealed class GatewayService(
                 Tools = tools,
                 CompletionOptions = BuildCompletionOptions(agentConfig.Completion, model),
                 MemoryPath = memoryPath,
+                TodoPath = ExpandHome(agentConfig.TodoFile),
             };
 
             logger.LogInformation("Agent '{Name}' resolved with model {Model}", name, model.Id);
@@ -161,6 +163,9 @@ public sealed class GatewayService(
                 case "memory":
                     // MemoryTool is added per-session in Gateway.BuildSessionTools
                     break;
+                case "todo":
+                    // TodoTool is added per-session in Gateway.BuildSessionTools
+                    break;
                 default:
                     throw new InvalidOperationException($"Unknown tool '{toolName}'.");
             }
@@ -182,6 +187,11 @@ public sealed class GatewayService(
                 : null,
         };
     }
+
+    private static string? ExpandHome(string? path) =>
+        path is not null && path.StartsWith('~')
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..])
+            : path;
 
     private async Task<Model> ResolveModelAsync(string? providerId, string? modelId, CancellationToken cancellationToken)
     {

@@ -10,7 +10,8 @@ public static class SystemPrompt
     public static string Build(
         string? agentDescription = null,
         string? agentPrompt = null,
-        IReadOnlyList<AgentTool>? tools = null)
+        IReadOnlyList<AgentTool>? tools = null,
+        bool hasTodo = false)
     {
         var lines = new List<string>();
 
@@ -58,6 +59,17 @@ public static class SystemPrompt
         lines.Add("Save important facts, preferences, and decisions the user would expect you to remember.");
         lines.Add("When saving, include everything you want to keep — the file is replaced, not appended.");
         lines.Add("");
+
+        if (hasTodo)
+        {
+            lines.Add("## Todo List");
+            lines.Add("You have access to the user's personal todo list via the todo tool.");
+            lines.Add("The list is organized by sections (Today, This Week, etc.) with emoji category prefixes.");
+            lines.Add("You can list items, add new items, and mark items complete or incomplete.");
+            lines.Add("You CANNOT delete items — completed items stay in the list for the user to manage.");
+            lines.Add("When adding items, always include the appropriate category emoji and place them in the right section.");
+            lines.Add("");
+        }
 
         lines.Add("## Style");
         lines.Add("Be concise and direct. Lead with the answer, not the reasoning.");

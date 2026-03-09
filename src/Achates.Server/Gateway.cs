@@ -111,6 +111,8 @@ public sealed class Gateway : IAsyncDisposable
     {
         var tools = new List<AgentTool>(agentDef.Tools);
         tools.Add(new MemoryTool(agentDef.MemoryPath));
+        if (agentDef.TodoPath is { } todoPath)
+            tools.Add(new TodoTool(todoPath));
         return tools;
     }
 

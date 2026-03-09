@@ -54,4 +54,5 @@
 ## Server / Operations
 
 - [x] **Configuration file** — `~/.achates/config.yaml` with agents, channels, provider config.
+- [ ] **Env var expansion in config** — Support `${ENV_VAR}` syntax in YAML values (e.g. for tokens and secrets).
 - [ ] **Daemon mode** — Run the server as a background service (launchd on macOS, systemd on Linux).
