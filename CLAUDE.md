@@ -65,17 +65,19 @@ Console (standalone, no config dependency)
 ### Tool System (`AgentTool` subclasses)
 - `AgentTool` is the preferred pattern (class-based). Subclass and implement `Name`, `Description`, `Parameters` (JSON Schema as `JsonElement`), `ExecuteAsync()`.
 - Returns `AgentToolResult` with `Content` (list of `CompletionContent`) and optional `Details` (for UI display).
-- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`.
+- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`.
+- Tools can be shared (same instance for all sessions) or per-session. The Gateway builds per-session tool lists via `BuildSessionTools()`, combining shared tools with session-specific ones (e.g. `MemoryTool` with per-peer file path).
 - Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
 
 ### Channel System (`Achates.Channels`)
-- `IChannel` — `SendAsync()`, `StartAsync()`, `StopAsync()`, `MessageReceived` event
+- `IChannel` — `SendAsync()`, `SendTypingAsync()` (default no-op), `StartAsync()`, `StopAsync()`, `MessageReceived` event
 - `ChannelMessage` — ChannelId, PeerId, Text, Timestamp
 - Implementations: `TelegramChannel` (in Channels project), `WebSocketChannel` (in Server project)
 
 ### Gateway (`Achates.Server`)
-- `Gateway` — wires channels to per-peer agent sessions. Each `channelId:peerId` pair gets its own `Agent` instance (created on first message). Routes inbound messages, accumulates text deltas, sends responses back. Persists sessions via `ISessionStore` after each completed response.
+- `Gateway` — wires channels to per-peer agent sessions. Each `channelId:peerId` pair gets its own `Agent` instance (created on first message). Routes inbound messages, accumulates text deltas, sends responses back. Persists sessions via `ISessionStore` after each completed response. Sends typing indicators via a keepalive loop (4s interval) while processing. Handles `/new` command to reset sessions.
 - `FileSessionStore` — stores conversation history as JSON files in `~/.achates/sessions/{channelId}/{peerId}.json`.
+- `MemoryTool` — per-peer persistent memory at `~/.achates/memory/{channelId}/{peerId}.md`. Read/save actions; survives `/new` resets.
 - `GatewayService` — ASP.NET Core `IHostedLifecycleService`. Resolves model at startup, creates gateway, registers channels.
 - WebSocket endpoint: `/ws` (query params: `channel`, `peer`)
 - Health check: `GET /health`

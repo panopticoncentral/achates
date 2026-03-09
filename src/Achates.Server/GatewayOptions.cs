@@ -31,4 +31,10 @@ public sealed record GatewayOptions
     /// Optional session store for persisting conversation history across restarts.
     /// </summary>
     public ISessionStore? SessionStore { get; init; }
+
+    /// <summary>
+    /// Base directory for per-peer memory files. When set, each session gets a
+    /// MemoryTool backed by {MemoryBasePath}/{channelId}/{peerId}.md.
+    /// </summary>
+    public string? MemoryBasePath { get; init; }
 }

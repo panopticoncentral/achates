@@ -61,6 +61,14 @@ internal sealed class ChatSession(ClientWebSocket ws)
 
             switch (type)
             {
+                case "typing":
+                    if (!inMessage && !inThinking)
+                    {
+                        AnsiConsole.Markup("[dim italic]thinking...[/]");
+                        inThinking = true;
+                    }
+                    continue;
+
                 case "thinking.delta":
                     if (!inThinking)
                     {

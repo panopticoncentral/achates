@@ -27,6 +27,13 @@ public interface IChannel
     Task SendAsync(ChannelMessage message, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Show a typing indicator to the peer. Channels that don't support this can leave
+    /// the default no-op. Callers should send this periodically (e.g. every 4–5 seconds)
+    /// because some platforms expire the indicator.
+    /// </summary>
+    Task SendTypingAsync(string peerId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    /// <summary>
     /// Start listening for messages. Called once by the gateway during startup.
     /// </summary>
     Task StartAsync(CancellationToken cancellationToken = default);

@@ -36,10 +36,10 @@ public sealed class GatewayService(
 
         var activeTools = model.Parameters.HasFlag(ModelParameters.Tools) ? tools : null;
 
-        var sessionsPath = Path.Combine(
+        var achatesHome = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".achates", "sessions");
-        var sessionStore = new FileSessionStore(sessionsPath);
+            ".achates");
+        var sessionStore = new FileSessionStore(Path.Combine(achatesHome, "sessions"));
 
         var gatewayOptions = new GatewayOptions
         {
@@ -55,6 +55,7 @@ public sealed class GatewayService(
                     : null,
             },
             SessionStore = sessionStore,
+            MemoryBasePath = Path.Combine(achatesHome, "memory"),
         };
 
         _gateway = new Gateway(gatewayOptions);

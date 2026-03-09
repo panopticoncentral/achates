@@ -43,6 +43,14 @@ public sealed class TelegramChannel(
         }
     }
 
+    public async Task SendTypingAsync(string peerId, CancellationToken cancellationToken = default)
+    {
+        if (_bot is null) return;
+
+        var chatId = long.Parse(peerId);
+        await _bot.SendChatAction(chatId, ChatAction.Typing, cancellationToken: cancellationToken);
+    }
+
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
         _bot = new TelegramBotClient(token);

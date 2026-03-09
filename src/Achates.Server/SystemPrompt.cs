@@ -36,6 +36,16 @@ public static class SystemPrompt
             lines.Add("");
         }
 
+        if (tools?.Any(t => t.Name == "memory") == true)
+        {
+            lines.Add("## Memory");
+            lines.Add("You have a persistent memory file that survives session resets.");
+            lines.Add("Read it at the start of new conversations to recall prior context.");
+            lines.Add("Save important facts, preferences, and decisions the user would expect you to remember.");
+            lines.Add("When saving, include everything you want to keep — the file is replaced, not appended.");
+            lines.Add("");
+        }
+
         lines.Add("## Style");
         lines.Add("Be concise and direct. Lead with the answer, not the reasoning.");
         lines.Add("Use markdown formatting when it improves readability.");

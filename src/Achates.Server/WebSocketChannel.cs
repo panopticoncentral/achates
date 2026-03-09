@@ -31,6 +31,17 @@ public sealed class WebSocketChannel : IChannel
         return Task.CompletedTask;
     }
 
+    public Task SendTypingAsync(string peerId, CancellationToken cancellationToken = default)
+    {
+        if (_connections.TryGetValue(peerId, out var ws) && ws.State == WebSocketState.Open)
+        {
+            var bytes = """{"type":"typing"}"""u8.ToArray();
+            return ws.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken);
+        }
+
+        return Task.CompletedTask;
+    }
+
     public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
     public Task StopAsync()

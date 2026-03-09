@@ -2,9 +2,11 @@ using System.Collections.Concurrent;
 using Achates.Agent;
 using Achates.Agent.Events;
 using Achates.Agent.Messages;
+using Achates.Agent.Tools;
 using Achates.Channels;
 using Achates.Providers.Completions;
 using Achates.Providers.Completions.Events;
+using Achates.Server.Tools;
 
 namespace Achates.Server;
 
@@ -64,7 +66,20 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
         }
     }
 
-    private async Task<Agent.Agent> GetOrCreateSessionAsync(string sessionKey)
+    private static async Task SendTypingLoopAsync(IChannel channel, string peerId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await channel.SendTypingAsync(peerId, cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task<Agent.Agent> GetOrCreateSessionAsync(string sessionKey, string channelId, string peerId)
     {
         if (_sessions.TryGetValue(sessionKey, out var existing))
             return existing;
@@ -75,11 +90,13 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
             savedMessages = await store.LoadAsync(sessionKey, _cts.Token);
         }
 
+        var tools = BuildSessionTools(channelId, peerId);
+
         var agent = new Agent.Agent(new AgentOptions
         {
             Model = options.Model,
             SystemPrompt = options.SystemPrompt,
-            Tools = options.Tools,
+            Tools = tools,
             CompletionOptions = options.CompletionOptions,
             Messages = savedMessages,
         });
@@ -87,10 +104,49 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
         return _sessions.GetOrAdd(sessionKey, agent);
     }
 
+    private IReadOnlyList<AgentTool>? BuildSessionTools(string channelId, string peerId)
+    {
+        if (options.Tools is not { Count: > 0 } && options.MemoryBasePath is null)
+            return options.Tools;
+
+        var tools = new List<AgentTool>(options.Tools ?? []);
+
+        if (options.MemoryBasePath is { } memoryBase)
+        {
+            var memoryPath = Path.Combine(memoryBase, channelId, $"{peerId}.md");
+            tools.Add(new MemoryTool(memoryPath));
+        }
+
+        return tools;
+    }
+
     private async Task OnMessageReceivedAsync(IChannel channel, ChannelMessage message)
     {
         var sessionKey = $"{message.ChannelId}:{message.PeerId}";
-        var agent = await GetOrCreateSessionAsync(sessionKey);
+
+        // Handle /new command — reset the session
+        if (message.Text.Trim().Equals("/new", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_sessions.TryRemove(sessionKey, out var existing))
+            {
+                existing.Abort();
+            }
+
+            if (options.SessionStore is { } store)
+            {
+                await store.DeleteAsync(sessionKey, _cts.Token);
+            }
+
+            await channel.SendAsync(new ChannelMessage
+            {
+                ChannelId = message.ChannelId,
+                PeerId = message.PeerId,
+                Text = "Session reset. Starting fresh.",
+            }, _cts.Token);
+            return;
+        }
+
+        var agent = await GetOrCreateSessionAsync(sessionKey, message.ChannelId, message.PeerId);
 
         // If the agent is already running, queue as a follow-up
         if (agent.IsRunning)
@@ -101,6 +157,10 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
 
         var stream = agent.PromptAsync(message.Text);
         var responseText = "";
+
+        // Start a typing indicator that repeats until processing finishes
+        using var typingCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        _ = SendTypingLoopAsync(channel, message.PeerId, typingCts.Token);
 
         await foreach (var evt in stream.WithCancellation(_cts.Token))
         {
@@ -132,6 +192,9 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
                     break;
             }
         }
+
+        // Stop the typing indicator
+        await typingCts.CancelAsync();
 
         // Catch any remaining text (e.g. from follow-up turns)
         if (!string.IsNullOrWhiteSpace(responseText))
