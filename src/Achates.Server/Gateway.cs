@@ -3,7 +3,7 @@ using Achates.Agent;
 using Achates.Agent.Events;
 using Achates.Agent.Messages;
 using Achates.Agent.Tools;
-using Achates.Channels;
+using Achates.Transports;
 using Achates.Providers.Completions;
 using Achates.Providers.Completions.Events;
 using Achates.Server.Tools;
@@ -11,13 +11,15 @@ using Achates.Server.Tools;
 namespace Achates.Server;
 
 /// <summary>
-/// The gateway wires channels to per-peer agent sessions. Each unique channel+peer
-/// combination gets its own agent with independent conversation history.
+/// The gateway wires channels (transport + agent bindings) to per-peer agent sessions.
+/// Each unique channel+peer combination gets its own <see cref="AgentRuntime"/> instance
+/// configured from the channel's agent definition.
 /// </summary>
-public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
+public sealed class Gateway : IAsyncDisposable
 {
-    private readonly List<IChannel> _channels = [];
-    private readonly ConcurrentDictionary<string, Agent.Agent> _sessions = new();
+    private readonly IReadOnlyList<ChannelBinding> _bindings;
+    private readonly ISessionStore? _sessionStore;
+    private readonly ConcurrentDictionary<string, AgentRuntime> _sessions = new();
     private readonly CancellationTokenSource _cts = new();
 
     /// <summary>
@@ -26,38 +28,39 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
     /// </summary>
     public event Func<AgentEvent, Task>? AgentEvent;
 
-    public IReadOnlyList<IChannel> Channels => _channels;
-
-    /// <summary>
-    /// Register a channel with the gateway. Must be called before <see cref="StartAsync"/>.
-    /// </summary>
-    public void AddChannel(IChannel channel)
+    public Gateway(IReadOnlyList<ChannelBinding> bindings, ISessionStore? sessionStore = null)
     {
-        channel.MessageReceived += msg => OnMessageReceivedAsync(channel, msg);
-        _channels.Add(channel);
-    }
+        _bindings = bindings;
+        _sessionStore = sessionStore;
 
-    /// <summary>
-    /// Start all registered channels and begin processing messages.
-    /// </summary>
-    public async Task StartAsync(CancellationToken cancellationToken = default)
-    {
-        foreach (var channel in _channels)
+        foreach (var binding in _bindings)
         {
-            await channel.StartAsync(cancellationToken);
+            var b = binding; // capture for closure
+            b.Transport.MessageReceived += msg => OnMessageReceivedAsync(b, msg);
         }
     }
 
     /// <summary>
-    /// Stop all channels and dispose resources.
+    /// Start all transports and begin processing messages.
+    /// </summary>
+    public async Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        foreach (var binding in _bindings)
+        {
+            await binding.Transport.StartAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Stop all transports and dispose resources.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
         await _cts.CancelAsync();
 
-        foreach (var channel in _channels)
+        foreach (var binding in _bindings)
         {
-            await channel.StopAsync();
+            await binding.Transport.StopAsync();
         }
 
         foreach (var agent in _sessions.Values)
@@ -66,63 +69,54 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
         }
     }
 
-    private static async Task SendTypingLoopAsync(IChannel channel, string peerId, CancellationToken cancellationToken)
+    private static async Task SendTypingLoopAsync(ITransport transport, string peerId, CancellationToken cancellationToken)
     {
         try
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                await channel.SendTypingAsync(peerId, cancellationToken);
+                await transport.SendTypingAsync(peerId, cancellationToken);
                 await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
             }
         }
         catch (OperationCanceledException) { }
     }
 
-    private async Task<Agent.Agent> GetOrCreateSessionAsync(string sessionKey, string channelId, string peerId)
+    private async Task<AgentRuntime> GetOrCreateSessionAsync(string sessionKey, AgentDefinition agentDef)
     {
         if (_sessions.TryGetValue(sessionKey, out var existing))
             return existing;
 
         IReadOnlyList<AgentMessage>? savedMessages = null;
-        if (options.SessionStore is { } store)
+        if (_sessionStore is { } store)
         {
             savedMessages = await store.LoadAsync(sessionKey, _cts.Token);
         }
 
-        var tools = BuildSessionTools(channelId, peerId);
+        var tools = BuildSessionTools(agentDef);
 
-        var agent = new Agent.Agent(new AgentOptions
+        var agent = new AgentRuntime(new AgentOptions
         {
-            Model = options.Model,
-            SystemPrompt = options.SystemPrompt,
+            Model = agentDef.Model,
+            SystemPrompt = agentDef.SystemPrompt,
             Tools = tools,
-            CompletionOptions = options.CompletionOptions,
+            CompletionOptions = agentDef.CompletionOptions,
             Messages = savedMessages,
         });
 
         return _sessions.GetOrAdd(sessionKey, agent);
     }
 
-    private IReadOnlyList<AgentTool>? BuildSessionTools(string channelId, string peerId)
+    private static IReadOnlyList<AgentTool> BuildSessionTools(AgentDefinition agentDef)
     {
-        if (options.Tools is not { Count: > 0 } && options.MemoryBasePath is null)
-            return options.Tools;
-
-        var tools = new List<AgentTool>(options.Tools ?? []);
-
-        if (options.MemoryBasePath is { } memoryBase)
-        {
-            var memoryPath = Path.Combine(memoryBase, channelId, $"{peerId}.md");
-            tools.Add(new MemoryTool(memoryPath));
-        }
-
+        var tools = new List<AgentTool>(agentDef.Tools);
+        tools.Add(new MemoryTool(agentDef.MemoryPath));
         return tools;
     }
 
-    private async Task OnMessageReceivedAsync(IChannel channel, ChannelMessage message)
+    private async Task OnMessageReceivedAsync(ChannelBinding binding, TransportMessage message)
     {
-        var sessionKey = $"{message.ChannelId}:{message.PeerId}";
+        var sessionKey = $"{binding.Name}:{message.PeerId}";
 
         // Handle /new command — reset the session
         if (message.Text.Trim().Equals("/new", StringComparison.OrdinalIgnoreCase))
@@ -132,21 +126,21 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
                 existing.Abort();
             }
 
-            if (options.SessionStore is { } store)
+            if (_sessionStore is { } store)
             {
                 await store.DeleteAsync(sessionKey, _cts.Token);
             }
 
-            await channel.SendAsync(new ChannelMessage
+            await binding.Transport.SendAsync(new TransportMessage
             {
-                ChannelId = message.ChannelId,
+                TransportId = message.TransportId,
                 PeerId = message.PeerId,
                 Text = "Session reset. Starting fresh.",
             }, _cts.Token);
             return;
         }
 
-        var agent = await GetOrCreateSessionAsync(sessionKey, message.ChannelId, message.PeerId);
+        var agent = await GetOrCreateSessionAsync(sessionKey, binding.Agent);
 
         // If the agent is already running, queue as a follow-up
         if (agent.IsRunning)
@@ -160,7 +154,7 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
 
         // Start a typing indicator that repeats until processing finishes
         using var typingCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-        _ = SendTypingLoopAsync(channel, message.PeerId, typingCts.Token);
+        _ = SendTypingLoopAsync(binding.Transport, message.PeerId, typingCts.Token);
 
         await foreach (var evt in stream.WithCancellation(_cts.Token))
         {
@@ -181,9 +175,9 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
                     // Turn is done and not continuing with tools — send the response
                     if (!string.IsNullOrWhiteSpace(responseText))
                     {
-                        await channel.SendAsync(new ChannelMessage
+                        await binding.Transport.SendAsync(new TransportMessage
                         {
-                            ChannelId = message.ChannelId,
+                            TransportId = message.TransportId,
                             PeerId = message.PeerId,
                             Text = responseText.Trim(),
                         }, _cts.Token);
@@ -199,16 +193,16 @@ public sealed class Gateway(GatewayOptions options) : IAsyncDisposable
         // Catch any remaining text (e.g. from follow-up turns)
         if (!string.IsNullOrWhiteSpace(responseText))
         {
-            await channel.SendAsync(new ChannelMessage
+            await binding.Transport.SendAsync(new TransportMessage
             {
-                ChannelId = message.ChannelId,
+                TransportId = message.TransportId,
                 PeerId = message.PeerId,
                 Text = responseText.Trim(),
             }, _cts.Token);
         }
 
         // Persist the updated conversation history
-        if (options.SessionStore is { } sessionStore)
+        if (_sessionStore is { } sessionStore)
         {
             await sessionStore.SaveAsync(sessionKey, agent.Messages, _cts.Token);
         }

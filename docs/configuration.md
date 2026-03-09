@@ -8,9 +8,19 @@ YAML uses `snake_case` naming (mapped to C# `PascalCase` automatically). Unknown
 
 ```yaml
 provider: openrouter
-model: anthropic/claude-sonnet-4
-completion:
-  reasoning_effort: medium
+
+agents:
+  default:
+    model: anthropic/claude-sonnet-4
+    tools: [session, memory]
+    completion:
+      reasoning_effort: medium
+
+channels:
+  console:
+    transport: websocket
+    agent: default
+
 console:
   url: ws://localhost:5000/ws
 ```
@@ -21,27 +31,41 @@ console:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `provider` | string | `openrouter` | LLM provider ID. Only `openrouter` is currently implemented. |
-| `model` | string | `anthropic/claude-sonnet-4` | Model ID within the provider. Must exist in the provider's model list. |
+| `provider` | string | `openrouter` | Default LLM provider ID. Agents can override this. |
+| `agents` | map | _(required)_ | Named agent definitions. At least one required. |
+| `channels` | map | _(required)_ | Named channel bindings (transport + agent). At least one required. |
 
-### `completion`
+### `agents.<name>`
 
-Controls LLM generation parameters.
+Each agent is a named entry with its own configuration.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `description` | string | _(none)_ | Agent description, used in system prompt (e.g. "a personal assistant"). |
+| `model` | string | _(required)_ | Model ID within the provider. |
+| `provider` | string | _(top-level)_ | Override the provider for this agent. |
+| `tools` | string[] | _(none)_ | Tool names to enable. Available: `session`, `memory`. |
+| `prompt` | string | _(none)_ | Custom system prompt text. Replaces the default opening line. |
+| `completion` | object | _(none)_ | Completion options (see below). |
+
+### `agents.<name>.completion`
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `reasoning_effort` | string | `medium` | Reasoning effort level. Only sent if the model supports it. |
-| `temperature` | number | _(none)_ | Sampling temperature. Higher = more varied. |
+| `temperature` | number | _(none)_ | Sampling temperature. |
 | `max_tokens` | int | _(none)_ | Maximum output tokens per response. |
 
-### `telegram`
+### `channels.<name>`
 
-Telegram bot channel. Omit this section entirely to disable Telegram.
+Each channel binds a transport to an agent.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `token` | string | _(none)_ | Bot token from @BotFather. Falls back to `TELEGRAM_BOT_TOKEN` env var. |
-| `allowed_chat_ids` | int[] | _(none)_ | Restrict the bot to specific chat IDs. If omitted, all chats are allowed. |
+| `transport` | string | _(required)_ | Transport type: `websocket` or `telegram`. |
+| `agent` | string | _(required)_ | Name of the agent to bind to (must match a key in `agents`). |
+| `token` | string | _(none)_ | Telegram bot token. Falls back to `TELEGRAM_BOT_TOKEN` env var. |
+| `allowed_chat_ids` | int[] | _(none)_ | Restrict Telegram bot to specific chat IDs. |
 
 ### `console`
 
@@ -50,7 +74,7 @@ Settings for the CLI WebSocket client (`Achates.Console`).
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `url` | string | `ws://localhost:5000/ws` | WebSocket server URL to connect to. |
-| `channel` | string | _(none)_ | Channel ID sent to the server. |
+| `channel` | string | _(none)_ | Channel name sent to the server. |
 | `peer` | string | _(none)_ | Peer ID sent to the server. |
 
 ## Environment variables
@@ -59,18 +83,21 @@ Settings for the CLI WebSocket client (`Achates.Console`).
 |----------|---------|
 | `ACHATES_CONFIG_PATH` | Override the config file path (default: `~/.achates/config.yaml`). |
 | `OPENROUTER_API_KEY` | **Required.** API key for the OpenRouter provider. |
-| `TELEGRAM_BOT_TOKEN` | Fallback Telegram bot token if not set in config. |
+| `TELEGRAM_BOT_TOKEN` | Fallback Telegram bot token if not set in channel config. |
 
 ## Data paths
 
 | Path | Purpose |
 |------|---------|
 | `~/.achates/config.yaml` | Configuration file. |
-| `~/.achates/sessions/{channelId}/{peerId}.json` | Persisted conversation history per session. |
+| `~/.achates/sessions/{channelName}/{peerId}.json` | Persisted conversation history per session. |
+| `~/.achates/agents/{agentName}/memory.md` | Agent memory (shared across all peers using the agent). |
 
 ## Implicit behavior
 
 These features are always on and not configurable:
 
-- **Session persistence** -- Conversations are saved to disk after each response and restored on restart.
-- **Session compaction** -- When a conversation approaches 80% of the model's context window, older messages are summarized via the LLM and replaced with a compact summary. Falls back to truncation if summarization fails.
+- **Session persistence** — Conversations are saved to disk after each response and restored on restart.
+- **Session compaction** — When a conversation approaches 80% of the model's context window, older messages are summarized via the LLM and replaced with a compact summary. Falls back to truncation if summarization fails.
+- **Agent memory** — Each agent has a persistent memory file that survives session resets (`/new`). The agent reads it at conversation start and saves important facts.
+- **Typing indicators** — Sent to transports every 4 seconds while processing. Telegram shows native typing; WebSocket sends a `{"type":"typing"}` JSON event.

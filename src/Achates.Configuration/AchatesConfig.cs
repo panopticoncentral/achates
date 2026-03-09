@@ -3,10 +3,27 @@ namespace Achates.Configuration;
 public sealed class AchatesConfig
 {
     public string? Provider { get; set; }
-    public string? Model { get; set; }
-    public CompletionConfig? Completion { get; set; }
+    public Dictionary<string, AgentConfig>? Agents { get; set; }
+    public Dictionary<string, ChannelConfig>? Channels { get; set; }
     public ConsoleConfig? Console { get; set; }
-    public TelegramConfig? Telegram { get; set; }
+}
+
+public sealed class AgentConfig
+{
+    public string? Description { get; set; }
+    public string? Model { get; set; }
+    public string? Provider { get; set; }
+    public List<string>? Tools { get; set; }
+    public string? Prompt { get; set; }
+    public CompletionConfig? Completion { get; set; }
+}
+
+public sealed class ChannelConfig
+{
+    public string? Transport { get; set; }
+    public string? Agent { get; set; }
+    public string? Token { get; set; }
+    public long[]? AllowedChatIds { get; set; }
 }
 
 public sealed class CompletionConfig
@@ -14,12 +31,6 @@ public sealed class CompletionConfig
     public string? ReasoningEffort { get; set; }
     public double? Temperature { get; set; }
     public int? MaxTokens { get; set; }
-}
-
-public sealed class TelegramConfig
-{
-    public string? Token { get; set; }
-    public long[]? AllowedChatIds { get; set; }
 }
 
 public sealed class ConsoleConfig

@@ -3,17 +3,32 @@ using Achates.Agent.Tools;
 namespace Achates.Server;
 
 /// <summary>
-/// Assembles the system prompt from runtime context.
+/// Assembles the system prompt from agent config and runtime context.
 /// </summary>
 public static class SystemPrompt
 {
-    public static string Build(IReadOnlyList<AgentTool>? tools = null)
+    public static string Build(
+        string? agentDescription = null,
+        string? agentPrompt = null,
+        IReadOnlyList<AgentTool>? tools = null)
     {
-        var lines = new List<string>
+        var lines = new List<string>();
+
+        // Agent identity
+        if (agentPrompt is not null)
         {
-            "You are a helpful personal assistant.",
-            "",
-        };
+            lines.Add(agentPrompt);
+        }
+        else if (agentDescription is not null)
+        {
+            lines.Add($"You are {agentDescription}.");
+        }
+        else
+        {
+            lines.Add("You are a helpful personal assistant.");
+        }
+
+        lines.Add("");
 
         // Inject timezone and date for time-aware reasoning without a tool call.
         // Only timezone is included (not clock time) to keep prompt caching stable.
@@ -36,15 +51,13 @@ public static class SystemPrompt
             lines.Add("");
         }
 
-        if (tools?.Any(t => t.Name == "memory") == true)
-        {
-            lines.Add("## Memory");
-            lines.Add("You have a persistent memory file that survives session resets.");
-            lines.Add("Read it at the start of new conversations to recall prior context.");
-            lines.Add("Save important facts, preferences, and decisions the user would expect you to remember.");
-            lines.Add("When saving, include everything you want to keep — the file is replaced, not appended.");
-            lines.Add("");
-        }
+        // Memory section — always included since memory tool is added per-session
+        lines.Add("## Memory");
+        lines.Add("You have a persistent memory file that survives session resets.");
+        lines.Add("Read it at the start of new conversations to recall prior context.");
+        lines.Add("Save important facts, preferences, and decisions the user would expect you to remember.");
+        lines.Add("When saving, include everything you want to keep — the file is replaced, not appended.");
+        lines.Add("");
 
         lines.Add("## Style");
         lines.Add("Be concise and direct. Lead with the answer, not the reasoning.");

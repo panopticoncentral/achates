@@ -1,5 +1,5 @@
 using Achates.Agent.Tools;
-using Achates.Channels;
+using Achates.Transports;
 using Achates.Configuration;
 using Achates.Providers;
 using Achates.Providers.Completions;
@@ -10,7 +10,7 @@ namespace Achates.Server;
 
 /// <summary>
 /// Hosted service that creates and manages the gateway lifecycle.
-/// Resolves the model at startup, creates the gateway, starts all channels.
+/// Resolves agents and channels from config, creates the gateway, starts all transports.
 /// </summary>
 public sealed class GatewayService(
     AchatesConfig config,
@@ -20,62 +20,86 @@ public sealed class GatewayService(
     : IHostedLifecycleService, IAsyncDisposable
 {
     private Gateway? _gateway;
+    private readonly Dictionary<string, WebSocketTransport> _webSocketTransports = new();
 
     public Gateway Gateway =>
         _gateway ?? throw new InvalidOperationException("Gateway has not started yet.");
 
-    public WebSocketChannel WebSocketChannel { get; } = new();
+    /// <summary>
+    /// Get the WebSocket transport for a given channel name.
+    /// </summary>
+    public WebSocketTransport? GetWebSocketTransport(string channelName) =>
+        _webSocketTransports.GetValueOrDefault(channelName);
 
     public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var model = await ResolveModelAsync(cancellationToken);
-
-        AgentTool[] tools = [new SessionTool(model)];
-
-        var activeTools = model.Parameters.HasFlag(ModelParameters.Tools) ? tools : null;
+        if (config.Agents is not { Count: > 0 })
+            throw new InvalidOperationException("No agents configured. Add at least one agent to config.yaml.");
+        if (config.Channels is not { Count: > 0 })
+            throw new InvalidOperationException("No channels configured. Add at least one channel to config.yaml.");
 
         var achatesHome = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".achates");
         var sessionStore = new FileSessionStore(Path.Combine(achatesHome, "sessions"));
 
-        var gatewayOptions = new GatewayOptions
+        // Resolve agents
+        var agents = new Dictionary<string, AgentDefinition>();
+        foreach (var (name, agentConfig) in config.Agents)
         {
-            Model = model,
-            SystemPrompt = SystemPrompt.Build(activeTools),
-            Tools = activeTools,
-            CompletionOptions = new CompletionOptions
+            var model = await ResolveModelAsync(
+                agentConfig.Provider ?? config.Provider,
+                agentConfig.Model,
+                cancellationToken);
+
+            var tools = ResolveTools(agentConfig, model);
+            var systemPrompt = SystemPrompt.Build(agentConfig.Description, agentConfig.Prompt, tools);
+            var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
+
+            agents[name] = new AgentDefinition
             {
-                Temperature = config.Completion?.Temperature,
-                MaxTokens = config.Completion?.MaxTokens,
-                ReasoningEffort = model.Parameters.HasFlag(ModelParameters.ReasoningEffort)
-                    ? config.Completion?.ReasoningEffort ?? "medium"
-                    : null,
-            },
-            SessionStore = sessionStore,
-            MemoryBasePath = Path.Combine(achatesHome, "memory"),
-        };
+                Model = model,
+                SystemPrompt = systemPrompt,
+                Tools = tools,
+                CompletionOptions = BuildCompletionOptions(agentConfig.Completion, model),
+                MemoryPath = memoryPath,
+            };
 
-        _gateway = new Gateway(gatewayOptions);
-        _gateway.AddChannel(WebSocketChannel);
-
-        var telegramToken = config.Telegram?.Token
-            ?? Environment.GetEnvironmentVariable("TELEGRAM_BOT_TOKEN");
-
-        if (!string.IsNullOrEmpty(telegramToken))
-        {
-            var telegramChannel = new TelegramChannel(
-                telegramToken,
-                config.Telegram?.AllowedChatIds,
-                loggerFactory.CreateLogger<TelegramChannel>());
-            _gateway.AddChannel(telegramChannel);
+            logger.LogInformation("Agent '{Name}' resolved with model {Model}", name, model.Id);
         }
 
+        // Resolve channels
+        var bindings = new List<ChannelBinding>();
+        foreach (var (channelName, channelConfig) in config.Channels)
+        {
+            var agentName = channelConfig.Agent
+                ?? throw new InvalidOperationException($"Channel '{channelName}' has no agent specified.");
+
+            if (!agents.TryGetValue(agentName, out var agentDef))
+                throw new InvalidOperationException(
+                    $"Channel '{channelName}' references unknown agent '{agentName}'.");
+
+            var transport = CreateTransport(channelName, channelConfig);
+
+            bindings.Add(new ChannelBinding
+            {
+                Name = channelName,
+                Transport = transport,
+                AgentName = agentName,
+                Agent = agentDef,
+            });
+
+            logger.LogInformation("Channel '{Channel}' bound to agent '{Agent}' via {Transport}",
+                channelName, agentName, channelConfig.Transport);
+        }
+
+        _gateway = new Gateway(bindings, sessionStore);
         await _gateway.StartAsync(cancellationToken);
 
-        logger.LogInformation("Gateway started with model {Model} ({Name})", model.Id, model.Name);
+        logger.LogInformation("Gateway started with {AgentCount} agent(s) and {ChannelCount} channel(s)",
+            agents.Count, bindings.Count);
     }
 
     public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -91,10 +115,83 @@ public sealed class GatewayService(
         }
     }
 
-    private async Task<Model> ResolveModelAsync(CancellationToken cancellationToken)
+    private ITransport CreateTransport(string channelName, ChannelConfig channelConfig)
     {
-        var provider = ModelProviders.Create(config.Provider!)
-            ?? throw new InvalidOperationException($"Unknown provider: {config.Provider}");
+        return channelConfig.Transport switch
+        {
+            "websocket" => CreateWebSocketTransport(channelName),
+            "telegram" => CreateTelegramTransport(channelConfig),
+            _ => throw new InvalidOperationException(
+                $"Unknown transport type '{channelConfig.Transport}' for channel '{channelName}'."),
+        };
+    }
+
+    private WebSocketTransport CreateWebSocketTransport(string channelName)
+    {
+        var transport = new WebSocketTransport();
+        _webSocketTransports[channelName] = transport;
+        return transport;
+    }
+
+    private TelegramTransport CreateTelegramTransport(ChannelConfig channelConfig)
+    {
+        var token = channelConfig.Token
+            ?? Environment.GetEnvironmentVariable("TELEGRAM_BOT_TOKEN")
+            ?? throw new InvalidOperationException("Telegram channel requires a token.");
+
+        return new TelegramTransport(
+            token,
+            channelConfig.AllowedChatIds,
+            loggerFactory.CreateLogger<TelegramTransport>());
+    }
+
+    private static IReadOnlyList<AgentTool> ResolveTools(AgentConfig agentConfig, Model model)
+    {
+        if (!model.Parameters.HasFlag(ModelParameters.Tools))
+            return [];
+
+        var tools = new List<AgentTool>();
+        foreach (var toolName in agentConfig.Tools ?? [])
+        {
+            switch (toolName)
+            {
+                case "session":
+                    tools.Add(new SessionTool(model));
+                    break;
+                case "memory":
+                    // MemoryTool is added per-session in Gateway.BuildSessionTools
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unknown tool '{toolName}'.");
+            }
+        }
+        return tools;
+    }
+
+    private static CompletionOptions? BuildCompletionOptions(CompletionConfig? completion, Model model)
+    {
+        if (completion is null)
+            return null;
+
+        return new CompletionOptions
+        {
+            Temperature = completion.Temperature,
+            MaxTokens = completion.MaxTokens,
+            ReasoningEffort = model.Parameters.HasFlag(ModelParameters.ReasoningEffort)
+                ? completion.ReasoningEffort ?? "medium"
+                : null,
+        };
+    }
+
+    private async Task<Model> ResolveModelAsync(string? providerId, string? modelId, CancellationToken cancellationToken)
+    {
+        providerId ??= config.Provider
+            ?? throw new InvalidOperationException("No provider specified.");
+        if (modelId is null)
+            throw new InvalidOperationException("No model specified.");
+
+        var provider = ModelProviders.Create(providerId)
+            ?? throw new InvalidOperationException($"Unknown provider: {providerId}");
 
         var apiKey = Environment.GetEnvironmentVariable(provider.EnvironmentKey)
             ?? throw new InvalidOperationException(
@@ -104,7 +201,7 @@ public sealed class GatewayService(
         provider.HttpClient = httpClientFactory.CreateClient("achates");
 
         var models = await provider.GetModelsAsync(cancellationToken);
-        return models.FirstOrDefault(m => m.Id.Equals(config.Model, StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidOperationException($"Model '{config.Model}' not found.");
+        return models.FirstOrDefault(m => m.Id.Equals(modelId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException($"Model '{modelId}' not found.");
     }
 }

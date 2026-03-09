@@ -11,7 +11,7 @@ namespace Achates.Agent;
 /// A stateful AI agent that manages conversation history, tool execution, and event streaming.
 /// One instance represents one conversation thread.
 /// </summary>
-public sealed class Agent
+public sealed class AgentRuntime
 {
     private readonly List<AgentMessage> _messages;
     private readonly List<Func<AgentEvent, Task>> _subscribers = [];
@@ -33,7 +33,7 @@ public sealed class Agent
     private AgentState _state = AgentState.Idle;
     private string? _lastError;
 
-    public Agent(AgentOptions? options = null)
+    public AgentRuntime(AgentOptions? options = null)
     {
         options ??= new AgentOptions();
 

@@ -1,17 +1,17 @@
-namespace Achates.Channels;
+namespace Achates.Transports;
 
 /// <summary>
-/// A message received from or sent to a channel.
+/// A message received from or sent to a transport.
 /// </summary>
-public sealed record ChannelMessage
+public sealed record TransportMessage
 {
     /// <summary>
-    /// The channel that originated or will receive this message.
+    /// The transport that originated or will receive this message.
     /// </summary>
-    public required string ChannelId { get; init; }
+    public required string TransportId { get; init; }
 
     /// <summary>
-    /// Identity of the peer (user, group, thread) within the channel.
+    /// Identity of the peer (user, group, thread) within the transport.
     /// For console this is fixed; for Telegram it might be a chat ID, etc.
     /// </summary>
     public required string PeerId { get; init; }

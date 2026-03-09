@@ -57,10 +57,25 @@ public static class ConfigLoader
     private static AchatesConfig CreateDefault() => new()
     {
         Provider = "openrouter",
-        Model = "anthropic/claude-sonnet-4",
-        Completion = new CompletionConfig
+        Agents = new Dictionary<string, AgentConfig>
         {
-            ReasoningEffort = "medium",
+            ["default"] = new()
+            {
+                Model = "anthropic/claude-sonnet-4",
+                Tools = ["session", "memory"],
+                Completion = new CompletionConfig
+                {
+                    ReasoningEffort = "medium",
+                },
+            },
+        },
+        Channels = new Dictionary<string, ChannelConfig>
+        {
+            ["console"] = new()
+            {
+                Transport = "websocket",
+                Agent = "default",
+            },
         },
         Console = new ConsoleConfig
         {

@@ -1,13 +1,13 @@
-namespace Achates.Channels;
+namespace Achates.Transports;
 
 /// <summary>
-/// Abstraction for a messaging channel (console, Telegram, Discord, Slack, etc.).
-/// Each channel has a lifecycle (start/stop) and can send/receive messages.
+/// Abstraction for a messaging transport (WebSocket, Telegram, Discord, Slack, etc.).
+/// Each transport has a lifecycle (start/stop) and can send/receive messages.
 /// </summary>
-public interface IChannel
+public interface ITransport
 {
     /// <summary>
-    /// Unique identifier for this channel instance (e.g. "console", "telegram:12345").
+    /// Unique identifier for this transport instance.
     /// </summary>
     string Id { get; }
 
@@ -17,17 +17,17 @@ public interface IChannel
     string DisplayName { get; }
 
     /// <summary>
-    /// Raised when a message arrives from this channel.
+    /// Raised when a message arrives from this transport.
     /// </summary>
-    event Func<ChannelMessage, Task> MessageReceived;
+    event Func<TransportMessage, Task> MessageReceived;
 
     /// <summary>
-    /// Send a message out through this channel.
+    /// Send a message out through this transport.
     /// </summary>
-    Task SendAsync(ChannelMessage message, CancellationToken cancellationToken = default);
+    Task SendAsync(TransportMessage message, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Show a typing indicator to the peer. Channels that don't support this can leave
+    /// Show a typing indicator to the peer. Transports that don't support this can leave
     /// the default no-op. Callers should send this periodically (e.g. every 4–5 seconds)
     /// because some platforms expire the indicator.
     /// </summary>

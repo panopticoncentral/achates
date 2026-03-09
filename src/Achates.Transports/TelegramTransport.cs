@@ -4,15 +4,15 @@ using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 
-namespace Achates.Channels;
+namespace Achates.Transports;
 
 /// <summary>
-/// A channel that sends and receives messages via a Telegram bot using long-polling.
+/// A transport that sends and receives messages via a Telegram bot using long-polling.
 /// </summary>
-public sealed class TelegramChannel(
+public sealed class TelegramTransport(
     string token,
     long[]? allowedChatIds,
-    ILogger<TelegramChannel> logger) : IChannel
+    ILogger<TelegramTransport> logger) : ITransport
 {
     private TelegramBotClient? _bot;
     private CancellationTokenSource? _cts;
@@ -22,9 +22,9 @@ public sealed class TelegramChannel(
     public string Id => "telegram";
     public string DisplayName => "Telegram";
 
-    public event Func<ChannelMessage, Task>? MessageReceived;
+    public event Func<TransportMessage, Task>? MessageReceived;
 
-    public async Task SendAsync(ChannelMessage message, CancellationToken cancellationToken = default)
+    public async Task SendAsync(TransportMessage message, CancellationToken cancellationToken = default)
     {
         if (_bot is null) return;
 
@@ -67,7 +67,7 @@ public sealed class TelegramChannel(
             receiverOptions: receiverOptions,
             cancellationToken: _cts.Token);
 
-        logger.LogInformation("Telegram channel started");
+        logger.LogInformation("Telegram transport started");
         return Task.CompletedTask;
     }
 
@@ -78,7 +78,7 @@ public sealed class TelegramChannel(
             await _cts.CancelAsync();
         }
 
-        logger.LogInformation("Telegram channel stopped");
+        logger.LogInformation("Telegram transport stopped");
     }
 
     private async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, CancellationToken cancellationToken)
@@ -98,9 +98,9 @@ public sealed class TelegramChannel(
 
         if (MessageReceived is { } handler)
         {
-            await handler(new ChannelMessage
+            await handler(new TransportMessage
             {
-                ChannelId = Id,
+                TransportId = Id,
                 PeerId = chatId.ToString(),
                 Text = text,
             });

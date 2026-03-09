@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>Achates.Channels</RootNamespace>
+    <RootNamespace>Achates.Transports</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

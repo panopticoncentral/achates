@@ -2,15 +2,15 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 
-using Achates.Channels;
+using Achates.Transports;
 
 namespace Achates.Server;
 
 /// <summary>
-/// A channel that accepts WebSocket connections from a mapped endpoint.
+/// A transport that accepts WebSocket connections from a mapped endpoint.
 /// Each connection is treated as a separate peer.
 /// </summary>
-public sealed class WebSocketChannel : IChannel
+public sealed class WebSocketTransport : ITransport
 {
     private readonly ConcurrentDictionary<string, WebSocket> _connections = new();
     private int _nextPeerId;
@@ -18,9 +18,9 @@ public sealed class WebSocketChannel : IChannel
     public string Id => "websocket";
     public string DisplayName => "WebSocket";
 
-    public event Func<ChannelMessage, Task>? MessageReceived;
+    public event Func<TransportMessage, Task>? MessageReceived;
 
-    public Task SendAsync(ChannelMessage message, CancellationToken cancellationToken = default)
+    public Task SendAsync(TransportMessage message, CancellationToken cancellationToken = default)
     {
         if (_connections.TryGetValue(message.PeerId, out var ws) && ws.State == WebSocketState.Open)
         {
@@ -83,9 +83,9 @@ public sealed class WebSocketChannel : IChannel
 
                 if (MessageReceived is { } handler)
                 {
-                    await handler(new ChannelMessage
+                    await handler(new TransportMessage
                     {
-                        ChannelId = Id,
+                        TransportId = Id,
                         PeerId = peerId,
                         Text = text,
                     });

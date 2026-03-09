@@ -6,9 +6,9 @@ var builder = WebApplication.CreateBuilder(args);
 // Load user config (~/.achates/config.yaml)
 var userConfig = ConfigLoader.Load();
 
-if (string.IsNullOrEmpty(userConfig.Model))
+if (userConfig.Agents is not { Count: > 0 })
 {
-    Console.Error.WriteLine("Error: Model is required. Set model in ~/.achates/config.yaml.");
+    Console.Error.WriteLine("Error: No agents configured. Add at least one agent to ~/.achates/config.yaml.");
     return 1;
 }
 
@@ -32,11 +32,20 @@ app.Map("/ws", async (HttpContext context, GatewayService gatewayService) =>
         return;
     }
 
+    var channel = context.Request.Query["channel"].FirstOrDefault() ?? "console";
     var peer = context.Request.Query["peer"].FirstOrDefault();
+
+    var transport = gatewayService.GetWebSocketTransport(channel);
+    if (transport is null)
+    {
+        context.Response.StatusCode = 404;
+        await context.Response.WriteAsync($"No WebSocket channel named '{channel}'.");
+        return;
+    }
+
     var ws = await context.WebSockets.AcceptWebSocketAsync();
-    await gatewayService.WebSocketChannel.AcceptAsync(ws, peer, context.RequestAborted);
+    await transport.AcceptAsync(ws, peer, context.RequestAborted);
 });
 
 app.Run();
 return 0;
-
