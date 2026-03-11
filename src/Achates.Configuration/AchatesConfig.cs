@@ -19,6 +19,12 @@ public sealed class AgentConfig
     public NotesConfig? Notes { get; set; }
     public CompletionConfig? Completion { get; set; }
     public Dictionary<string, GraphConfig>? Graph { get; set; }
+    public WebConfig? Web { get; set; }
+}
+
+public sealed class WebConfig
+{
+    public string? BraveApiKey { get; set; }
 }
 
 public sealed class NotesConfig

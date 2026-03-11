@@ -44,18 +44,25 @@ Each agent is a named entry with its own configuration.
 | `description` | string | _(none)_ | Agent description, used in system prompt (e.g. "a personal assistant"). |
 | `model` | string | _(required)_ | Model ID within the provider. |
 | `provider` | string | _(top-level)_ | Override the provider for this agent. |
-| `tools` | string[] | _(none)_ | Tool names to enable. Available: `session`, `memory`, `todo`, `notes`, `mail`, `calendar`. |
+| `tools` | string[] | _(none)_ | Tool names to enable. Available: `session`, `memory`, `todo`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`. |
 | `prompt` | string | _(none)_ | Custom system prompt text. Replaces the default opening line. |
 | `todo_file` | string | _(none)_ | Path to a Markdown todo list file. Enables per-session todo access when `todo` is in `tools`. |
 | `notes` | object | _(none)_ | Apple Notes settings for the `notes` tool. |
 | `completion` | object | _(none)_ | Completion options (see below). |
 | `graph` | map | _(none)_ | Microsoft Graph account settings for `mail` and `calendar`. |
+| `web` | object | _(none)_ | Web tool settings for `web_search` and `web_fetch`. |
 
 ### `agents.<name>.notes`
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `folder` | string | `Achates` | Apple Notes folder the `notes` tool is allowed to access. The tool is restricted to this folder only. |
+
+### `agents.<name>.web`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `brave_api_key` | string | _(none)_ | Brave Search API key. Falls back to `BRAVE_API_KEY` env var. Required for `web_search`. |
 
 ### `agents.<name>.completion`
 
@@ -93,6 +100,7 @@ Settings for the CLI WebSocket client (`Achates.Console`).
 | `ACHATES_CONFIG_PATH` | Override the config file path (default: `~/.achates/config.yaml`). |
 | `OPENROUTER_API_KEY` | **Required.** API key for the OpenRouter provider. |
 | `TELEGRAM_BOT_TOKEN` | Fallback Telegram bot token if not set in channel config. |
+| `BRAVE_API_KEY` | Brave Search API key. Fallback if not set in agent's `web.brave_api_key`. |
 
 ## Data paths
 

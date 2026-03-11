@@ -146,20 +146,6 @@ When multiple accounts are configured, the mail and calendar tools gain an `acco
 
 ---
 
-### Available Tools
-
-Once configured, the agent has two tools:
-
-**mail** — Read Outlook email
-- `list` — Recent messages (params: `count`, `folder`)
-- `read` — Full message by ID
-- `search` — Search messages using KQL syntax
-
-**calendar** — View Outlook calendar
-- `upcoming` — Events in the next N days (params: `days`, `count`)
-- `read` — Full event details by ID
-- `availability` — Free/busy status for a time range (params: `start`, `end`)
-
 ## Apple Notes Setup
 
 Achates can access a restricted folder in Apple Notes on macOS. The Notes tool can list note titles, read a note by exact title, create new notes, rename notes, and replace note contents inside one configured folder.
@@ -175,3 +161,50 @@ agents:
 ```
 
 If `notes.folder` is omitted, Achates defaults to the `Achates` folder. The tool will refuse access to notes outside that folder and will error if multiple accounts contain folders with the same name.
+
+## Web Search & Fetch Setup
+
+Achates can search the web and fetch page content. Web search uses the [Brave Search API](https://brave.com/search/api/).
+
+### 1. Get a Brave Search API key
+
+1. Go to [brave.com/search/api](https://brave.com/search/api/) and create an account
+2. Subscribe to a plan (the free tier gives 2,000 queries/month)
+3. Copy your API key
+
+### 2. Configure
+
+Set the `BRAVE_API_KEY` environment variable, or add it to your config:
+
+```yaml
+agents:
+  myagent:
+    tools: [session, memory, web_search, web_fetch]
+    web:
+      brave_api_key: BSA...
+```
+
+`web_fetch` works without an API key — it only needs `web_search` to have Brave configured.
+
+### Tools
+
+**web_search** — Search the web
+- Returns a numbered list of results with title, URL, and description
+- Params: `query` (required), `count` (1-20, default 5)
+
+**web_fetch** — Fetch and extract readable content from a URL
+- Uses Readability extraction for HTML, returns plain text
+- Params: `url` (required), `max_chars` (default 20,000, max 50,000)
+
+## Tools Reference
+
+| Tool | Description | Config required |
+|------|-------------|-----------------|
+| `session` | Current time, model info, timezone | None |
+| `memory` | Persistent agent memory across sessions | None |
+| `todo` | Manage a Markdown todo list | `todo_file` path |
+| `notes` | Access Apple Notes (macOS only) | Optional `notes.folder` |
+| `mail` | Read Outlook email | `graph` account(s) |
+| `calendar` | View Outlook calendar | `graph` account(s) |
+| `web_search` | Search the web via Brave Search | `BRAVE_API_KEY` or `web.brave_api_key` |
+| `web_fetch` | Fetch and extract web page content | None |

@@ -65,7 +65,9 @@ public sealed class GatewayService(
                 notesFolderName: ResolveNotesFolder(agentConfig),
                 hasMail: hasTools.Contains("mail"),
                 hasCalendar: hasTools.Contains("calendar"),
-                graphAccountNames: graphAccountNames);
+                graphAccountNames: graphAccountNames,
+                hasWebSearch: hasTools.Contains("web_search"),
+                hasWebFetch: hasTools.Contains("web_fetch"));
             var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
 
             agents[name] = new AgentDefinition
@@ -206,6 +208,16 @@ public sealed class GatewayService(
                     if (graphClients.Count == 0)
                         throw new InvalidOperationException("Calendar tool requires graph configuration.");
                     tools.Add(new CalendarTool(graphClients));
+                    break;
+                case "web_search":
+                    var braveKey = agentConfig.Web?.BraveApiKey
+                        ?? Environment.GetEnvironmentVariable("BRAVE_API_KEY")
+                        ?? throw new InvalidOperationException(
+                            "web_search requires brave_api_key in config or BRAVE_API_KEY env var.");
+                    tools.Add(new WebSearchTool(braveKey, httpClientFactory.CreateClient("brave")));
+                    break;
+                case "web_fetch":
+                    tools.Add(new WebFetchTool(httpClientFactory.CreateClient("web")));
                     break;
                 default:
                     throw new InvalidOperationException($"Unknown tool '{toolName}'.");
