@@ -16,8 +16,14 @@ public sealed class AgentConfig
     public List<string>? Tools { get; set; }
     public string? Prompt { get; set; }
     public string? TodoFile { get; set; }
+    public NotesConfig? Notes { get; set; }
     public CompletionConfig? Completion { get; set; }
     public Dictionary<string, GraphConfig>? Graph { get; set; }
+}
+
+public sealed class NotesConfig
+{
+    public string? Folder { get; set; }
 }
 
 public sealed class GraphConfig

@@ -159,3 +159,19 @@ Once configured, the agent has two tools:
 - `upcoming` — Events in the next N days (params: `days`, `count`)
 - `read` — Full event details by ID
 - `availability` — Free/busy status for a time range (params: `start`, `end`)
+
+## Apple Notes Setup
+
+Achates can access a restricted folder in Apple Notes on macOS. The Notes tool can list note titles, read a note by exact title, create new notes, rename notes, and replace note contents inside one configured folder.
+
+In `~/.achates/config.yaml`:
+
+```yaml
+agents:
+  myagent:
+    tools: [session, memory, notes]
+    notes:
+      folder: Achates
+```
+
+If `notes.folder` is omitted, Achates defaults to the `Achates` folder. The tool will refuse access to notes outside that folder and will error if multiple accounts contain folders with the same name.

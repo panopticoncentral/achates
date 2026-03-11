@@ -44,9 +44,18 @@ Each agent is a named entry with its own configuration.
 | `description` | string | _(none)_ | Agent description, used in system prompt (e.g. "a personal assistant"). |
 | `model` | string | _(required)_ | Model ID within the provider. |
 | `provider` | string | _(top-level)_ | Override the provider for this agent. |
-| `tools` | string[] | _(none)_ | Tool names to enable. Available: `session`, `memory`. |
+| `tools` | string[] | _(none)_ | Tool names to enable. Available: `session`, `memory`, `todo`, `notes`, `mail`, `calendar`. |
 | `prompt` | string | _(none)_ | Custom system prompt text. Replaces the default opening line. |
+| `todo_file` | string | _(none)_ | Path to a Markdown todo list file. Enables per-session todo access when `todo` is in `tools`. |
+| `notes` | object | _(none)_ | Apple Notes settings for the `notes` tool. |
 | `completion` | object | _(none)_ | Completion options (see below). |
+| `graph` | map | _(none)_ | Microsoft Graph account settings for `mail` and `calendar`. |
+
+### `agents.<name>.notes`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `folder` | string | `Achates` | Apple Notes folder the `notes` tool is allowed to access. The tool is restricted to this folder only. |
 
 ### `agents.<name>.completion`
 

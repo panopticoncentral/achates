@@ -12,6 +12,8 @@ public static class SystemPrompt
         string? agentPrompt = null,
         IReadOnlyList<AgentTool>? tools = null,
         bool hasTodo = false,
+        bool hasNotes = false,
+        string? notesFolderName = null,
         bool hasMail = false,
         bool hasCalendar = false,
         IReadOnlyList<string>? graphAccountNames = null)
@@ -71,6 +73,16 @@ public static class SystemPrompt
             lines.Add("You can list items, add new items, and mark items complete or incomplete.");
             lines.Add("You CANNOT delete items — completed items stay in the list for the user to manage.");
             lines.Add("When adding items, always include the appropriate category emoji and place them in the right section.");
+            lines.Add("");
+        }
+
+        if (hasNotes)
+        {
+            var folder = string.IsNullOrWhiteSpace(notesFolderName) ? "Achates" : notesFolderName;
+            lines.Add("## Notes");
+            lines.Add($"You can access the user's Apple Notes in the '{folder}' folder via the notes tool.");
+            lines.Add("Use 'list' to see available note titles, 'read' to open a note by exact title, and create/update/rename only within that folder.");
+            lines.Add("You cannot search across all notes or access notes outside that folder.");
             lines.Add("");
         }
 

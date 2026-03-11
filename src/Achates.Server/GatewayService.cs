@@ -61,6 +61,8 @@ public sealed class GatewayService(
             var graphAccountNames = graphClients.Keys.ToList();
             var systemPrompt = SystemPrompt.Build(agentConfig.Description, agentConfig.Prompt, tools,
                 hasTodo: agentConfig.TodoFile is not null,
+                hasNotes: hasTools.Contains("notes"),
+                notesFolderName: ResolveNotesFolder(agentConfig),
                 hasMail: hasTools.Contains("mail"),
                 hasCalendar: hasTools.Contains("calendar"),
                 graphAccountNames: graphAccountNames);
@@ -197,6 +199,9 @@ public sealed class GatewayService(
                         throw new InvalidOperationException("Mail tool requires graph configuration.");
                     tools.Add(new MailTool(graphClients));
                     break;
+                case "notes":
+                    tools.Add(new NotesTool(ResolveNotesFolder(agentConfig)));
+                    break;
                 case "calendar":
                     if (graphClients.Count == 0)
                         throw new InvalidOperationException("Calendar tool requires graph configuration.");
@@ -245,6 +250,9 @@ public sealed class GatewayService(
         path is not null && path.StartsWith('~')
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..])
             : path;
+
+    private static string ResolveNotesFolder(AgentConfig agentConfig) =>
+        string.IsNullOrWhiteSpace(agentConfig.Notes?.Folder) ? "Achates" : agentConfig.Notes.Folder;
 
     private async Task<Model> ResolveModelAsync(string? providerId, string? modelId, CancellationToken cancellationToken)
     {
