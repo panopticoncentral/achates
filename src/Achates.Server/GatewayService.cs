@@ -4,6 +4,7 @@ using Achates.Configuration;
 using Achates.Providers;
 using Achates.Providers.Completions;
 using Achates.Providers.Models;
+using Achates.Server.Graph;
 using Achates.Server.Tools;
 
 namespace Achates.Server;
@@ -54,9 +55,15 @@ public sealed class GatewayService(
                 agentConfig.Model,
                 cancellationToken);
 
-            var tools = ResolveTools(agentConfig, model);
+            var graphClients = CreateGraphClients(agentConfig.Graph);
+            var tools = ResolveTools(agentConfig, model, graphClients);
+            var hasTools = agentConfig.Tools ?? [];
+            var graphAccountNames = graphClients.Keys.ToList();
             var systemPrompt = SystemPrompt.Build(agentConfig.Description, agentConfig.Prompt, tools,
-                hasTodo: agentConfig.TodoFile is not null);
+                hasTodo: agentConfig.TodoFile is not null,
+                hasMail: hasTools.Contains("mail"),
+                hasCalendar: hasTools.Contains("calendar"),
+                graphAccountNames: graphAccountNames);
             var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
 
             agents[name] = new AgentDefinition
@@ -67,9 +74,27 @@ public sealed class GatewayService(
                 CompletionOptions = BuildCompletionOptions(agentConfig.Completion, model),
                 MemoryPath = memoryPath,
                 TodoPath = ExpandHome(agentConfig.TodoFile),
+                GraphClients = graphClients,
             };
 
             logger.LogInformation("Agent '{Name}' resolved with model {Model}", name, model.Id);
+
+            // Eagerly authenticate Graph so device code prompt appears at startup
+            foreach (var (accountName, client) in graphClients)
+            {
+                try
+                {
+                    await client.EnsureAuthenticatedAsync(cancellationToken);
+                    logger.LogInformation("Agent '{Name}' graph account '{Account}' authenticated",
+                        name, accountName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex,
+                        "Agent '{Name}' graph account '{Account}' authentication failed — will retry on first use",
+                        name, accountName);
+                }
+            }
         }
 
         // Resolve channels
@@ -147,7 +172,8 @@ public sealed class GatewayService(
             loggerFactory.CreateLogger<TelegramTransport>());
     }
 
-    private static IReadOnlyList<AgentTool> ResolveTools(AgentConfig agentConfig, Model model)
+    private IReadOnlyList<AgentTool> ResolveTools(AgentConfig agentConfig, Model model,
+        IReadOnlyDictionary<string, GraphClient> graphClients)
     {
         if (!model.Parameters.HasFlag(ModelParameters.Tools))
             return [];
@@ -166,11 +192,38 @@ public sealed class GatewayService(
                 case "todo":
                     // TodoTool is added per-session in Gateway.BuildSessionTools
                     break;
+                case "mail":
+                    if (graphClients.Count == 0)
+                        throw new InvalidOperationException("Mail tool requires graph configuration.");
+                    tools.Add(new MailTool(graphClients));
+                    break;
+                case "calendar":
+                    if (graphClients.Count == 0)
+                        throw new InvalidOperationException("Calendar tool requires graph configuration.");
+                    tools.Add(new CalendarTool(graphClients));
+                    break;
                 default:
                     throw new InvalidOperationException($"Unknown tool '{toolName}'.");
             }
         }
         return tools;
+    }
+
+    private Dictionary<string, GraphClient> CreateGraphClients(Dictionary<string, GraphConfig>? graphConfigs)
+    {
+        var clients = new Dictionary<string, GraphClient>();
+        if (graphConfigs is null)
+            return clients;
+
+        foreach (var (name, graphConfig) in graphConfigs)
+        {
+            if (graphConfig.ClientId is null)
+                continue;
+            clients[name] = new GraphClient(graphConfig, httpClientFactory.CreateClient("graph"),
+                loggerFactory.CreateLogger<GraphClient>());
+        }
+
+        return clients;
     }
 
     private static CompletionOptions? BuildCompletionOptions(CompletionConfig? completion, Model model)

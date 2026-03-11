@@ -17,6 +17,15 @@ public sealed class AgentConfig
     public string? Prompt { get; set; }
     public string? TodoFile { get; set; }
     public CompletionConfig? Completion { get; set; }
+    public Dictionary<string, GraphConfig>? Graph { get; set; }
+}
+
+public sealed class GraphConfig
+{
+    public string? TenantId { get; set; }
+    public string? ClientId { get; set; }
+    public string? ClientSecret { get; set; }
+    public string? UserEmail { get; set; }
 }
 
 public sealed class ChannelConfig

@@ -11,7 +11,10 @@ public static class SystemPrompt
         string? agentDescription = null,
         string? agentPrompt = null,
         IReadOnlyList<AgentTool>? tools = null,
-        bool hasTodo = false)
+        bool hasTodo = false,
+        bool hasMail = false,
+        bool hasCalendar = false,
+        IReadOnlyList<string>? graphAccountNames = null)
     {
         var lines = new List<string>();
 
@@ -68,6 +71,29 @@ public static class SystemPrompt
             lines.Add("You can list items, add new items, and mark items complete or incomplete.");
             lines.Add("You CANNOT delete items — completed items stay in the list for the user to manage.");
             lines.Add("When adding items, always include the appropriate category emoji and place them in the right section.");
+            lines.Add("");
+        }
+
+        if (hasMail)
+        {
+            lines.Add("## Mail");
+            lines.Add("You can read the user's Outlook email via the mail tool.");
+            lines.Add("Use 'list' to see recent messages, 'read' to view a specific message, and 'search' to find messages.");
+            lines.Add("When listing mail, summarize key messages rather than dumping raw data.");
+            lines.Add("Message IDs from list/search results can be used with the read action.");
+            if (graphAccountNames is { Count: > 1 })
+                lines.Add($"Available accounts: {string.Join(", ", graphAccountNames)}. Use the 'account' parameter to select one.");
+            lines.Add("");
+        }
+
+        if (hasCalendar)
+        {
+            lines.Add("## Calendar");
+            lines.Add("You can view the user's Outlook calendar via the calendar tool.");
+            lines.Add("Use 'upcoming' to see scheduled events, 'read' for event details, and 'availability' to check free/busy time.");
+            lines.Add("When reporting schedules, use the user's local timezone and present times clearly.");
+            if (graphAccountNames is { Count: > 1 })
+                lines.Add($"Available accounts: {string.Join(", ", graphAccountNames)}. Use the 'account' parameter to select one.");
             lines.Add("");
         }
 

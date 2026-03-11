@@ -13,4 +13,8 @@
     <ProjectReference Include="..\Achates.Configuration\Achates.Configuration.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.83.0" />
+  </ItemGroup>
+
 </Project>

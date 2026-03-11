@@ -7,6 +7,12 @@
     <Project Path="src/Achates.Console/Achates.Console.csproj" />
     <Project Path="src/Achates.Configuration/Achates.Configuration.csproj" />
   </Folder>
+  <Folder Name="/docs/">
+    <File Path="README.md" />
+    <File Path="CLAUDE.md" />
+    <File Path="LICENSE" />
+    <File Path="TODO.md" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Achates.Tests/Achates.Tests.csproj" />
   </Folder>

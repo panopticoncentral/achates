@@ -6,6 +6,7 @@ using Achates.Agent.Tools;
 using Achates.Transports;
 using Achates.Providers.Completions;
 using Achates.Providers.Completions.Events;
+using Achates.Server.Graph;
 using Achates.Server.Tools;
 
 namespace Achates.Server;
@@ -150,6 +151,15 @@ public sealed class Gateway : IAsyncDisposable
             agent.FollowUp(new UserMessage { Text = message.Text });
             return;
         }
+
+        // Route device code sign-in messages to the user's chat
+        GraphClient.SetDeviceCodeNotifier(msg =>
+            binding.Transport.SendAsync(new TransportMessage
+            {
+                TransportId = message.TransportId,
+                PeerId = message.PeerId,
+                Text = msg,
+            }, _cts.Token));
 
         var stream = agent.PromptAsync(message.Text);
         var responseText = "";
