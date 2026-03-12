@@ -29,15 +29,16 @@ public sealed class TelegramTransport(
         if (_bot is null) return;
 
         var chatId = long.Parse(message.PeerId);
+        var html = TelegramHtmlRenderer.Convert(message.Text);
 
         try
         {
-            await _bot.SendMessage(chatId, message.Text,
-                parseMode: ParseMode.Markdown, cancellationToken: cancellationToken);
+            await _bot.SendMessage(chatId, html,
+                parseMode: ParseMode.Html, cancellationToken: cancellationToken);
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
-            // Markdown parse failed — retry as plain text
+            // HTML send failed — retry as plain text
             await _bot.SendMessage(chatId, message.Text,
                 cancellationToken: cancellationToken);
         }
