@@ -4,6 +4,7 @@ using Achates.Configuration;
 using Achates.Providers;
 using Achates.Providers.Completions;
 using Achates.Providers.Models;
+using Achates.Server.Cron;
 using Achates.Server.Graph;
 using Achates.Server.Tools;
 
@@ -21,6 +22,7 @@ public sealed class GatewayService(
     : IHostedLifecycleService, IAsyncDisposable
 {
     private Gateway? _gateway;
+    private CronService? _cronService;
     private FileSessionStore? _sessionStore;
     private readonly Dictionary<string, WebSocketTransport> _webSocketTransports = new();
 
@@ -73,10 +75,14 @@ public sealed class GatewayService(
                 graphAccountNames: graphAccountNames,
                 hasWebSearch: hasTools.Contains("web_search"),
                 hasWebFetch: hasTools.Contains("web_fetch"),
-                hasCost: hasTools.Contains("cost"));
+                hasCost: hasTools.Contains("cost"),
+                hasIMessage: hasTools.Contains("imessage"),
+                hasCron: hasTools.Contains("cron"));
             var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
             var costLedgerPath = Path.Combine(achatesHome, "agents", name, "costs.jsonl");
             var costLedger = new CostLedger(costLedgerPath);
+            var cronStorePath = Path.Combine(achatesHome, "agents", name, "cron.json");
+            var cronStore = hasTools.Contains("cron") ? new CronStore(cronStorePath) : null;
 
             agents[name] = new AgentDefinition
             {
@@ -87,6 +93,7 @@ public sealed class GatewayService(
                 MemoryPath = memoryPath,
                 TodoPath = ExpandHome(agentConfig.TodoFile),
                 CostLedger = costLedger,
+                CronStore = cronStore,
                 GraphClients = graphClients,
             };
 
@@ -138,6 +145,18 @@ public sealed class GatewayService(
         _gateway = new Gateway(bindings, sessionStore);
         await _gateway.StartAsync(cancellationToken);
 
+        // Start cron service for agents that have scheduled tasks enabled
+        var cronAgents = agents
+            .Where(a => a.Value.CronStore is not null)
+            .ToDictionary(a => a.Key, a => (a.Value.CronStore!, a.Value));
+        if (cronAgents.Count > 0)
+        {
+            _cronService = new CronService(cronAgents, bindings,
+                loggerFactory.CreateLogger<CronService>());
+            _gateway.CronService = _cronService;
+            await _cronService.StartAsync(cancellationToken);
+        }
+
         logger.LogInformation("Gateway started with {AgentCount} agent(s) and {ChannelCount} channel(s)",
             agents.Count, bindings.Count);
     }
@@ -149,6 +168,10 @@ public sealed class GatewayService(
 
     public async ValueTask DisposeAsync()
     {
+        if (_cronService is not null)
+        {
+            await _cronService.DisposeAsync();
+        }
         if (_gateway is not null)
         {
             await _gateway.DisposeAsync();
@@ -208,6 +231,9 @@ public sealed class GatewayService(
                 case "cost":
                     // CostTool is added per-session in Gateway.BuildSessionTools
                     break;
+                case "cron":
+                    // CronTool is added per-session in Gateway.BuildSessionTools
+                    break;
                 case "mail":
                     if (graphClients.Count == 0)
                         throw new InvalidOperationException("Mail tool requires graph configuration.");
@@ -230,6 +256,12 @@ public sealed class GatewayService(
                     break;
                 case "web_fetch":
                     tools.Add(new WebFetchTool(httpClientFactory.CreateClient("web")));
+                    break;
+                case "imessage":
+                    var messagesDb = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                        "Library", "Messages", "chat.db");
+                    tools.Add(new IMessageTool(messagesDb));
                     break;
                 default:
                     throw new InvalidOperationException($"Unknown tool '{toolName}'.");

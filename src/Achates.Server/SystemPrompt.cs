@@ -19,7 +19,9 @@ public static class SystemPrompt
         IReadOnlyList<string>? graphAccountNames = null,
         bool hasWebSearch = false,
         bool hasWebFetch = false,
-        bool hasCost = false)
+        bool hasCost = false,
+        bool hasIMessage = false,
+        bool hasCron = false)
     {
         var lines = new List<string>();
 
@@ -136,6 +138,25 @@ public static class SystemPrompt
             lines.Add("You can query usage costs via the cost tool.");
             lines.Add("Use 'summary' for totals, 'recent' for last N completions, or 'breakdown' for grouped analysis.");
             lines.Add("Available periods: today, week, month, all.");
+            lines.Add("");
+        }
+
+        if (hasIMessage)
+        {
+            lines.Add("## iMessage");
+            lines.Add("You can read the user's iMessage conversations via the imessage tool.");
+            lines.Add("Use 'chats' to list recent conversations, 'read' to view messages in a specific chat, and 'search' to find messages.");
+            lines.Add("Chat IDs from the chats list can be used with the read action.");
+            lines.Add("");
+        }
+
+        if (hasCron)
+        {
+            lines.Add("## Scheduled Tasks");
+            lines.Add("You can create and manage scheduled tasks using the cron tool.");
+            lines.Add("Schedule types: one-shot (at a specific time), recurring interval, or cron expression.");
+            lines.Add("Jobs run independently and deliver results to the user's chat.");
+            lines.Add("Use 'list' to see jobs, 'add' to create, 'update' to modify, 'remove' to delete, 'run' to execute immediately.");
             lines.Add("");
         }
 

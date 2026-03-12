@@ -71,7 +71,7 @@ Console (standalone, no config dependency)
 ### Tool System (`AgentTool` subclasses)
 - `AgentTool` is the preferred pattern (class-based). Subclass and implement `Name`, `Description`, `Parameters` (JSON Schema as `JsonElement`), `ExecuteAsync()`.
 - Returns `AgentToolResult` with `Content` (list of `CompletionContent`) and optional `Details` (for UI display).
-- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`.
+- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`, `CronTool`, `IMessageTool`.
 - Tools can be shared (same instance for all sessions) or per-session. The Gateway builds per-session tool lists via `BuildSessionTools()` (e.g. `MemoryTool` uses per-agent memory path).
 - Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
 
@@ -83,7 +83,7 @@ Console (standalone, no config dependency)
 ### Gateway (`Achates.Server`)
 - `Gateway` — takes a list of `ChannelBinding` (transport + agent pairs) and an optional `ISessionStore`. Each `channelName:peerId` pair gets its own `AgentRuntime` instance configured from the channel's `AgentDefinition`. Routes inbound messages, accumulates text deltas, sends responses back. Persists sessions after each completed response. Sends typing indicators via a keepalive loop (4s interval). Handles `/new` command to reset sessions.
 - `ChannelBinding` — binds a channel name to a transport and an agent definition.
-- `AgentDefinition` — resolved agent with Model, SystemPrompt, Tools, CompletionOptions, MemoryPath, CostLedger, GraphClient.
+- `AgentDefinition` — resolved agent with Model, SystemPrompt, Tools, CompletionOptions, MemoryPath, CostLedger, CronStore, GraphClient.
 - `FileSessionStore` — stores conversation history as JSON files in `~/.achates/sessions/{channelName}/{peerId}.json`.
 - `MemoryTool` — per-agent persistent memory at `~/.achates/agents/{agentName}/memory.md`. Read/save actions; survives `/new` resets. Shared across all peers using the same agent.
 - `MailTool` — reads Outlook email via Microsoft Graph API. Actions: list, read, search. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
@@ -91,9 +91,12 @@ Console (standalone, no config dependency)
 - `WebSearchTool` — searches the web via Brave Search API. Parameters: query, count. Returns numbered results with title, URL, description. Singleton; requires `brave_api_key` in config or `BRAVE_API_KEY` env var.
 - `WebFetchTool` — fetches a URL and extracts readable content using SmartReader (Readability). Parameters: url, max_chars. Handles HTML, JSON, plain text. Singleton; no config required.
 - `CostTool` — queries the persistent cost ledger. Actions: summary (totals for a period), recent (last N entries), breakdown (grouped by day or model). Per-session; requires `cost` in agent's tools list. Ledger is always recorded regardless of tool config.
+- `CronTool` — manages scheduled tasks. Actions: list, add, update, remove, run. Per-session; requires `cron` in agent's tools list. Schedule types: `at` (one-shot timestamp), `every` (interval in minutes), `cron` (cron expression with optional timezone). Jobs run in isolation (fresh AgentRuntime) and deliver results to the configured channel+peer. Delivery target defaults to the current session's channel+peer.
+- `IMessageTool` — reads local macOS iMessage database (`~/Library/Messages/chat.db`) via SQLite (read-only). Actions: chats (list recent conversations), read (messages from a chat by ID), search (full-text search). Singleton; requires Full Disk Access for the host process.
 - `GraphClient` (`src/Achates.Server/Graph/`) — Microsoft Graph API client supporting two auth flows. Multiple named accounts per agent. Created per-account during startup. Eagerly authenticates so device code prompts appear at startup. `AsyncLocal` notifier routes device code messages through the transport to the user's chat. Flow is selected by presence of `client_secret`:
   - **Client credentials** (work/school): `client_secret` set → application permissions, `/users/{email}/` paths. Requires `tenant_id`, `user_email`.
   - **Device code** (personal or work/school): no `client_secret` → delegated permissions, `/me/` paths. `tenant_id` defaults to `consumers`. Token cache persisted at `~/.achates/graph-token-cache.bin`.
+- `CronService` (`src/Achates.Server/Cron/`) — background timer loop for scheduled task execution. Not DI-registered; created by `GatewayService` after Gateway starts. Timer sleeps until next due job (max 60s), executes due jobs sequentially, delivers results via transports. `CronStore` persists jobs per-agent as JSON. `CronScheduler` computes next run times using Cronos library for cron expressions.
 - `GatewayService` — ASP.NET Core `IHostedLifecycleService`. Resolves agents and channels from config at startup, creates transports, builds `ChannelBinding` list, creates gateway.
 - WebSocket endpoint: `/ws` (query params: `channel`, `peer`)
 - Health check: `GET /health`
@@ -120,7 +123,7 @@ agents:
   paul:
     description: Personal assistant
     model: anthropic/claude-sonnet-4
-    tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost]
+    tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost, cron, imessage]
     todo_file: ~/path/to/todo.md
     web:
       brave_api_key: BSA...  # or set BRAVE_API_KEY env var
@@ -160,5 +163,6 @@ Loaded by `ConfigLoader.Load()`. Env var override: `ACHATES_CONFIG_PATH`. YAML u
 ~/.achates/sessions/{channelName}/{peerId}.json  Conversation history
 ~/.achates/agents/{agentName}/memory.md          Agent memory (shared across peers)
 ~/.achates/agents/{agentName}/costs.jsonl        Cost ledger (append-only, always recorded)
+~/.achates/agents/{agentName}/cron.json          Scheduled task definitions and state
 ~/.achates/graph-token-cache.bin                 Graph device code token cache
 ```

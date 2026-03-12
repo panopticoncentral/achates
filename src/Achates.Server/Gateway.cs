@@ -6,6 +6,7 @@ using Achates.Agent.Tools;
 using Achates.Transports;
 using Achates.Providers.Completions;
 using Achates.Providers.Completions.Events;
+using Achates.Server.Cron;
 using Achates.Server.Graph;
 using Achates.Server.Tools;
 
@@ -25,6 +26,7 @@ public sealed class Gateway : IAsyncDisposable
 
     public IReadOnlyList<ChannelBinding> Bindings => _bindings;
     public ICollection<string> ActiveSessionKeys => _sessions.Keys;
+    public CronService? CronService { get; set; }
 
     /// <summary>
     /// Raised for every agent event.
@@ -95,7 +97,8 @@ public sealed class Gateway : IAsyncDisposable
         catch (OperationCanceledException) { }
     }
 
-    private async Task<AgentRuntime> GetOrCreateSessionAsync(string sessionKey, AgentDefinition agentDef)
+    private async Task<AgentRuntime> GetOrCreateSessionAsync(
+        string sessionKey, ChannelBinding binding)
     {
         if (_sessions.TryGetValue(sessionKey, out var existing))
             return existing;
@@ -106,21 +109,23 @@ public sealed class Gateway : IAsyncDisposable
             savedMessages = await store.LoadAsync(sessionKey, _cts.Token);
         }
 
-        var tools = BuildSessionTools(agentDef);
+        var peerId = sessionKey[(binding.Name.Length + 1)..];
+        var tools = BuildSessionTools(binding.Agent, binding.AgentName, binding.Name, peerId);
 
         var agent = new AgentRuntime(new AgentOptions
         {
-            Model = agentDef.Model,
-            SystemPrompt = agentDef.SystemPrompt,
+            Model = binding.Agent.Model,
+            SystemPrompt = binding.Agent.SystemPrompt,
             Tools = tools,
-            CompletionOptions = agentDef.CompletionOptions,
+            CompletionOptions = binding.Agent.CompletionOptions,
             Messages = savedMessages,
         });
 
         return _sessions.GetOrAdd(sessionKey, agent);
     }
 
-    private static IReadOnlyList<AgentTool> BuildSessionTools(AgentDefinition agentDef)
+    private IReadOnlyList<AgentTool> BuildSessionTools(
+        AgentDefinition agentDef, string agentName, string channelName, string peerId)
     {
         var tools = new List<AgentTool>(agentDef.Tools);
         tools.Add(new MemoryTool(agentDef.MemoryPath));
@@ -128,6 +133,8 @@ public sealed class Gateway : IAsyncDisposable
             tools.Add(new TodoTool(todoPath));
         if (agentDef.CostLedger is { } costLedger)
             tools.Add(new CostTool(costLedger));
+        if (agentDef.CronStore is { } cronStore && CronService is { } cronService)
+            tools.Add(new CronTool(cronStore, agentName, channelName, peerId, cronService));
         return tools;
     }
 
@@ -157,7 +164,7 @@ public sealed class Gateway : IAsyncDisposable
             return;
         }
 
-        var agent = await GetOrCreateSessionAsync(sessionKey, binding.Agent);
+        var agent = await GetOrCreateSessionAsync(sessionKey, binding);
 
         // If the agent is already running, queue as a follow-up
         if (agent.IsRunning)

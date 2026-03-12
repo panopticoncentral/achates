@@ -196,6 +196,50 @@ agents:
 - Uses Readability extraction for HTML, returns plain text
 - Params: `url` (required), `max_chars` (default 20,000, max 50,000)
 
+## iMessage Setup (macOS only)
+
+Achates can read your iMessage conversations directly from the local Messages database. This is read-only — it cannot send messages.
+
+### 1. Publish the server binary
+
+The iMessage database requires Full Disk Access (FDA). Rather than granting FDA to your terminal (which would give it to every process you launch), publish a standalone binary and grant FDA to just that:
+
+```bash
+dotnet publish src/Achates.Server -c Release -o ~/.achates/bin
+```
+
+### 2. Grant Full Disk Access
+
+1. Open **System Settings** > **Privacy & Security** > **Full Disk Access**
+2. Click `+`
+3. Press `Cmd+Shift+G` and type `~/.achates/bin/Achates.Server`
+4. Add it and ensure the toggle is on
+
+### 3. Configure
+
+In `~/.achates/config.yaml`, add `imessage` to your agent's tools:
+
+```yaml
+agents:
+  myagent:
+    tools: [session, memory, imessage]
+```
+
+### 4. Run from the published binary
+
+```bash
+~/.achates/bin/Achates.Server
+```
+
+You must run the published binary (not `dotnet run`) for FDA to apply.
+
+### Tools
+
+**imessage** — Read iMessage conversations
+- `chats`: list recent conversations with last message preview
+- `read`: view messages from a specific chat (by chat ID from the chats list)
+- `search`: full-text search across all messages
+
 ## Tools Reference
 
 | Tool | Description | Config required |
@@ -209,3 +253,4 @@ agents:
 | `web_search` | Search the web via Brave Search | `BRAVE_API_KEY` or `web.brave_api_key` |
 | `web_fetch` | Fetch and extract web page content | None |
 | `cost` | Query usage costs (summary, recent, breakdown) | None |
+| `imessage` | Read iMessage conversations (macOS only) | Full Disk Access on published binary |

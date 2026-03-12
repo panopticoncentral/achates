@@ -1,6 +1,7 @@
 using Achates.Agent.Tools;
 using Achates.Providers.Completions;
 using Achates.Providers.Models;
+using Achates.Server.Cron;
 using Achates.Server.Graph;
 
 namespace Achates.Server;
@@ -18,5 +19,6 @@ public sealed record AgentDefinition
     public required string MemoryPath { get; init; }
     public string? TodoPath { get; init; }
     public CostLedger? CostLedger { get; init; }
+    public CronStore? CronStore { get; init; }
     public IReadOnlyDictionary<string, GraphClient> GraphClients { get; init; } = new Dictionary<string, GraphClient>();
 }
