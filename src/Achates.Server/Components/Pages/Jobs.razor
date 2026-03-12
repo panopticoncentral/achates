@@ -1,0 +1,235 @@
+@page "/admin/jobs"
+@using Achates.Server.Cron
+@inject AdminService Admin
+
+<div class="container-fluid p-4">
+    <h1 class="mb-4">Scheduled Jobs</h1>
+
+    @if (jobs is null)
+    {
+        <p class="text-muted">Loading...</p>
+    }
+    else if (jobs.Count == 0)
+    {
+        <div class="card">
+            <div class="card-body text-muted">
+                No scheduled jobs. Agents can create jobs using the cron tool.
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h3 class="card-title">@jobs.Count</h3>
+                        <p class="card-text text-muted">Total Jobs</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h3 class="card-title">@jobs.Count(j => j.Job.Enabled)</h3>
+                        <p class="card-text text-muted">Enabled</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h3 class="card-title">@jobs.Count(j => j.Job.State.LastStatus == "error")</h3>
+                        <p class="card-text text-muted">Errored</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h3 class="card-title">@NextDueIn()</h3>
+                        <p class="card-text text-muted">Next Run</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Agent</th>
+                            <th>Schedule</th>
+                            <th>Deliver To</th>
+                            <th>Status</th>
+                            <th>Next Run</th>
+                            <th>Last Run</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var (agentName, job) in jobs.OrderBy(j => j.Job.State.NextRunAt))
+                        {
+                            <tr class="@(job.Enabled ? "" : "text-muted")">
+                                <td>
+                                    <strong>@job.Name</strong>
+                                    <br />
+                                    <code style="font-size: 0.75rem;">@job.Id</code>
+                                </td>
+                                <td>@agentName</td>
+                                <td style="font-size: 0.85rem;">@FormatSchedule(job.Schedule)</td>
+                                <td style="font-size: 0.85rem;">@job.Delivery.ChannelName:@job.Delivery.PeerId</td>
+                                <td>
+                                    @if (!job.Enabled)
+                                    {
+                                        <span class="badge bg-secondary">disabled</span>
+                                    }
+                                    else if (job.State.LastStatus == "error")
+                                    {
+                                        <span class="badge bg-danger" title="@job.State.LastError">error</span>
+                                        @if (job.State.ConsecutiveErrors > 1)
+                                        {
+                                            <span class="badge bg-warning text-dark ms-1">@(job.State.ConsecutiveErrors)x</span>
+                                        }
+                                    }
+                                    else if (job.State.LastStatus == "ok")
+                                    {
+                                        <span class="badge bg-success">ok</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-info">pending</span>
+                                    }
+                                </td>
+                                <td style="font-size: 0.85rem;">
+                                    @if (job.State.NextRunAt is { } next)
+                                    {
+                                        @next.ToLocalTime().ToString("g")
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">&mdash;</span>
+                                    }
+                                </td>
+                                <td style="font-size: 0.85rem;">
+                                    @if (job.State.LastRunAt is { } last)
+                                    {
+                                        @last.ToLocalTime().ToString("g")
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">&mdash;</span>
+                                    }
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm @(job.Enabled ? "btn-outline-secondary" : "btn-outline-success")"
+                                            @onclick="() => ToggleEnabled(agentName, job)">
+                                        @(job.Enabled ? "Disable" : "Enable")
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger ms-1"
+                                            @onclick="() => DeleteJob(agentName, job)">
+                                        Delete
+                                    </button>
+                                </td>
+                            </tr>
+                            @if (job.State.LastError is not null)
+                            {
+                                <tr>
+                                    <td colspan="8" class="py-1 px-3">
+                                        <small class="text-danger">@job.State.LastError</small>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-header">Job Messages</div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var (agentName, job) in jobs.OrderBy(j => j.Job.Name))
+                        {
+                            <tr>
+                                <td><strong>@job.Name</strong></td>
+                                <td style="font-size: 0.85rem; white-space: pre-wrap; max-width: 600px;">@Truncate(job.Message, 300)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<(string AgentName, CronJob Job)>? jobs;
+
+    protected override async Task OnInitializedAsync()
+    {
+        jobs = await Admin.GetAllJobsAsync();
+    }
+
+    private async Task ToggleEnabled(string agentName, CronJob job)
+    {
+        var store = Admin.GetCronStore(agentName);
+        if (store is null) return;
+
+        await store.UpdateAsync(job.Id, j => j.Enabled = !j.Enabled);
+        jobs = await Admin.GetAllJobsAsync();
+    }
+
+    private async Task DeleteJob(string agentName, CronJob job)
+    {
+        var store = Admin.GetCronStore(agentName);
+        if (store is null) return;
+
+        await store.RemoveAsync(job.Id);
+        jobs = await Admin.GetAllJobsAsync();
+    }
+
+    private static string FormatSchedule(CronSchedule schedule) => schedule switch
+    {
+        CronSchedule.At at => $"once at {at.Time.ToLocalTime():yyyy-MM-dd HH:mm}",
+        CronSchedule.Every every => $"every {FormatInterval(every.Interval)}",
+        CronSchedule.Cron cron => $"cron: {cron.Expression}" + (cron.Timezone is not null ? $" ({cron.Timezone})" : ""),
+        _ => "unknown",
+    };
+
+    private static string FormatInterval(TimeSpan interval)
+    {
+        if (interval.TotalDays >= 1) return $"{interval.TotalDays:F0} day(s)";
+        if (interval.TotalHours >= 1) return $"{interval.TotalHours:F0} hour(s)";
+        return $"{interval.TotalMinutes:F0} min";
+    }
+
+    private string NextDueIn()
+    {
+        var next = jobs?
+            .Where(j => j.Job.Enabled && j.Job.State.NextRunAt is not null)
+            .MinBy(j => j.Job.State.NextRunAt);
+
+        if (next is null || next.Value.Job.State.NextRunAt is not { } nextTime)
+            return "—";
+
+        var diff = nextTime - DateTimeOffset.UtcNow;
+        if (diff <= TimeSpan.Zero) return "now";
+        if (diff.TotalMinutes < 60) return $"{diff.TotalMinutes:F0}m";
+        if (diff.TotalHours < 24) return $"{diff.TotalHours:F0}h";
+        return $"{diff.TotalDays:F0}d";
+    }
+
+    private static string Truncate(string text, int maxLength) =>
+        text.Length <= maxLength ? text : text[..maxLength] + "...";
+}

@@ -1,5 +1,6 @@
 using Achates.Agent.Messages;
 using Achates.Configuration;
+using Achates.Server.Cron;
 
 namespace Achates.Server;
 
@@ -112,6 +113,33 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
         gatewayService.Gateway.Bindings
             .Select(b => b.AgentName)
             .Distinct();
+
+    // --- Jobs ---
+
+    public async Task<List<(string AgentName, CronJob Job)>> GetAllJobsAsync()
+    {
+        var result = new List<(string, CronJob)>();
+        foreach (var binding in gatewayService.Gateway.Bindings)
+        {
+            if (binding.Agent.CronStore is not { } store)
+                continue;
+
+            // Avoid duplicates if multiple channels share the same agent
+            if (result.Any(r => r.Item1 == binding.AgentName))
+                continue;
+
+            var jobs = await store.LoadAsync();
+            foreach (var job in jobs)
+                result.Add((binding.AgentName, job));
+        }
+        return result;
+    }
+
+    public CronStore? GetCronStore(string agentName)
+    {
+        return gatewayService.Gateway.Bindings
+            .FirstOrDefault(b => b.AgentName == agentName)?.Agent.CronStore;
+    }
 
     // --- Config ---
 
