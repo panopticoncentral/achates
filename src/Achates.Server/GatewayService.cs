@@ -21,10 +21,14 @@ public sealed class GatewayService(
     : IHostedLifecycleService, IAsyncDisposable
 {
     private Gateway? _gateway;
+    private FileSessionStore? _sessionStore;
     private readonly Dictionary<string, WebSocketTransport> _webSocketTransports = new();
 
     public Gateway Gateway =>
         _gateway ?? throw new InvalidOperationException("Gateway has not started yet.");
+
+    public FileSessionStore SessionStore =>
+        _sessionStore ?? throw new InvalidOperationException("Gateway has not started yet.");
 
     /// <summary>
     /// Get the WebSocket transport for a given channel name.
@@ -44,7 +48,8 @@ public sealed class GatewayService(
         var achatesHome = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".achates");
-        var sessionStore = new FileSessionStore(Path.Combine(achatesHome, "sessions"));
+        _sessionStore = new FileSessionStore(Path.Combine(achatesHome, "sessions"));
+        var sessionStore = _sessionStore;
 
         // Resolve agents
         var agents = new Dictionary<string, AgentDefinition>();
@@ -67,8 +72,11 @@ public sealed class GatewayService(
                 hasCalendar: hasTools.Contains("calendar"),
                 graphAccountNames: graphAccountNames,
                 hasWebSearch: hasTools.Contains("web_search"),
-                hasWebFetch: hasTools.Contains("web_fetch"));
+                hasWebFetch: hasTools.Contains("web_fetch"),
+                hasCost: hasTools.Contains("cost"));
             var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
+            var costLedgerPath = Path.Combine(achatesHome, "agents", name, "costs.jsonl");
+            var costLedger = new CostLedger(costLedgerPath);
 
             agents[name] = new AgentDefinition
             {
@@ -78,6 +86,7 @@ public sealed class GatewayService(
                 CompletionOptions = BuildCompletionOptions(agentConfig.Completion, model),
                 MemoryPath = memoryPath,
                 TodoPath = ExpandHome(agentConfig.TodoFile),
+                CostLedger = costLedger,
                 GraphClients = graphClients,
             };
 
@@ -195,6 +204,9 @@ public sealed class GatewayService(
                     break;
                 case "todo":
                     // TodoTool is added per-session in Gateway.BuildSessionTools
+                    break;
+                case "cost":
+                    // CostTool is added per-session in Gateway.BuildSessionTools
                     break;
                 case "mail":
                     if (graphClients.Count == 0)

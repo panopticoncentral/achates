@@ -1,0 +1,38 @@
+@inherits LayoutComponentBase
+
+<div class="d-flex vh-100">
+    <nav class="sidebar bg-dark text-white p-3 d-flex flex-column" style="width: 220px; flex-shrink: 0;">
+        <h5 class="mb-4 text-white-50">Achates Admin</h5>
+        <ul class="nav nav-pills flex-column gap-1">
+            <li class="nav-item">
+                <NavLink class="nav-link text-white" href="admin" Match="NavLinkMatch.All">
+                    Dashboard
+                </NavLink>
+            </li>
+            <li class="nav-item">
+                <NavLink class="nav-link text-white" href="admin/sessions">
+                    Sessions
+                </NavLink>
+            </li>
+            <li class="nav-item">
+                <NavLink class="nav-link text-white" href="admin/memory">
+                    Memory
+                </NavLink>
+            </li>
+            <li class="nav-item">
+                <NavLink class="nav-link text-white" href="admin/costs">
+                    Costs
+                </NavLink>
+            </li>
+            <li class="nav-item">
+                <NavLink class="nav-link text-white" href="admin/config">
+                    Config
+                </NavLink>
+            </li>
+        </ul>
+    </nav>
+
+    <main class="flex-grow-1 overflow-auto bg-body-tertiary">
+        @Body
+    </main>
+</div>

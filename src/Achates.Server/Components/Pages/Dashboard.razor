@@ -1,0 +1,103 @@
+@page "/admin"
+@inject AdminService Admin
+
+<div class="container-fluid p-4">
+    <h1 class="mb-4">Dashboard</h1>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h2 class="card-title">@agentNames.Count</h2>
+                    <p class="card-text text-muted">Agents</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h2 class="card-title">@bindings.Count</h2>
+                    <p class="card-text text-muted">Channels</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h2 class="card-title">@activeSessionCount</h2>
+                    <p class="card-text text-muted">Active Sessions</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h2 class="card-title">@sessionFiles.Count</h2>
+                    <p class="card-text text-muted">Persisted Sessions</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h4 class="mb-3">Agents</h4>
+    <div class="row g-3 mb-4">
+        @foreach (var agent in agentDetails)
+        {
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">@agent.Name</h5>
+                        <p class="card-text text-muted mb-2" style="font-size: 0.85rem;">@agent.Model</p>
+                        <div class="mb-2">
+                            @foreach (var channel in agent.Channels)
+                            {
+                                <span class="badge bg-primary me-1">@channel</span>
+                            }
+                        </div>
+                        <div>
+                            @foreach (var tool in agent.Tools)
+                            {
+                                <span class="badge bg-secondary me-1">@tool</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<ChannelBinding> bindings = [];
+    private List<SessionInfo> sessionFiles = [];
+    private int activeSessionCount;
+    private List<string> agentNames = [];
+    private List<AgentDetail> agentDetails = [];
+
+    protected override void OnInitialized()
+    {
+        bindings = Admin.GetBindings();
+        sessionFiles = Admin.GetSessionFiles();
+        activeSessionCount = Admin.GetActiveSessionKeys().Count;
+        agentNames = Admin.GetAgentNames().ToList();
+
+        agentDetails = bindings
+            .GroupBy(b => b.AgentName)
+            .Select(g => new AgentDetail
+            {
+                Name = g.Key,
+                Model = g.First().Agent.Model.Id,
+                Channels = g.Select(b => b.Name).ToList(),
+                Tools = g.First().Agent.Tools.Select(t => t.Name).ToList(),
+            })
+            .ToList();
+    }
+
+    private sealed class AgentDetail
+    {
+        public string Name { get; init; } = "";
+        public string Model { get; init; } = "";
+        public List<string> Channels { get; init; } = [];
+        public List<string> Tools { get; init; } = [];
+    }
+}

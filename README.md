@@ -208,3 +208,4 @@ agents:
 | `calendar` | View Outlook calendar | `graph` account(s) |
 | `web_search` | Search the web via Brave Search | `BRAVE_API_KEY` or `web.brave_api_key` |
 | `web_fetch` | Fetch and extract web page content | None |
+| `cost` | Query usage costs (summary, recent, breakdown) | None |

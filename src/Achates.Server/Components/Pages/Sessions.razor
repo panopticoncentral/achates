@@ -1,0 +1,213 @@
+@page "/admin/sessions"
+@page "/admin/sessions/{Channel}/{Peer}"
+@using Achates.Agent.Messages
+@using Achates.Providers.Completions.Content
+@inject AdminService Admin
+
+<div class="container-fluid p-4">
+    <h1 class="mb-4">Sessions</h1>
+
+    <div class="row">
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">Session Files</div>
+                <div class="list-group list-group-flush">
+                    @if (sessions.Count == 0)
+                    {
+                        <div class="list-group-item text-muted">No sessions found.</div>
+                    }
+                    @foreach (var group in sessions.GroupBy(s => s.Channel))
+                    {
+                        <div class="list-group-item bg-light fw-bold">@group.Key</div>
+                        @foreach (var session in group.OrderByDescending(s => s.LastModified))
+                        {
+                            var isActive = session.Channel == Channel && session.Peer == Peer;
+                            <a href="/admin/sessions/@session.Channel/@session.Peer"
+                               class="list-group-item list-group-item-action d-flex justify-content-between align-items-center @(isActive ? "active" : "")">
+                                <div>
+                                    <span>@session.Peer</span>
+                                    <br />
+                                    <small class="@(isActive ? "text-white-50" : "text-muted")">
+                                        @FormatSize(session.SizeBytes) &middot; @session.LastModified.ToString("g")
+                                    </small>
+                                </div>
+                                <button class="btn btn-sm @(isActive ? "btn-outline-light" : "btn-outline-danger")"
+                                        @onclick="() => DeleteSession(session)" @onclick:preventDefault @onclick:stopPropagation>
+                                    Delete
+                                </button>
+                            </a>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-8">
+            @if (Channel is not null && Peer is not null)
+            {
+                <div class="card">
+                    <div class="card-header">
+                        @Channel / @Peer
+                        @if (isActiveSession)
+                        {
+                            <span class="badge bg-success ms-2">Active</span>
+                        }
+                    </div>
+                    <div class="card-body" style="max-height: 75vh; overflow-y: auto;">
+                        @if (messages is null)
+                        {
+                            <p class="text-muted">Loading...</p>
+                        }
+                        else if (messages.Count == 0)
+                        {
+                            <p class="text-muted">Session file not found.</p>
+                        }
+                        else
+                        {
+                            @foreach (var msg in messages)
+                            {
+                                <div class="p-2 mb-2 rounded @GetMessageClass(msg)">
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <strong>@GetMessageRole(msg)</strong>
+                                        <small class="text-muted">
+                                            @DateTimeOffset.FromUnixTimeMilliseconds(msg.Timestamp).LocalDateTime.ToString("g")
+                                        </small>
+                                    </div>
+                                    @switch (msg)
+                                    {
+                                        case UserMessage user:
+                                            <div style="white-space: pre-wrap;">@user.Text</div>
+                                            break;
+                                        case AssistantMessage assistant:
+                                            @foreach (var content in assistant.Content)
+                                            {
+                                                @switch (content)
+                                                {
+                                                    case CompletionTextContent text:
+                                                        <div style="white-space: pre-wrap;">@text.Text</div>
+                                                        break;
+                                                    case CompletionToolCall tool:
+                                                        <div class="bg-white rounded p-2 my-1 border" style="font-size: 0.85rem;">
+                                                            <strong>@tool.Name</strong>
+                                                            <code class="d-block mt-1">@FormatArgs(tool.Arguments)</code>
+                                                        </div>
+                                                        break;
+                                                    case CompletionThinkingContent thinking:
+                                                        <details class="my-1">
+                                                            <summary class="text-muted" style="font-size: 0.85rem;">Thinking</summary>
+                                                            <div class="mt-1 text-muted" style="white-space: pre-wrap; font-size: 0.85rem;">@thinking.Thinking</div>
+                                                        </details>
+                                                        break;
+                                                }
+                                            }
+                                            <div class="mt-1" style="font-size: 0.75rem; color: #999;">
+                                                @assistant.Model &middot;
+                                                @assistant.Usage.Input in / @assistant.Usage.Output out
+                                                @if (assistant.Usage.Cost.Total > 0)
+                                                {
+                                                    <span>&middot; $@assistant.Usage.Cost.Total.ToString("F4")</span>
+                                                }
+                                            </div>
+                                            break;
+                                        case ToolResultMessage toolResult:
+                                            <div style="font-size: 0.85rem;">
+                                                <strong>@toolResult.ToolName</strong>
+                                                @if (toolResult.IsError)
+                                                {
+                                                    <span class="badge bg-danger ms-1">error</span>
+                                                }
+                                                @foreach (var content in toolResult.Content)
+                                                {
+                                                    @if (content is CompletionTextContent text)
+                                                    {
+                                                        <pre class="mt-1 mb-0" style="white-space: pre-wrap; font-size: 0.8rem; max-height: 200px; overflow-y: auto;">@text.Text</pre>
+                                                    }
+                                                }
+                                            </div>
+                                            break;
+                                        case SummaryMessage summary:
+                                            <div style="white-space: pre-wrap; font-style: italic;">@summary.Summary</div>
+                                            break;
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="card">
+                    <div class="card-body text-muted">
+                        Select a session to view its conversation history.
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string? Channel { get; set; }
+    [Parameter] public string? Peer { get; set; }
+
+    private List<SessionInfo> sessions = [];
+    private IReadOnlyList<AgentMessage>? messages;
+    private bool isActiveSession;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        sessions = Admin.GetSessionFiles();
+
+        if (Channel is not null && Peer is not null)
+        {
+            var loaded = await Admin.LoadSessionAsync(Channel, Peer);
+            messages = loaded ?? [];
+            isActiveSession = Admin.GetActiveSessionKeys().Contains($"{Channel}:{Peer}");
+        }
+        else
+        {
+            messages = null;
+        }
+    }
+
+    private async Task DeleteSession(SessionInfo session)
+    {
+        await Admin.DeleteSessionAsync(session.Channel, session.Peer);
+        sessions = Admin.GetSessionFiles();
+        if (Channel == session.Channel && Peer == session.Peer)
+        {
+            messages = null;
+        }
+    }
+
+    private static string GetMessageClass(AgentMessage msg) => msg switch
+    {
+        UserMessage => "message-user",
+        AssistantMessage => "message-assistant",
+        ToolResultMessage => "message-tool",
+        SummaryMessage => "message-summary",
+        _ => "",
+    };
+
+    private static string GetMessageRole(AgentMessage msg) => msg switch
+    {
+        UserMessage => "User",
+        AssistantMessage => "Assistant",
+        ToolResultMessage => "Tool Result",
+        SummaryMessage => "Summary",
+        _ => "Unknown",
+    };
+
+    private static string FormatArgs(Dictionary<string, object?> args)
+    {
+        return string.Join(", ", args.Select(kv => $"{kv.Key}: {kv.Value}"));
+    }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
+        _ => $"{bytes / (1024.0 * 1024.0):F1} MB",
+    };
+}

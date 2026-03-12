@@ -1,5 +1,6 @@
 using Achates.Configuration;
 using Achates.Server;
+using Achates.Server.Components;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,9 +17,15 @@ builder.Services.AddSingleton(userConfig);
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<GatewayService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GatewayService>());
+builder.Services.AddSingleton<AdminService>();
+
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
 
 var app = builder.Build();
 app.UseWebSockets();
+app.UseStaticFiles();
+app.UseAntiforgery();
 
 // --- Health check ---
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
@@ -46,6 +53,10 @@ app.Map("/ws", async (HttpContext context, GatewayService gatewayService) =>
     var ws = await context.WebSockets.AcceptWebSocketAsync();
     await transport.AcceptAsync(ws, peer, context.RequestAborted);
 });
+
+// --- Blazor admin console ---
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
 
 app.Run();
 return 0;

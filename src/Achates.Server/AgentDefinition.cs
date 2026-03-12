@@ -17,5 +17,6 @@ public sealed record AgentDefinition
     public required CompletionOptions? CompletionOptions { get; init; }
     public required string MemoryPath { get; init; }
     public string? TodoPath { get; init; }
+    public CostLedger? CostLedger { get; init; }
     public IReadOnlyDictionary<string, GraphClient> GraphClients { get; init; } = new Dictionary<string, GraphClient>();
 }

@@ -1,0 +1,101 @@
+@page "/admin/memory"
+@page "/admin/memory/{AgentName}"
+@inject AdminService Admin
+
+<div class="container-fluid p-4">
+    <h1 class="mb-4">Memory</h1>
+
+    <div class="row">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-header">Agents</div>
+                <div class="list-group list-group-flush">
+                    @if (memories.Count == 0)
+                    {
+                        <div class="list-group-item text-muted">No memory files found.</div>
+                    }
+                    @foreach (var mem in memories)
+                    {
+                        var isActive = mem.AgentName == AgentName;
+                        <a href="/admin/memory/@mem.AgentName"
+                           class="list-group-item list-group-item-action @(isActive ? "active" : "")">
+                            <div>@mem.AgentName</div>
+                            <small class="@(isActive ? "text-white-50" : "text-muted")">
+                                @FormatSize(mem.SizeBytes) &middot; @mem.LastModified.ToString("g")
+                            </small>
+                        </a>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-9">
+            @if (AgentName is not null)
+            {
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>@AgentName / memory.md</span>
+                        <div>
+                            @if (saveMessage is not null)
+                            {
+                                <span class="text-success me-2" style="font-size: 0.85rem;">@saveMessage</span>
+                            }
+                            <button class="btn btn-sm btn-primary" @onclick="Save" disabled="@saving">
+                                @(saving ? "Saving..." : "Save")
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <textarea class="form-control memory-editor" @bind="content" rows="25"></textarea>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="card">
+                    <div class="card-body text-muted">
+                        Select an agent to view and edit its memory.
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string? AgentName { get; set; }
+
+    private List<MemoryInfo> memories = [];
+    private string content = "";
+    private bool saving;
+    private string? saveMessage;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        memories = Admin.GetMemoryFiles();
+        saveMessage = null;
+
+        if (AgentName is not null)
+        {
+            content = await Admin.LoadMemoryAsync(AgentName);
+        }
+    }
+
+    private async Task Save()
+    {
+        if (AgentName is null) return;
+        saving = true;
+        saveMessage = null;
+        await Admin.SaveMemoryAsync(AgentName, content);
+        saving = false;
+        saveMessage = "Saved.";
+        memories = Admin.GetMemoryFiles();
+    }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
+        _ => $"{bytes / (1024.0 * 1024.0):F1} MB",
+    };
+}

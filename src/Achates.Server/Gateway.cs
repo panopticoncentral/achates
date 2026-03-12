@@ -23,6 +23,9 @@ public sealed class Gateway : IAsyncDisposable
     private readonly ConcurrentDictionary<string, AgentRuntime> _sessions = new();
     private readonly CancellationTokenSource _cts = new();
 
+    public IReadOnlyList<ChannelBinding> Bindings => _bindings;
+    public ICollection<string> ActiveSessionKeys => _sessions.Keys;
+
     /// <summary>
     /// Raised for every agent event.
     /// Useful for logging, rendering, or broadcasting.
@@ -70,6 +73,15 @@ public sealed class Gateway : IAsyncDisposable
         }
     }
 
+    public async Task RemoveSessionAsync(string sessionKey)
+    {
+        if (_sessions.TryRemove(sessionKey, out var existing))
+            existing.Abort();
+
+        if (_sessionStore is { } store)
+            await store.DeleteAsync(sessionKey, _cts.Token);
+    }
+
     private static async Task SendTypingLoopAsync(ITransport transport, string peerId, CancellationToken cancellationToken)
     {
         try
@@ -114,6 +126,8 @@ public sealed class Gateway : IAsyncDisposable
         tools.Add(new MemoryTool(agentDef.MemoryPath));
         if (agentDef.TodoPath is { } todoPath)
             tools.Add(new TodoTool(todoPath));
+        if (agentDef.CostLedger is { } costLedger)
+            tools.Add(new CostTool(costLedger));
         return tools;
     }
 
@@ -183,9 +197,31 @@ public sealed class Gateway : IAsyncDisposable
                     responseText += delta.Delta;
                     break;
 
-                case MessageEndEvent { Message: AssistantMessage { StopReason: not CompletionStopReason.ToolUse } }:
+                case MessageEndEvent { Message: AssistantMessage assistantMsg }:
+                    // Record cost for every completion (including tool-use turns)
+                    if (binding.Agent.CostLedger is { } costLedger)
+                    {
+                        _ = costLedger.AppendAsync(new CostEntry
+                        {
+                            Timestamp = DateTimeOffset.UtcNow,
+                            Model = assistantMsg.Model,
+                            Channel = binding.Name,
+                            Peer = message.PeerId,
+                            InputTokens = assistantMsg.Usage.Input,
+                            OutputTokens = assistantMsg.Usage.Output,
+                            CacheReadTokens = assistantMsg.Usage.CacheRead,
+                            CacheWriteTokens = assistantMsg.Usage.CacheWrite,
+                            CostTotal = assistantMsg.Usage.Cost.Total,
+                            CostInput = assistantMsg.Usage.Cost.Input,
+                            CostOutput = assistantMsg.Usage.Cost.Output,
+                            CostCacheRead = assistantMsg.Usage.Cost.CacheRead,
+                            CostCacheWrite = assistantMsg.Usage.Cost.CacheWrite,
+                        });
+                    }
+
                     // Turn is done and not continuing with tools — send the response
-                    if (!string.IsNullOrWhiteSpace(responseText))
+                    if (assistantMsg.StopReason is not CompletionStopReason.ToolUse
+                        && !string.IsNullOrWhiteSpace(responseText))
                     {
                         await binding.Transport.SendAsync(new TransportMessage
                         {

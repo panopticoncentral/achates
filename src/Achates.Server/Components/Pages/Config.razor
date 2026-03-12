@@ -1,0 +1,66 @@
+@page "/admin/config"
+@inject AdminService Admin
+
+<div class="container-fluid p-4">
+    <h1 class="mb-4">Configuration</h1>
+
+    <div class="row g-3 mb-4">
+        @foreach (var binding in bindings)
+        {
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        Channel: <strong>@binding.Name</strong>
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-sm mb-0">
+                            <tr>
+                                <td class="text-muted" style="width: 120px;">Agent</td>
+                                <td>@binding.AgentName</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">Transport</td>
+                                <td>@binding.Transport.GetType().Name</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">Model</td>
+                                <td>@binding.Agent.Model.Id</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">Context</td>
+                                <td>@binding.Agent.Model.ContextWindow.ToString("N0") tokens</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">Tools</td>
+                                <td>
+                                    @foreach (var tool in binding.Agent.Tools)
+                                    {
+                                        <span class="badge bg-secondary me-1">@tool.Name</span>
+                                    }
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="card">
+        <div class="card-header">config.yaml (secrets masked)</div>
+        <div class="card-body p-0">
+            <pre class="config-view mb-0">@rawConfig</pre>
+        </div>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<ChannelBinding> bindings = [];
+    private string rawConfig = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        bindings = Admin.GetBindings();
+        rawConfig = await Admin.GetRawConfigAsync();
+    }
+}

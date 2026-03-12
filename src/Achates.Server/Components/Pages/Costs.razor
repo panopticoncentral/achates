@@ -1,0 +1,233 @@
+@page "/admin/costs"
+@inject AdminService Admin
+
+<div class="container-fluid p-4">
+    <h1 class="mb-4">Costs</h1>
+
+    <div class="row mb-3">
+        <div class="col-auto">
+            <select class="form-select" @bind="selectedAgent">
+                @foreach (var name in agentNames)
+                {
+                    <option value="@name">@name</option>
+                }
+            </select>
+        </div>
+        <div class="col-auto">
+            <div class="btn-group">
+                <button class="btn @(period == "today" ? "btn-primary" : "btn-outline-primary")" @onclick='() => SetPeriod("today")'>Today</button>
+                <button class="btn @(period == "week" ? "btn-primary" : "btn-outline-primary")" @onclick='() => SetPeriod("week")'>Week</button>
+                <button class="btn @(period == "month" ? "btn-primary" : "btn-outline-primary")" @onclick='() => SetPeriod("month")'>Month</button>
+                <button class="btn @(period == "all" ? "btn-primary" : "btn-outline-primary")" @onclick='() => SetPeriod("all")'>All</button>
+            </div>
+        </div>
+    </div>
+
+    @if (entries is not null)
+    {
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h3 class="card-title">$@totalCost.ToString("F4")</h3>
+                        <p class="card-text text-muted">Total Cost</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h3 class="card-title">@entries.Count</h3>
+                        <p class="card-text text-muted">Completions</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h3 class="card-title">@FormatTokens(totalInputTokens)</h3>
+                        <p class="card-text text-muted">Input Tokens</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h3 class="card-title">@FormatTokens(totalOutputTokens)</h3>
+                        <p class="card-text text-muted">Output Tokens</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">By Day</div>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th class="text-end">Completions</th>
+                                    <th class="text-end">Cost</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var day in byDay)
+                                {
+                                    <tr>
+                                        <td>@day.Key</td>
+                                        <td class="text-end">@day.Count</td>
+                                        <td class="text-end">$@day.Cost.ToString("F4")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">By Model</div>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Model</th>
+                                    <th class="text-end">Completions</th>
+                                    <th class="text-end">Cost</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var model in byModel)
+                                {
+                                    <tr>
+                                        <td>@model.Key</td>
+                                        <td class="text-end">@model.Count</td>
+                                        <td class="text-end">$@model.Cost.ToString("F4")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-header">Recent Entries</div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Model</th>
+                            <th>Channel</th>
+                            <th class="text-end">Input</th>
+                            <th class="text-end">Output</th>
+                            <th class="text-end">Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entry in entries.OrderByDescending(e => e.Timestamp).Take(50))
+                        {
+                            <tr>
+                                <td>@entry.Timestamp.LocalDateTime.ToString("g")</td>
+                                <td style="font-size: 0.85rem;">@ShortModel(entry.Model)</td>
+                                <td>@entry.Channel:@entry.Peer</td>
+                                <td class="text-end">@entry.InputTokens.ToString("N0")</td>
+                                <td class="text-end">@entry.OutputTokens.ToString("N0")</td>
+                                <td class="text-end">$@entry.CostTotal.ToString("F4")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<string> agentNames = [];
+    private string selectedAgent = "";
+    private string period = "today";
+    private IReadOnlyList<CostEntry>? entries;
+    private decimal totalCost;
+    private long totalInputTokens;
+    private long totalOutputTokens;
+    private List<GroupRow> byDay = [];
+    private List<GroupRow> byModel = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        agentNames = Admin.GetAgentNames().ToList();
+        if (agentNames.Count > 0)
+        {
+            selectedAgent = agentNames[0];
+            await LoadData();
+        }
+    }
+
+    private async Task SetPeriod(string newPeriod)
+    {
+        period = newPeriod;
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        var ledger = Admin.GetCostLedger(selectedAgent);
+        if (ledger is null)
+        {
+            entries = [];
+            return;
+        }
+
+        var from = period switch
+        {
+            "today" => (DateTimeOffset?)DateTimeOffset.UtcNow.Date,
+            "week" => DateTimeOffset.UtcNow.AddDays(-7),
+            "month" => DateTimeOffset.UtcNow.AddDays(-30),
+            _ => null,
+        };
+
+        entries = await ledger.QueryAsync(from);
+        totalCost = entries.Sum(e => e.CostTotal);
+        totalInputTokens = entries.Sum(e => (long)e.InputTokens);
+        totalOutputTokens = entries.Sum(e => (long)e.OutputTokens);
+
+        byDay = entries
+            .GroupBy(e => e.Timestamp.LocalDateTime.ToString("yyyy-MM-dd"))
+            .Select(g => new GroupRow { Key = g.Key, Count = g.Count(), Cost = g.Sum(e => e.CostTotal) })
+            .OrderByDescending(r => r.Key)
+            .ToList();
+
+        byModel = entries
+            .GroupBy(e => e.Model)
+            .Select(g => new GroupRow { Key = g.Key, Count = g.Count(), Cost = g.Sum(e => e.CostTotal) })
+            .OrderByDescending(r => r.Cost)
+            .ToList();
+    }
+
+    private static string FormatTokens(long tokens) => tokens switch
+    {
+        >= 1_000_000 => $"{tokens / 1_000_000.0:F1}M",
+        >= 1_000 => $"{tokens / 1_000.0:F1}K",
+        _ => tokens.ToString(),
+    };
+
+    private static string ShortModel(string model)
+    {
+        var slash = model.LastIndexOf('/');
+        return slash >= 0 ? model[(slash + 1)..] : model;
+    }
+
+    private sealed class GroupRow
+    {
+        public string Key { get; init; } = "";
+        public int Count { get; init; }
+        public decimal Cost { get; init; }
+    }
+}

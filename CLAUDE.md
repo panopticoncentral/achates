@@ -71,7 +71,7 @@ Console (standalone, no config dependency)
 ### Tool System (`AgentTool` subclasses)
 - `AgentTool` is the preferred pattern (class-based). Subclass and implement `Name`, `Description`, `Parameters` (JSON Schema as `JsonElement`), `ExecuteAsync()`.
 - Returns `AgentToolResult` with `Content` (list of `CompletionContent`) and optional `Details` (for UI display).
-- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`.
+- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`.
 - Tools can be shared (same instance for all sessions) or per-session. The Gateway builds per-session tool lists via `BuildSessionTools()` (e.g. `MemoryTool` uses per-agent memory path).
 - Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
 
@@ -83,19 +83,23 @@ Console (standalone, no config dependency)
 ### Gateway (`Achates.Server`)
 - `Gateway` — takes a list of `ChannelBinding` (transport + agent pairs) and an optional `ISessionStore`. Each `channelName:peerId` pair gets its own `AgentRuntime` instance configured from the channel's `AgentDefinition`. Routes inbound messages, accumulates text deltas, sends responses back. Persists sessions after each completed response. Sends typing indicators via a keepalive loop (4s interval). Handles `/new` command to reset sessions.
 - `ChannelBinding` — binds a channel name to a transport and an agent definition.
-- `AgentDefinition` — resolved agent with Model, SystemPrompt, Tools, CompletionOptions, MemoryPath, GraphClient.
+- `AgentDefinition` — resolved agent with Model, SystemPrompt, Tools, CompletionOptions, MemoryPath, CostLedger, GraphClient.
 - `FileSessionStore` — stores conversation history as JSON files in `~/.achates/sessions/{channelName}/{peerId}.json`.
 - `MemoryTool` — per-agent persistent memory at `~/.achates/agents/{agentName}/memory.md`. Read/save actions; survives `/new` resets. Shared across all peers using the same agent.
 - `MailTool` — reads Outlook email via Microsoft Graph API. Actions: list, read, search. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
 - `CalendarTool` — reads Outlook calendar via Microsoft Graph API. Actions: upcoming, read, availability. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
 - `WebSearchTool` — searches the web via Brave Search API. Parameters: query, count. Returns numbered results with title, URL, description. Singleton; requires `brave_api_key` in config or `BRAVE_API_KEY` env var.
 - `WebFetchTool` — fetches a URL and extracts readable content using SmartReader (Readability). Parameters: url, max_chars. Handles HTML, JSON, plain text. Singleton; no config required.
+- `CostTool` — queries the persistent cost ledger. Actions: summary (totals for a period), recent (last N entries), breakdown (grouped by day or model). Per-session; requires `cost` in agent's tools list. Ledger is always recorded regardless of tool config.
 - `GraphClient` (`src/Achates.Server/Graph/`) — Microsoft Graph API client supporting two auth flows. Multiple named accounts per agent. Created per-account during startup. Eagerly authenticates so device code prompts appear at startup. `AsyncLocal` notifier routes device code messages through the transport to the user's chat. Flow is selected by presence of `client_secret`:
   - **Client credentials** (work/school): `client_secret` set → application permissions, `/users/{email}/` paths. Requires `tenant_id`, `user_email`.
   - **Device code** (personal or work/school): no `client_secret` → delegated permissions, `/me/` paths. `tenant_id` defaults to `consumers`. Token cache persisted at `~/.achates/graph-token-cache.bin`.
 - `GatewayService` — ASP.NET Core `IHostedLifecycleService`. Resolves agents and channels from config at startup, creates transports, builds `ChannelBinding` list, creates gateway.
 - WebSocket endpoint: `/ws` (query params: `channel`, `peer`)
 - Health check: `GET /health`
+- Admin console: Blazor Interactive Server UI at `/admin`. Pages: Dashboard, Sessions, Memory, Costs, Config.
+- `AdminService` — singleton data access layer for admin pages. Reads sessions, memory, costs, config from disk. Delegates session deletion to `Gateway.RemoveSessionAsync()`.
+- Blazor files live in `Components/` (App, Routes, Layout, Pages). Static assets in `wwwroot/css/` (Bootstrap 5, app.css).
 
 ## Conventions
 
@@ -116,7 +120,7 @@ agents:
   paul:
     description: Personal assistant
     model: anthropic/claude-sonnet-4
-    tools: [session, memory, todo, mail, calendar, web_search, web_fetch]
+    tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost]
     todo_file: ~/path/to/todo.md
     web:
       brave_api_key: BSA...  # or set BRAVE_API_KEY env var
@@ -155,5 +159,6 @@ Loaded by `ConfigLoader.Load()`. Env var override: `ACHATES_CONFIG_PATH`. YAML u
 ~/.achates/config.yaml                          Configuration
 ~/.achates/sessions/{channelName}/{peerId}.json  Conversation history
 ~/.achates/agents/{agentName}/memory.md          Agent memory (shared across peers)
+~/.achates/agents/{agentName}/costs.jsonl        Cost ledger (append-only, always recorded)
 ~/.achates/graph-token-cache.bin                 Graph device code token cache
 ```
