@@ -1,8 +1,8 @@
 using System.Net;
 using System.Text;
 using Markdig;
+using Markdig.Extensions.Tables;
 using Markdig.Extensions.TaskLists;
-using Markdig.Renderers;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 
@@ -16,6 +16,7 @@ public static class TelegramHtmlRenderer
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseEmphasisExtras()
         .UseTaskLists()
+        .UsePipeTables()
         .Build();
 
     public static string Convert(string markdown)
@@ -70,6 +71,10 @@ public static class TelegramHtmlRenderer
                     RenderListItem(sb, listItem, listDepth);
                     break;
 
+                case Table table:
+                    RenderTable(sb, table);
+                    break;
+
                 case ThematicBreakBlock:
                     sb.Append("---\n");
                     break;
@@ -108,6 +113,91 @@ public static class TelegramHtmlRenderer
         AppendLeafRawLines(sb, code);
 
         sb.Append("</code></pre>\n");
+    }
+
+    private static void RenderTable(StringBuilder sb, Table table)
+    {
+        // Extract cell text into a grid
+        var rows = new List<string[]>();
+        foreach (var block in table)
+        {
+            if (block is not TableRow row) continue;
+            var cells = new string[table.ColumnDefinitions.Count];
+            for (var c = 0; c < row.Count && c < cells.Length; c++)
+            {
+                if (row[c] is TableCell cell)
+                {
+                    var cellSb = new StringBuilder();
+                    foreach (var child in cell)
+                    {
+                        if (child is ParagraphBlock p && p.Inline is not null)
+                            RenderInlinesPlain(cellSb, p.Inline);
+                    }
+                    cells[c] = cellSb.ToString().Trim();
+                }
+                else
+                {
+                    cells[c] = "";
+                }
+            }
+            rows.Add(cells);
+        }
+
+        if (rows.Count == 0) return;
+
+        // Compute column widths
+        var colCount = table.ColumnDefinitions.Count;
+        var widths = new int[colCount];
+        foreach (var row in rows)
+            for (var c = 0; c < colCount && c < row.Length; c++)
+                widths[c] = Math.Max(widths[c], row[c].Length);
+
+        // Render as preformatted text
+        sb.Append("<pre>");
+        for (var r = 0; r < rows.Count; r++)
+        {
+            var row = rows[r];
+            for (var c = 0; c < colCount; c++)
+            {
+                if (c > 0) sb.Append(" │ ");
+                var cell = c < row.Length ? row[c] : "";
+                sb.Append(Escape(cell.PadRight(widths[c])));
+            }
+            sb.Append('\n');
+
+            // Separator after header row
+            if (r == 0)
+            {
+                for (var c = 0; c < colCount; c++)
+                {
+                    if (c > 0) sb.Append("─┼─");
+                    sb.Append(new string('─', widths[c]));
+                }
+                sb.Append('\n');
+            }
+        }
+        sb.Append("</pre>\n");
+    }
+
+    private static void RenderInlinesPlain(StringBuilder sb, ContainerInline container)
+    {
+        var inline = container.FirstChild;
+        while (inline is not null)
+        {
+            switch (inline)
+            {
+                case LiteralInline literal:
+                    sb.Append(literal.Content.ToString());
+                    break;
+                case CodeInline code:
+                    sb.Append(code.Content);
+                    break;
+                case ContainerInline nested:
+                    RenderInlinesPlain(sb, nested);
+                    break;
+            }
+            inline = inline.NextSibling;
+        }
     }
 
     private static void RenderList(StringBuilder sb, ListBlock list, int listDepth)
