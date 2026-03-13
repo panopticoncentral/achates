@@ -20,11 +20,19 @@ public sealed class AgentConfig
     public CompletionConfig? Completion { get; set; }
     public Dictionary<string, GraphConfig>? Graph { get; set; }
     public WebConfig? Web { get; set; }
+    public WithingsConfig? Withings { get; set; }
 }
 
 public sealed class WebConfig
 {
     public string? BraveApiKey { get; set; }
+}
+
+public sealed class WithingsConfig
+{
+    public string? ClientId { get; set; }
+    public string? ClientSecret { get; set; }
+    public string? RedirectUri { get; set; }
 }
 
 public sealed class NotesConfig

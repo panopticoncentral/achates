@@ -30,6 +30,35 @@ app.UseAntiforgery();
 // --- Health check ---
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
+// --- Withings OAuth callback ---
+app.MapGet("/withings/callback", async (HttpContext context, GatewayService gatewayService) =>
+{
+    var code = context.Request.Query["code"].FirstOrDefault();
+    if (string.IsNullOrEmpty(code))
+    {
+        context.Response.StatusCode = 400;
+        await context.Response.WriteAsync("Missing authorization code.");
+        return;
+    }
+
+    var client = gatewayService.WithingsClient;
+    if (client is null)
+    {
+        context.Response.StatusCode = 404;
+        await context.Response.WriteAsync("Withings is not configured.");
+        return;
+    }
+
+    await client.ExchangeCodeAsync(code);
+    context.Response.ContentType = "text/html";
+    await context.Response.WriteAsync("""
+        <html><body style="font-family: system-ui; text-align: center; padding: 60px;">
+        <h1>Connected!</h1>
+        <p>Withings account linked successfully. You can close this tab.</p>
+        </body></html>
+        """);
+});
+
 // --- WebSocket ---
 app.Map("/ws", async (HttpContext context, GatewayService gatewayService) =>
 {

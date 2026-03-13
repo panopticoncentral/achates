@@ -7,6 +7,7 @@ using Achates.Providers.Models;
 using Achates.Server.Cron;
 using Achates.Server.Graph;
 using Achates.Server.Tools;
+using Achates.Server.Withings;
 
 namespace Achates.Server;
 
@@ -25,6 +26,7 @@ public sealed class GatewayService(
     private CronService? _cronService;
     private FileSessionStore? _sessionStore;
     private readonly Dictionary<string, WebSocketTransport> _webSocketTransports = new();
+    private WithingsClient? _withingsClient;
 
     public Gateway Gateway =>
         _gateway ?? throw new InvalidOperationException("Gateway has not started yet.");
@@ -35,6 +37,8 @@ public sealed class GatewayService(
     /// <summary>
     /// Get the WebSocket transport for a given channel name.
     /// </summary>
+    public WithingsClient? WithingsClient => _withingsClient;
+
     public WebSocketTransport? GetWebSocketTransport(string channelName) =>
         _webSocketTransports.GetValueOrDefault(channelName);
 
@@ -63,7 +67,10 @@ public sealed class GatewayService(
                 cancellationToken);
 
             var graphClients = CreateGraphClients(agentConfig.Graph);
-            var tools = ResolveTools(agentConfig, model, graphClients);
+            var withingsClient = CreateWithingsClient(agentConfig.Withings);
+            if (withingsClient is not null)
+                _withingsClient = withingsClient;
+            var tools = ResolveTools(agentConfig, model, graphClients, withingsClient);
             var hasTools = agentConfig.Tools ?? [];
             var graphAccountNames = graphClients.Keys.ToList();
             var systemPrompt = SystemPrompt.Build(agentConfig.Description, agentConfig.Prompt, tools,
@@ -77,7 +84,8 @@ public sealed class GatewayService(
                 hasWebFetch: hasTools.Contains("web_fetch"),
                 hasCost: hasTools.Contains("cost"),
                 hasIMessage: hasTools.Contains("imessage"),
-                hasCron: hasTools.Contains("cron"));
+                hasCron: hasTools.Contains("cron"),
+                hasHealth: hasTools.Contains("health"));
             var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
             var costLedgerPath = Path.Combine(achatesHome, "agents", name, "costs.jsonl");
             var costLedger = new CostLedger(costLedgerPath);
@@ -209,7 +217,7 @@ public sealed class GatewayService(
     }
 
     private IReadOnlyList<AgentTool> ResolveTools(AgentConfig agentConfig, Model model,
-        IReadOnlyDictionary<string, GraphClient> graphClients)
+        IReadOnlyDictionary<string, GraphClient> graphClients, WithingsClient? withingsClient)
     {
         if (!model.Parameters.HasFlag(ModelParameters.Tools))
             return [];
@@ -263,6 +271,11 @@ public sealed class GatewayService(
                         "Library", "Messages", "chat.db");
                     tools.Add(new IMessageTool(messagesDb));
                     break;
+                case "health":
+                    if (withingsClient is null)
+                        throw new InvalidOperationException("Health tool requires withings configuration.");
+                    tools.Add(new HealthTool(withingsClient));
+                    break;
                 default:
                     throw new InvalidOperationException($"Unknown tool '{toolName}'.");
             }
@@ -285,6 +298,15 @@ public sealed class GatewayService(
         }
 
         return clients;
+    }
+
+    private WithingsClient? CreateWithingsClient(WithingsConfig? withingsConfig)
+    {
+        if (withingsConfig?.ClientId is null)
+            return null;
+
+        return new WithingsClient(withingsConfig, httpClientFactory.CreateClient("withings"),
+            loggerFactory.CreateLogger<WithingsClient>());
     }
 
     private static CompletionOptions? BuildCompletionOptions(CompletionConfig? completion, Model model)

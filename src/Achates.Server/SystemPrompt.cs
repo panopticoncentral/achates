@@ -21,7 +21,8 @@ public static class SystemPrompt
         bool hasWebFetch = false,
         bool hasCost = false,
         bool hasIMessage = false,
-        bool hasCron = false)
+        bool hasCron = false,
+        bool hasHealth = false)
     {
         var lines = new List<string>();
 
@@ -147,6 +148,16 @@ public static class SystemPrompt
             lines.Add("You can read the user's iMessage conversations via the imessage tool.");
             lines.Add("Use 'chats' to list recent conversations, 'read' to view messages in a specific chat, and 'search' to find messages.");
             lines.Add("Chat IDs from the chats list can be used with the read action.");
+            lines.Add("");
+        }
+
+        if (hasHealth)
+        {
+            lines.Add("## Health");
+            lines.Add("You can query the user's health data from Withings via the health tool.");
+            lines.Add("Actions: weight (body composition), blood_pressure, sleep, activity.");
+            lines.Add("Use the 'days' parameter to control the lookback period (default 7).");
+            lines.Add("If the user hasn't authorized yet, the tool will provide an authorization URL.");
             lines.Add("");
         }
 

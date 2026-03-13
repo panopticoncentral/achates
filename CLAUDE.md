@@ -71,7 +71,7 @@ Console (standalone, no config dependency)
 ### Tool System (`AgentTool` subclasses)
 - `AgentTool` is the preferred pattern (class-based). Subclass and implement `Name`, `Description`, `Parameters` (JSON Schema as `JsonElement`), `ExecuteAsync()`.
 - Returns `AgentToolResult` with `Content` (list of `CompletionContent`) and optional `Details` (for UI display).
-- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`, `CronTool`, `IMessageTool`.
+- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`, `CronTool`, `IMessageTool`, `HealthTool`.
 - Tools can be shared (same instance for all sessions) or per-session. The Gateway builds per-session tool lists via `BuildSessionTools()` (e.g. `MemoryTool` uses per-agent memory path).
 - Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
 
@@ -93,6 +93,8 @@ Console (standalone, no config dependency)
 - `CostTool` — queries the persistent cost ledger. Actions: summary (totals for a period), recent (last N entries), breakdown (grouped by day or model). Per-session; requires `cost` in agent's tools list. Ledger is always recorded regardless of tool config.
 - `CronTool` — manages scheduled tasks. Actions: list, add, update, remove, run. Per-session; requires `cron` in agent's tools list. Schedule types: `at` (one-shot timestamp), `every` (interval in minutes), `cron` (cron expression with optional timezone). Jobs run in isolation (fresh AgentRuntime) and deliver results to the configured channel+peer. Delivery target defaults to the current session's channel+peer.
 - `IMessageTool` — reads local macOS iMessage database (`~/Library/Messages/chat.db`) via SQLite (read-only). Actions: chats (list recent conversations), read (messages from a chat by ID), search (full-text search). Singleton; requires Full Disk Access for the host process.
+- `HealthTool` — queries health data from Withings API. Actions: weight (body composition), blood_pressure, sleep, activity, authorize. Singleton; requires `withings` config with client_id and client_secret. OAuth 2.0 authorization code flow with browser redirect to `/withings/callback`.
+- `WithingsClient` (`src/Achates.Server/Withings/`) — Withings Health API client. OAuth 2.0 authorization code flow: user visits auth URL, Withings redirects to `/withings/callback`, tokens persisted at `~/.achates/withings-tokens.json`. Access tokens auto-refresh. All API calls are POST with form-encoded params; responses are `{ "status": 0, "body": { ... } }`.
 - `GraphClient` (`src/Achates.Server/Graph/`) — Microsoft Graph API client supporting two auth flows. Multiple named accounts per agent. Created per-account during startup. Eagerly authenticates so device code prompts appear at startup. `AsyncLocal` notifier routes device code messages through the transport to the user's chat. Flow is selected by presence of `client_secret`:
   - **Client credentials** (work/school): `client_secret` set → application permissions, `/users/{email}/` paths. Requires `tenant_id`, `user_email`.
   - **Device code** (personal or work/school): no `client_secret` → delegated permissions, `/me/` paths. `tenant_id` defaults to `consumers`. Token cache persisted at `~/.achates/graph-token-cache.bin`.
@@ -123,7 +125,7 @@ agents:
   paul:
     description: Personal assistant
     model: anthropic/claude-sonnet-4
-    tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost, cron, imessage]
+    tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost, cron, imessage, health]
     todo_file: ~/path/to/todo.md
     web:
       brave_api_key: BSA...  # or set BRAVE_API_KEY env var
@@ -137,6 +139,10 @@ agents:
         client_id: <app-client-id>
         client_secret: <secret>          # presence triggers client credentials flow; or set GRAPH_CLIENT_SECRET env var
         user_email: user@example.com     # required for client credentials
+    withings:
+      client_id: <withings-client-id>
+      client_secret: <withings-client-secret>  # or set WITHINGS_CLIENT_SECRET env var
+      redirect_uri: http://localhost:5000/withings/callback  # optional, this is the default
     completion:
       reasoning_effort: medium
 
@@ -165,4 +171,5 @@ Loaded by `ConfigLoader.Load()`. Env var override: `ACHATES_CONFIG_PATH`. YAML u
 ~/.achates/agents/{agentName}/costs.jsonl        Cost ledger (append-only, always recorded)
 ~/.achates/agents/{agentName}/cron.json          Scheduled task definitions and state
 ~/.achates/graph-token-cache.bin                 Graph device code token cache
+~/.achates/withings-tokens.json                  Withings OAuth tokens (access + refresh)
 ```
