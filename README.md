@@ -240,6 +240,50 @@ You must run the published binary (not `dotnet run`) for FDA to apply.
 - `read`: view messages from a specific chat (by chat ID from the chats list)
 - `search`: full-text search across all messages
 
+## Withings Health Data Setup
+
+Achates can query health data from Withings — weight, body composition, blood pressure, sleep, and activity.
+
+### 1. Register a Withings app
+
+1. Go to [developer.withings.com](https://developer.withings.com) and create a developer account
+2. Create a new application
+3. Set the **Callback URL** to `http://localhost:5000/withings/callback`
+4. Copy your **Client ID** and **Consumer Secret**
+
+### 2. Configure
+
+In `~/.achates/config.yaml`:
+
+```yaml
+agents:
+  myagent:
+    tools: [session, memory, health]
+    withings:
+      client_id: <your-client-id>
+      client_secret: <your-consumer-secret>
+```
+
+To keep the secret out of the config file, set the `WITHINGS_CLIENT_SECRET` environment variable instead and omit `client_secret` from the YAML.
+
+The `redirect_uri` defaults to `http://localhost:5000/withings/callback`. Override it in config if your server runs on a different port.
+
+### 3. First run
+
+On first use, the health tool returns an authorization URL. Open it in a browser, sign in with your Withings account, and authorize the app. You'll be redirected back to your local server, and you'll see a "Connected!" confirmation page.
+
+Tokens are cached at `~/.achates/withings-tokens.json` and refresh automatically (access tokens last 3 hours, refresh tokens last 1 year).
+
+### Tools
+
+**health** — Query Withings health data
+- `weight`: body composition (weight, fat ratio, muscle mass, bone mass)
+- `blood_pressure`: systolic/diastolic BP and heart rate
+- `sleep`: sleep stages (awake, light, deep, REM) with durations
+- `activity`: steps, distance, calories, active time, heart rate
+- `authorize`: get the authorization URL (called automatically if not yet authorized)
+- Params: `action` (required), `days` (lookback period, default 7)
+
 ## Tools Reference
 
 | Tool | Description | Config required |
@@ -254,3 +298,4 @@ You must run the published binary (not `dotnet run`) for FDA to apply.
 | `web_fetch` | Fetch and extract web page content | None |
 | `cost` | Query usage costs (summary, recent, breakdown) | None |
 | `imessage` | Read iMessage conversations (macOS only) | Full Disk Access on published binary |
+| `health` | Query Withings health data (weight, BP, sleep, activity) | `withings` client_id and client_secret |
