@@ -66,17 +66,18 @@ public sealed class GatewayService(
                 agentConfig.Model,
                 cancellationToken);
 
-            var graphClients = CreateGraphClients(agentConfig.Graph);
-            var withingsClient = CreateWithingsClient(agentConfig.Withings);
+            var toolsConfig = config.Tools;
+            var graphClients = CreateGraphClients(toolsConfig?.Graph);
+            var withingsClient = CreateWithingsClient(toolsConfig?.Withings);
             if (withingsClient is not null)
                 _withingsClient = withingsClient;
-            var tools = ResolveTools(agentConfig, model, graphClients, withingsClient);
+            var tools = ResolveTools(agentConfig, toolsConfig, model, graphClients, withingsClient);
             var hasTools = agentConfig.Tools ?? [];
             var graphAccountNames = graphClients.Keys.ToList();
             var systemPrompt = SystemPrompt.Build(agentConfig.Description, agentConfig.Prompt, tools,
-                hasTodo: agentConfig.TodoFile is not null,
+                hasTodo: toolsConfig?.Todo?.File is not null,
                 hasNotes: hasTools.Contains("notes"),
-                notesFolderName: ResolveNotesFolder(agentConfig),
+                notesFolderName: ResolveNotesFolder(toolsConfig),
                 hasMail: hasTools.Contains("mail"),
                 hasCalendar: hasTools.Contains("calendar"),
                 graphAccountNames: graphAccountNames,
@@ -99,7 +100,7 @@ public sealed class GatewayService(
                 Tools = tools,
                 CompletionOptions = BuildCompletionOptions(agentConfig.Completion, model),
                 MemoryPath = memoryPath,
-                TodoPath = ExpandHome(agentConfig.TodoFile),
+                TodoPath = ExpandHome(toolsConfig?.Todo?.File),
                 CostLedger = costLedger,
                 CronStore = cronStore,
                 GraphClients = graphClients,
@@ -216,8 +217,8 @@ public sealed class GatewayService(
             loggerFactory.CreateLogger<TelegramTransport>());
     }
 
-    private IReadOnlyList<AgentTool> ResolveTools(AgentConfig agentConfig, Model model,
-        IReadOnlyDictionary<string, GraphClient> graphClients, WithingsClient? withingsClient)
+    private IReadOnlyList<AgentTool> ResolveTools(AgentConfig agentConfig, ToolsConfig? toolsConfig,
+        Model model, IReadOnlyDictionary<string, GraphClient> graphClients, WithingsClient? withingsClient)
     {
         if (!model.Parameters.HasFlag(ModelParameters.Tools))
             return [];
@@ -248,7 +249,7 @@ public sealed class GatewayService(
                     tools.Add(new MailTool(graphClients));
                     break;
                 case "notes":
-                    tools.Add(new NotesTool(ResolveNotesFolder(agentConfig)));
+                    tools.Add(new NotesTool(ResolveNotesFolder(toolsConfig)));
                     break;
                 case "calendar":
                     if (graphClients.Count == 0)
@@ -256,7 +257,7 @@ public sealed class GatewayService(
                     tools.Add(new CalendarTool(graphClients));
                     break;
                 case "web_search":
-                    var braveKey = agentConfig.Web?.BraveApiKey
+                    var braveKey = toolsConfig?.WebSearch?.BraveApiKey
                         ?? Environment.GetEnvironmentVariable("BRAVE_API_KEY")
                         ?? throw new InvalidOperationException(
                             "web_search requires brave_api_key in config or BRAVE_API_KEY env var.");
@@ -329,8 +330,8 @@ public sealed class GatewayService(
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..])
             : path;
 
-    private static string ResolveNotesFolder(AgentConfig agentConfig) =>
-        string.IsNullOrWhiteSpace(agentConfig.Notes?.Folder) ? "Achates" : agentConfig.Notes.Folder;
+    private static string ResolveNotesFolder(ToolsConfig? toolsConfig) =>
+        string.IsNullOrWhiteSpace(toolsConfig?.Notes?.Folder) ? "Achates" : toolsConfig.Notes.Folder;
 
     private async Task<Model> ResolveModelAsync(string? providerId, string? modelId, CancellationToken cancellationToken)
     {

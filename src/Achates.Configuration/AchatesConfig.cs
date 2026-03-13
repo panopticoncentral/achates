@@ -3,6 +3,7 @@ namespace Achates.Configuration;
 public sealed class AchatesConfig
 {
     public string? Provider { get; set; }
+    public ToolsConfig? Tools { get; set; }
     public Dictionary<string, AgentConfig>? Agents { get; set; }
     public Dictionary<string, ChannelConfig>? Channels { get; set; }
     public ConsoleConfig? Console { get; set; }
@@ -15,15 +16,24 @@ public sealed class AgentConfig
     public string? Provider { get; set; }
     public List<string>? Tools { get; set; }
     public string? Prompt { get; set; }
-    public string? TodoFile { get; set; }
-    public NotesConfig? Notes { get; set; }
     public CompletionConfig? Completion { get; set; }
+}
+
+public sealed class ToolsConfig
+{
+    public TodoConfig? Todo { get; set; }
+    public NotesConfig? Notes { get; set; }
+    public WebSearchConfig? WebSearch { get; set; }
     public Dictionary<string, GraphConfig>? Graph { get; set; }
-    public WebConfig? Web { get; set; }
     public WithingsConfig? Withings { get; set; }
 }
 
-public sealed class WebConfig
+public sealed class TodoConfig
+{
+    public string? File { get; set; }
+}
+
+public sealed class WebSearchConfig
 {
     public string? BraveApiKey { get; set; }
 }

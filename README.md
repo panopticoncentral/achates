@@ -36,12 +36,14 @@ No admin consent is needed — you consent for yourself during sign-in.
 In `~/.achates/config.yaml`:
 
 ```yaml
+tools:
+  graph:
+    personal:
+      client_id: <your-application-client-id>
+
 agents:
   myagent:
     tools: [session, memory, mail, calendar]
-    graph:
-      personal:
-        client_id: <your-application-client-id>
 ```
 
 That's it — no `client_secret`, `tenant_id`, or `user_email` needed. The name (`personal` here) is up to you.
@@ -103,15 +105,17 @@ If you don't have admin rights, ask your tenant administrator to grant consent.
 In `~/.achates/config.yaml`:
 
 ```yaml
+tools:
+  graph:
+    work:
+      tenant_id: <your-directory-tenant-id>
+      client_id: <your-application-client-id>
+      client_secret: <your-client-secret>
+      user_email: you@yourcompany.com
+
 agents:
   myagent:
     tools: [session, memory, mail, calendar]
-    graph:
-      work:
-        tenant_id: <your-directory-tenant-id>
-        client_id: <your-application-client-id>
-        client_secret: <your-client-secret>
-        user_email: you@yourcompany.com
 ```
 
 To keep the secret out of the config file, set the `GRAPH_CLIENT_SECRET` environment variable instead and omit `client_secret` from the YAML.
@@ -129,17 +133,19 @@ No interactive sign-in needed. The agent can access mail and calendar immediatel
 You can configure both a personal and work account on the same agent:
 
 ```yaml
+tools:
+  graph:
+    personal:
+      client_id: <personal-app-client-id>
+    work:
+      tenant_id: <your-directory-tenant-id>
+      client_id: <work-app-client-id>
+      client_secret: <your-client-secret>
+      user_email: you@yourcompany.com
+
 agents:
   myagent:
     tools: [session, memory, mail, calendar]
-    graph:
-      personal:
-        client_id: <personal-app-client-id>
-      work:
-        tenant_id: <your-directory-tenant-id>
-        client_id: <work-app-client-id>
-        client_secret: <your-client-secret>
-        user_email: you@yourcompany.com
 ```
 
 When multiple accounts are configured, the mail and calendar tools gain an `account` parameter. The agent is told which accounts are available and will select the right one based on context, or you can ask explicitly (e.g. "check my work calendar").
@@ -153,11 +159,13 @@ Achates can access a restricted folder in Apple Notes on macOS. The Notes tool c
 In `~/.achates/config.yaml`:
 
 ```yaml
+tools:
+  notes:
+    folder: Achates
+
 agents:
   myagent:
     tools: [session, memory, notes]
-    notes:
-      folder: Achates
 ```
 
 If `notes.folder` is omitted, Achates defaults to the `Achates` folder. The tool will refuse access to notes outside that folder and will error if multiple accounts contain folders with the same name.
@@ -177,11 +185,13 @@ Achates can search the web and fetch page content. Web search uses the [Brave Se
 Set the `BRAVE_API_KEY` environment variable, or add it to your config:
 
 ```yaml
+tools:
+  web_search:
+    brave_api_key: BSA...
+
 agents:
   myagent:
     tools: [session, memory, web_search, web_fetch]
-    web:
-      brave_api_key: BSA...
 ```
 
 `web_fetch` works without an API key — it only needs `web_search` to have Brave configured.
@@ -256,12 +266,14 @@ Achates can query health data from Withings — weight, body composition, blood 
 In `~/.achates/config.yaml`:
 
 ```yaml
+tools:
+  withings:
+    client_id: <your-client-id>
+    client_secret: <your-consumer-secret>
+
 agents:
   myagent:
     tools: [session, memory, health]
-    withings:
-      client_id: <your-client-id>
-      client_secret: <your-consumer-secret>
 ```
 
 To keep the secret out of the config file, set the `WITHINGS_CLIENT_SECRET` environment variable instead and omit `client_secret` from the YAML.
@@ -290,12 +302,12 @@ Tokens are cached at `~/.achates/withings-tokens.json` and refresh automatically
 |------|-------------|-----------------|
 | `session` | Current time, model info, timezone | None |
 | `memory` | Persistent agent memory across sessions | None |
-| `todo` | Manage a Markdown todo list | `todo_file` path |
-| `notes` | Access Apple Notes (macOS only) | Optional `notes.folder` |
-| `mail` | Read Outlook email | `graph` account(s) |
-| `calendar` | View Outlook calendar | `graph` account(s) |
-| `web_search` | Search the web via Brave Search | `BRAVE_API_KEY` or `web.brave_api_key` |
+| `todo` | Manage a Markdown todo list | `tools.todo.file` path |
+| `notes` | Access Apple Notes (macOS only) | Optional `tools.notes.folder` |
+| `mail` | Read Outlook email | `tools.graph` account(s) |
+| `calendar` | View Outlook calendar | `tools.graph` account(s) |
+| `web_search` | Search the web via Brave Search | `BRAVE_API_KEY` or `tools.web_search.brave_api_key` |
 | `web_fetch` | Fetch and extract web page content | None |
 | `cost` | Query usage costs (summary, recent, breakdown) | None |
 | `imessage` | Read iMessage conversations (macOS only) | Full Disk Access on published binary |
-| `health` | Query Withings health data (weight, BP, sleep, activity) | `withings` client_id and client_secret |
+| `health` | Query Withings health data (weight, BP, sleep, activity) | `tools.withings` client_id and client_secret |

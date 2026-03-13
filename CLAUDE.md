@@ -2,7 +2,7 @@
 
 AI agent framework with pluggable providers, transports, and tools. .NET 10 preview.
 
-> **Keep this file up to date.** When you add, remove, or rename projects, change architectural patterns, or modify conventions, update the relevant sections of this file before finishing the task.
+> **Keep this file up to date.** When you add, remove, or rename projects, change architectural patterns, or modify conventions, update the relevant sections of this file before finishing the task. Also update `README.md` when changes affect configuration format, tool setup instructions, or user-facing behavior.
 
 ## Build & Test
 
@@ -121,28 +121,31 @@ Console (standalone, no config dependency)
 ```yaml
 provider: openrouter
 
+tools:
+  todo:
+    file: ~/path/to/todo.md
+  web_search:
+    brave_api_key: BSA...  # or set BRAVE_API_KEY env var
+  graph:
+    # Each entry is a named account. Multiple accounts supported.
+    personal:
+      client_id: <app-client-id>       # device code flow (no client_secret)
+      # tenant_id defaults to "consumers" for personal accounts
+    work:
+      tenant_id: <azure-tenant-id>
+      client_id: <app-client-id>
+      client_secret: <secret>          # presence triggers client credentials flow; or set GRAPH_CLIENT_SECRET env var
+      user_email: user@example.com     # required for client credentials
+  withings:
+    client_id: <withings-client-id>
+    client_secret: <withings-client-secret>  # or set WITHINGS_CLIENT_SECRET env var
+    redirect_uri: http://localhost:5000/withings/callback  # optional, this is the default
+
 agents:
   paul:
     description: Personal assistant
     model: anthropic/claude-sonnet-4
     tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost, cron, imessage, health]
-    todo_file: ~/path/to/todo.md
-    web:
-      brave_api_key: BSA...  # or set BRAVE_API_KEY env var
-    graph:
-      # Each entry is a named account. Multiple accounts supported.
-      personal:
-        client_id: <app-client-id>       # device code flow (no client_secret)
-        # tenant_id defaults to "consumers" for personal accounts
-      work:
-        tenant_id: <azure-tenant-id>
-        client_id: <app-client-id>
-        client_secret: <secret>          # presence triggers client credentials flow; or set GRAPH_CLIENT_SECRET env var
-        user_email: user@example.com     # required for client credentials
-    withings:
-      client_id: <withings-client-id>
-      client_secret: <withings-client-secret>  # or set WITHINGS_CLIENT_SECRET env var
-      redirect_uri: http://localhost:5000/withings/callback  # optional, this is the default
     completion:
       reasoning_effort: medium
 
