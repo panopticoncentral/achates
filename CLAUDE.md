@@ -2,7 +2,7 @@
 
 AI agent framework with pluggable providers, transports, and tools. .NET 10 preview.
 
-> **Keep this file up to date.** When you add, remove, or rename projects, change architectural patterns, or modify conventions, update the relevant sections of this file before finishing the task. Also update `README.md` when changes affect configuration format, tool setup instructions, or user-facing behavior.
+> **Keep this file up to date.** When you add, remove, or rename projects, change architectural patterns, or modify conventions, update the relevant sections of this file before finishing the task. Also update `README.md` when changes affect configuration format, tool setup instructions, or user-facing behavior. Update `docs/configuration.md` when changing the config system (adding/removing/renaming fields, env vars, data paths).
 
 ## Build & Test
 
@@ -145,6 +145,7 @@ agents:
   paul:
     description: Personal assistant
     model: anthropic/claude-sonnet-4
+    prompt_file: ~/.achates/agents/paul/prompt.md  # or inline: prompt: "You are..."
     tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost, cron, imessage, health]
     completion:
       reasoning_effort: medium

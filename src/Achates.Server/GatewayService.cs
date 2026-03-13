@@ -66,6 +66,8 @@ public sealed class GatewayService(
                 agentConfig.Model,
                 cancellationToken);
 
+            var prompt = ResolvePrompt(agentConfig);
+
             var toolsConfig = config.Tools;
             var graphClients = CreateGraphClients(toolsConfig?.Graph);
             var withingsClient = CreateWithingsClient(toolsConfig?.Withings);
@@ -74,7 +76,7 @@ public sealed class GatewayService(
             var tools = ResolveTools(agentConfig, toolsConfig, model, graphClients, withingsClient);
             var hasTools = agentConfig.Tools ?? [];
             var graphAccountNames = graphClients.Keys.ToList();
-            var systemPrompt = SystemPrompt.Build(agentConfig.Description, agentConfig.Prompt, tools,
+            var systemPrompt = SystemPrompt.Build(agentConfig.Description, prompt, tools,
                 hasTodo: toolsConfig?.Todo?.File is not null,
                 hasNotes: hasTools.Contains("notes"),
                 notesFolderName: ResolveNotesFolder(toolsConfig),
@@ -320,6 +322,21 @@ public sealed class GatewayService(
                 ? completion.ReasoningEffort ?? "medium"
                 : null,
         };
+    }
+
+    private static string? ResolvePrompt(AgentConfig agentConfig)
+    {
+        if (agentConfig.Prompt is not null && agentConfig.PromptFile is not null)
+            throw new InvalidOperationException("Agent cannot have both 'prompt' and 'prompt_file' set.");
+
+        if (agentConfig.PromptFile is not null)
+        {
+            var path = ExpandHome(agentConfig.PromptFile)
+                ?? throw new InvalidOperationException("prompt_file cannot be empty.");
+            return File.ReadAllText(path);
+        }
+
+        return agentConfig.Prompt;
     }
 
     private static string? ExpandHome(string? path) =>

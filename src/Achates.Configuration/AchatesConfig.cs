@@ -15,6 +15,7 @@ public sealed class AgentConfig
     public string? Provider { get; set; }
     public List<string>? Tools { get; set; }
     public string? Prompt { get; set; }
+    public string? PromptFile { get; set; }
     public CompletionConfig? Completion { get; set; }
     public Dictionary<string, ChannelConfig>? Channels { get; set; }
 }
