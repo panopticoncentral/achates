@@ -84,7 +84,7 @@ Console (standalone, no config dependency)
 - `Gateway` — takes a list of `ChannelBinding` (transport + agent pairs) and an optional `ISessionStore`. Each `channelName:peerId` pair gets its own `AgentRuntime` instance configured from the channel's `AgentDefinition`. Routes inbound messages, accumulates text deltas, sends responses back. Persists sessions after each completed response. Sends typing indicators via a keepalive loop (4s interval). Handles `/new` command to reset sessions.
 - `ChannelBinding` — binds a derived channel name (`{agentName}/{transportType}`) to a transport and an agent definition.
 - `AgentDefinition` — resolved agent with Model, SystemPrompt, Tools, CompletionOptions, MemoryPath, CostLedger, CronStore, GraphClient.
-- `FileSessionStore` — stores conversation history as JSON files in `~/.achates/sessions/{agentName}/{transportType}/{peerId}.json`.
+- `FileSessionStore` — stores conversation history as JSON files in `~/.achates/agents/{agentName}/sessions/{transportType}/{peerId}.json`.
 - `MemoryTool` — layered persistent memory with two scopes. **Shared memory** at `~/.achates/memory.md` stores universal user facts (name, family, preferences) accessible to all agents. **Agent memory** at `~/.achates/agents/{agentName}/memory.md` stores agent-specific notes. `scope` parameter (`shared` or `agent`) controls which file to target; `read` without a scope returns both. Survives `/new` resets.
 - `MailTool` — reads Outlook email via Microsoft Graph API. Actions: list, read, search. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
 - `CalendarTool` — reads Outlook calendar via Microsoft Graph API. Actions: upcoming, read, availability. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
@@ -165,7 +165,7 @@ Loaded by `ConfigLoader.Load()`. Env var override: `ACHATES_CONFIG_PATH`. YAML u
 
 ```
 ~/.achates/config.yaml                                        Configuration
-~/.achates/sessions/{agentName}/{transportType}/{peerId}.json  Conversation history
+~/.achates/agents/{agentName}/sessions/{transportType}/{peerId}.json  Conversation history
 ~/.achates/memory.md                                           Shared memory (universal user facts, all agents)
 ~/.achates/agents/{agentName}/memory.md                        Agent memory (agent-specific notes)
 ~/.achates/agents/{agentName}/costs.jsonl                      Cost ledger (append-only, always recorded)

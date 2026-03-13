@@ -21,24 +21,33 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
 
     public List<SessionInfo> GetSessionFiles()
     {
-        var sessionsPath = Path.Combine(AchatesHome, "sessions");
-        if (!Directory.Exists(sessionsPath))
+        var agentsPath = Path.Combine(AchatesHome, "agents");
+        if (!Directory.Exists(agentsPath))
             return [];
 
         var sessions = new List<SessionInfo>();
-        foreach (var channelDir in Directory.GetDirectories(sessionsPath))
+        foreach (var agentDir in Directory.GetDirectories(agentsPath))
         {
-            var channelName = Path.GetFileName(channelDir);
-            foreach (var file in Directory.GetFiles(channelDir, "*.json"))
+            var agentName = Path.GetFileName(agentDir);
+            var sessionsDir = Path.Combine(agentDir, "sessions");
+            if (!Directory.Exists(sessionsDir))
+                continue;
+
+            foreach (var transportDir in Directory.GetDirectories(sessionsDir))
             {
-                var fi = new FileInfo(file);
-                sessions.Add(new SessionInfo
+                var transportType = Path.GetFileName(transportDir);
+                var channelName = $"{agentName}/{transportType}";
+                foreach (var file in Directory.GetFiles(transportDir, "*.json"))
                 {
-                    Channel = channelName,
-                    Peer = Path.GetFileNameWithoutExtension(file),
-                    SizeBytes = fi.Length,
-                    LastModified = fi.LastWriteTimeUtc,
-                });
+                    var fi = new FileInfo(file);
+                    sessions.Add(new SessionInfo
+                    {
+                        Channel = channelName,
+                        Peer = Path.GetFileNameWithoutExtension(file),
+                        SizeBytes = fi.Length,
+                        LastModified = fi.LastWriteTimeUtc,
+                    });
+                }
             }
         }
 

@@ -205,11 +205,11 @@ public sealed class FileSessionStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task Session_key_maps_to_channel_peer_directory_structure()
+    public async Task Session_key_maps_to_agent_sessions_directory_structure()
     {
-        await _store.SaveAsync("telegram:12345", [new UserMessage { Text = "hi" }]);
+        await _store.SaveAsync("paul/telegram:12345", [new UserMessage { Text = "hi" }]);
 
-        var expectedPath = Path.Combine(_basePath, "telegram", "12345.json");
+        var expectedPath = Path.Combine(_basePath, "agents", "paul", "sessions", "telegram", "12345.json");
         Assert.True(File.Exists(expectedPath));
     }
 }

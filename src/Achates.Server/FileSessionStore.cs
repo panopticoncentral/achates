@@ -48,13 +48,21 @@ public sealed class FileSessionStore(string basePath) : ISessionStore
 
     private string GetPath(string sessionKey)
     {
-        // Session key is "channelId:peerId" — split into directory/file
+        // Session key is "agentName/transportType:peerId"
+        // Stored at {basePath}/agents/{agentName}/sessions/{transportType}/{peerId}.json
         var separatorIndex = sessionKey.IndexOf(':');
         if (separatorIndex < 0)
             return Path.Combine(basePath, $"{sessionKey}.json");
 
         var channelId = sessionKey[..separatorIndex];
         var peerId = sessionKey[(separatorIndex + 1)..];
-        return Path.Combine(basePath, channelId, $"{peerId}.json");
+
+        var slashIndex = channelId.IndexOf('/');
+        if (slashIndex < 0)
+            return Path.Combine(basePath, "agents", channelId, "sessions", $"{peerId}.json");
+
+        var agentName = channelId[..slashIndex];
+        var transportType = channelId[(slashIndex + 1)..];
+        return Path.Combine(basePath, "agents", agentName, "sessions", transportType, $"{peerId}.json");
     }
 }

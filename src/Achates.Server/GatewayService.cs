@@ -52,7 +52,7 @@ public sealed class GatewayService(
         var achatesHome = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".achates");
-        _sessionStore = new FileSessionStore(Path.Combine(achatesHome, "sessions"));
+        _sessionStore = new FileSessionStore(achatesHome);
         var sessionStore = _sessionStore;
 
         // Resolve agents and their channels
