@@ -275,7 +275,9 @@ public sealed class CronService : IAsyncDisposable
         }
 
         // Add per-agent tools that make sense in isolation
-        tools.Add(new MemoryTool(agentDef.MemoryPath));
+        var sharedMemoryPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
+        tools.Add(new MemoryTool(sharedMemoryPath, agentDef.MemoryPath));
         if (agentDef.TodoPath is { } todoPath)
             tools.Add(new TodoTool(todoPath));
         if (agentDef.CostLedger is { } costLedger)

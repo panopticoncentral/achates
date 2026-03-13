@@ -65,10 +65,11 @@ public static class SystemPrompt
 
         // Memory section — always included since memory tool is added per-session
         lines.Add("## Memory");
-        lines.Add("You have a persistent memory file that survives session resets.");
-        lines.Add("Read it at the start of new conversations to recall prior context.");
-        lines.Add("Save important facts, preferences, and decisions the user would expect you to remember.");
-        lines.Add("When saving, include everything you want to keep — the file is replaced, not appended.");
+        lines.Add("You have two persistent memory files that survive session resets.");
+        lines.Add("- **Shared memory** (`scope: shared`): Facts about the user that any assistant should know — name, family, preferences, important dates. All agents read and write this same file.");
+        lines.Add("- **Agent memory** (`scope: agent`): Notes specific to your role and past conversations with the user. Only you use this file.");
+        lines.Add("Read memory at the start of new conversations to recall prior context.");
+        lines.Add("When saving, include everything you want to keep — the file for that scope is replaced, not appended.");
         lines.Add("");
 
         if (hasTodo)

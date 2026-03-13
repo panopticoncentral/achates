@@ -19,6 +19,9 @@ namespace Achates.Server;
 /// </summary>
 public sealed class Gateway : IAsyncDisposable
 {
+    private static readonly string SharedMemoryPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
+
     private readonly IReadOnlyList<ChannelBinding> _bindings;
     private readonly ISessionStore? _sessionStore;
     private readonly ConcurrentDictionary<string, AgentRuntime> _sessions = new();
@@ -128,7 +131,7 @@ public sealed class Gateway : IAsyncDisposable
         AgentDefinition agentDef, string agentName, string channelName, string peerId)
     {
         var tools = new List<AgentTool>(agentDef.Tools);
-        tools.Add(new MemoryTool(agentDef.MemoryPath));
+        tools.Add(new MemoryTool(SharedMemoryPath, agentDef.MemoryPath));
         if (agentDef.TodoPath is { } todoPath)
             tools.Add(new TodoTool(todoPath));
         if (agentDef.CostLedger is { } costLedger)

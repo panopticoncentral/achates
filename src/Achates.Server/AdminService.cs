@@ -61,25 +61,41 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
 
     public List<MemoryInfo> GetMemoryFiles()
     {
-        var agentsPath = Path.Combine(AchatesHome, "agents");
-        if (!Directory.Exists(agentsPath))
-            return [];
-
         var memories = new List<MemoryInfo>();
-        foreach (var agentDir in Directory.GetDirectories(agentsPath))
+
+        // Shared memory file
+        var sharedPath = Path.Combine(AchatesHome, "memory.md");
+        if (File.Exists(sharedPath))
         {
-            var agentName = Path.GetFileName(agentDir);
-            var memoryFile = Path.Combine(agentDir, "memory.md");
-            if (File.Exists(memoryFile))
+            var fi = new FileInfo(sharedPath);
+            memories.Add(new MemoryInfo
             {
-                var fi = new FileInfo(memoryFile);
-                memories.Add(new MemoryInfo
+                AgentName = "(shared)",
+                FilePath = sharedPath,
+                SizeBytes = fi.Length,
+                LastModified = fi.LastWriteTimeUtc,
+            });
+        }
+
+        // Per-agent memory files
+        var agentsPath = Path.Combine(AchatesHome, "agents");
+        if (Directory.Exists(agentsPath))
+        {
+            foreach (var agentDir in Directory.GetDirectories(agentsPath))
+            {
+                var agentName = Path.GetFileName(agentDir);
+                var memoryFile = Path.Combine(agentDir, "memory.md");
+                if (File.Exists(memoryFile))
                 {
-                    AgentName = agentName,
-                    FilePath = memoryFile,
-                    SizeBytes = fi.Length,
-                    LastModified = fi.LastWriteTimeUtc,
-                });
+                    var fi = new FileInfo(memoryFile);
+                    memories.Add(new MemoryInfo
+                    {
+                        AgentName = agentName,
+                        FilePath = memoryFile,
+                        SizeBytes = fi.Length,
+                        LastModified = fi.LastWriteTimeUtc,
+                    });
+                }
             }
         }
 
@@ -88,7 +104,9 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
 
     public async Task<string> LoadMemoryAsync(string agentName)
     {
-        var path = Path.Combine(AchatesHome, "agents", agentName, "memory.md");
+        var path = agentName == "(shared)"
+            ? Path.Combine(AchatesHome, "memory.md")
+            : Path.Combine(AchatesHome, "agents", agentName, "memory.md");
         if (!File.Exists(path))
             return "";
         return await File.ReadAllTextAsync(path);
@@ -96,7 +114,9 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
 
     public async Task SaveMemoryAsync(string agentName, string content)
     {
-        var path = Path.Combine(AchatesHome, "agents", agentName, "memory.md");
+        var path = agentName == "(shared)"
+            ? Path.Combine(AchatesHome, "memory.md")
+            : Path.Combine(AchatesHome, "agents", agentName, "memory.md");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, content);
     }
