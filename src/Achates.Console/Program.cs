@@ -3,7 +3,7 @@ using Achates.Console;
 using Spectre.Console;
 
 var url = GetOption(args, "--url") ?? "ws://localhost:5000/ws";
-var channelId = GetOption(args, "--channel") ?? "console";
+var agent = GetOption(args, "--agent") ?? "default";
 var peer = GetOption(args, "--peer") ?? "local";
 
 if (args is ["help" or "--help" or "-h", ..])
@@ -15,7 +15,7 @@ if (args is ["help" or "--help" or "-h", ..])
 
         Options:
           --url <ws-url>       Server WebSocket URL (default: ws://localhost:5000/ws)
-          --channel <id>       Channel identifier (default: console)
+          --agent <name>       Agent name (default: default)
           --peer <id>          Peer identifier (default: local)
           /clear               Clear the screen
           /thinking            Toggle showing thinking content
@@ -24,7 +24,7 @@ if (args is ["help" or "--help" or "-h", ..])
     return 0;
 }
 
-var wsUrl = $"{url}?channel={Uri.EscapeDataString(channelId)}&peer={Uri.EscapeDataString(peer)}";
+var wsUrl = $"{url}?agent={Uri.EscapeDataString(agent)}&peer={Uri.EscapeDataString(peer)}";
 
 using var ws = new ClientWebSocket();
 try
@@ -41,7 +41,7 @@ catch (Exception ex)
     return 1;
 }
 
-AnsiConsole.Write(new Rule($"[cyan]{channelId}:{peer}[/]").LeftJustified().RuleStyle("dim"));
+AnsiConsole.Write(new Rule($"[cyan]{agent}:{peer}[/]").LeftJustified().RuleStyle("dim"));
 AnsiConsole.WriteLine();
 
 var chat = new ChatSession(ws);

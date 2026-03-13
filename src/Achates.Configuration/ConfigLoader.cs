@@ -67,14 +67,10 @@ public static class ConfigLoader
                 {
                     ReasoningEffort = "medium",
                 },
-            },
-        },
-        Channels = new Dictionary<string, ChannelConfig>
-        {
-            ["console"] = new()
-            {
-                Transport = "websocket",
-                Agent = "default",
+                Channels = new Dictionary<string, ChannelConfig>
+                {
+                    ["websocket"] = new(),
+                },
             },
         },
         Console = new ConsoleConfig

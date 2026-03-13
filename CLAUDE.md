@@ -50,7 +50,7 @@ Console (standalone, no config dependency)
 
 - **Agent** — Named entity with identity (name, description), prompt, model, tools, and persistent memory. Defined in config, resolved at startup into `AgentDefinition`.
 - **Transport** — A messaging mechanism (`ITransport`). Implementations: `TelegramTransport`, `WebSocketTransport`.
-- **Channel** — A binding of a transport instance to an agent (`ChannelBinding`). Defined in config. Multiple channels can share the same agent.
+- **Channel** — A binding of a transport instance to an agent (`ChannelBinding`). Defined under the agent in config, keyed by transport type (e.g. `telegram`, `websocket`). The channel name is derived as `{agentName}/{transportType}`.
 
 ### Provider Layer (`Achates.Providers`)
 - `IModelProvider` — interface with `GetModelsAsync()` and `GetCompletions()` (streaming)
@@ -82,9 +82,9 @@ Console (standalone, no config dependency)
 
 ### Gateway (`Achates.Server`)
 - `Gateway` — takes a list of `ChannelBinding` (transport + agent pairs) and an optional `ISessionStore`. Each `channelName:peerId` pair gets its own `AgentRuntime` instance configured from the channel's `AgentDefinition`. Routes inbound messages, accumulates text deltas, sends responses back. Persists sessions after each completed response. Sends typing indicators via a keepalive loop (4s interval). Handles `/new` command to reset sessions.
-- `ChannelBinding` — binds a channel name to a transport and an agent definition.
+- `ChannelBinding` — binds a derived channel name (`{agentName}/{transportType}`) to a transport and an agent definition.
 - `AgentDefinition` — resolved agent with Model, SystemPrompt, Tools, CompletionOptions, MemoryPath, CostLedger, CronStore, GraphClient.
-- `FileSessionStore` — stores conversation history as JSON files in `~/.achates/sessions/{channelName}/{peerId}.json`.
+- `FileSessionStore` — stores conversation history as JSON files in `~/.achates/sessions/{agentName}/{transportType}/{peerId}.json`.
 - `MemoryTool` — per-agent persistent memory at `~/.achates/agents/{agentName}/memory.md`. Read/save actions; survives `/new` resets. Shared across all peers using the same agent.
 - `MailTool` — reads Outlook email via Microsoft Graph API. Actions: list, read, search. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
 - `CalendarTool` — reads Outlook calendar via Microsoft Graph API. Actions: upcoming, read, availability. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
@@ -99,8 +99,8 @@ Console (standalone, no config dependency)
   - **Client credentials** (work/school): `client_secret` set → application permissions, `/users/{email}/` paths. Requires `tenant_id`, `user_email`.
   - **Device code** (personal or work/school): no `client_secret` → delegated permissions, `/me/` paths. `tenant_id` defaults to `consumers`. Token cache persisted at `~/.achates/graph-token-cache.bin`.
 - `CronService` (`src/Achates.Server/Cron/`) — background timer loop for scheduled task execution. Not DI-registered; created by `GatewayService` after Gateway starts. Timer sleeps until next due job (max 60s), executes due jobs sequentially, delivers results via transports. `CronStore` persists jobs per-agent as JSON. `CronScheduler` computes next run times using Cronos library for cron expressions.
-- `GatewayService` — ASP.NET Core `IHostedLifecycleService`. Resolves agents and channels from config at startup, creates transports, builds `ChannelBinding` list, creates gateway.
-- WebSocket endpoint: `/ws` (query params: `channel`, `peer`)
+- `GatewayService` — ASP.NET Core `IHostedLifecycleService`. Resolves agents and their channels from config at startup, creates transports, builds `ChannelBinding` list, creates gateway. Channels are nested under agents in config; the channel name is derived as `{agentName}/{transportType}`.
+- WebSocket endpoint: `/ws` (query params: `agent`, `peer`)
 - Health check: `GET /health`
 - Admin console: Blazor Interactive Server UI at `/admin`. Pages: Dashboard, Sessions, Memory, Costs, Config.
 - `AdminService` — singleton data access layer for admin pages. Reads sessions, memory, costs, config from disk. Delegates session deletion to `Gateway.RemoveSessionAsync()`.
@@ -148,31 +148,26 @@ agents:
     tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost, cron, imessage, health]
     completion:
       reasoning_effort: medium
-
-channels:
-  telegram:
-    transport: telegram
-    agent: paul
-    token: your-bot-token  # env var expansion not yet supported
-    allowed_chat_ids: [12345]
-  console:
-    transport: websocket
-    agent: paul
+    channels:
+      telegram:
+        token: your-bot-token
+        allowed_chat_ids: [12345]
+      websocket: {}
 
 console:
   url: ws://localhost:5000/ws
 ```
 
-Loaded by `ConfigLoader.Load()`. Env var override: `ACHATES_CONFIG_PATH`. YAML uses underscore naming convention (C# PascalCase <-> YAML snake_case). `~` is expanded in file paths (e.g. `todo_file`). `${ENV_VAR}` expansion is **not yet supported** — use literal values or env vars directly.
+Loaded by `ConfigLoader.Load()`. Env var override: `ACHATES_CONFIG_PATH`. YAML uses underscore naming convention (C# PascalCase <-> YAML snake_case). `~` is expanded in file paths (e.g. `todo_file`). `${ENV_VAR}` expansion is **not yet supported** — use literal values or env vars directly. Channels are nested under agents, keyed by transport type (`telegram`, `websocket`). The channel name is derived as `{agentName}/{transportType}`.
 
 ### Data paths
 
 ```
-~/.achates/config.yaml                          Configuration
-~/.achates/sessions/{channelName}/{peerId}.json  Conversation history
-~/.achates/agents/{agentName}/memory.md          Agent memory (shared across peers)
-~/.achates/agents/{agentName}/costs.jsonl        Cost ledger (append-only, always recorded)
-~/.achates/agents/{agentName}/cron.json          Scheduled task definitions and state
-~/.achates/graph-token-cache.bin                 Graph device code token cache
-~/.achates/withings-tokens.json                  Withings OAuth tokens (access + refresh)
+~/.achates/config.yaml                                        Configuration
+~/.achates/sessions/{agentName}/{transportType}/{peerId}.json  Conversation history
+~/.achates/agents/{agentName}/memory.md                        Agent memory (shared across peers)
+~/.achates/agents/{agentName}/costs.jsonl                      Cost ledger (append-only, always recorded)
+~/.achates/agents/{agentName}/cron.json                        Scheduled task definitions and state
+~/.achates/graph-token-cache.bin                               Graph device code token cache
+~/.achates/withings-tokens.json                                Withings OAuth tokens (access + refresh)
 ```

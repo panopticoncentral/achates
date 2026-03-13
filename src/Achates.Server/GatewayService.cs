@@ -39,8 +39,8 @@ public sealed class GatewayService(
     /// </summary>
     public WithingsClient? WithingsClient => _withingsClient;
 
-    public WebSocketTransport? GetWebSocketTransport(string channelName) =>
-        _webSocketTransports.GetValueOrDefault(channelName);
+    public WebSocketTransport? GetWebSocketTransport(string agentName) =>
+        _webSocketTransports.GetValueOrDefault(agentName);
 
     public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -48,8 +48,6 @@ public sealed class GatewayService(
     {
         if (config.Agents is not { Count: > 0 })
             throw new InvalidOperationException("No agents configured. Add at least one agent to config.yaml.");
-        if (config.Channels is not { Count: > 0 })
-            throw new InvalidOperationException("No channels configured. Add at least one channel to config.yaml.");
 
         var achatesHome = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -57,8 +55,10 @@ public sealed class GatewayService(
         _sessionStore = new FileSessionStore(Path.Combine(achatesHome, "sessions"));
         var sessionStore = _sessionStore;
 
-        // Resolve agents
+        // Resolve agents and their channels
         var agents = new Dictionary<string, AgentDefinition>();
+        var bindings = new List<ChannelBinding>();
+
         foreach (var (name, agentConfig) in config.Agents)
         {
             var model = await ResolveModelAsync(
@@ -93,7 +93,7 @@ public sealed class GatewayService(
             var cronStorePath = Path.Combine(achatesHome, "agents", name, "cron.json");
             var cronStore = hasTools.Contains("cron") ? new CronStore(cronStorePath) : null;
 
-            agents[name] = new AgentDefinition
+            var agentDef = new AgentDefinition
             {
                 Model = model,
                 SystemPrompt = systemPrompt,
@@ -106,6 +106,7 @@ public sealed class GatewayService(
                 GraphClients = graphClients,
             };
 
+            agents[name] = agentDef;
             logger.LogInformation("Agent '{Name}' resolved with model {Model}", name, model.Id);
 
             // Eagerly authenticate Graph so device code prompt appears at startup
@@ -124,32 +125,28 @@ public sealed class GatewayService(
                         name, accountName);
                 }
             }
-        }
 
-        // Resolve channels
-        var bindings = new List<ChannelBinding>();
-        foreach (var (channelName, channelConfig) in config.Channels)
-        {
-            var agentName = channelConfig.Agent
-                ?? throw new InvalidOperationException($"Channel '{channelName}' has no agent specified.");
-
-            if (!agents.TryGetValue(agentName, out var agentDef))
-                throw new InvalidOperationException(
-                    $"Channel '{channelName}' references unknown agent '{agentName}'.");
-
-            var transport = CreateTransport(channelName, channelConfig);
-
-            bindings.Add(new ChannelBinding
+            // Resolve channels for this agent
+            foreach (var (transportType, channelConfig) in agentConfig.Channels ?? [])
             {
-                Name = channelName,
-                Transport = transport,
-                AgentName = agentName,
-                Agent = agentDef,
-            });
+                var channelName = $"{name}/{transportType}";
+                var transport = CreateTransport(name, transportType, channelConfig);
 
-            logger.LogInformation("Channel '{Channel}' bound to agent '{Agent}' via {Transport}",
-                channelName, agentName, channelConfig.Transport);
+                bindings.Add(new ChannelBinding
+                {
+                    Name = channelName,
+                    Transport = transport,
+                    AgentName = name,
+                    Agent = agentDef,
+                });
+
+                logger.LogInformation("Channel '{Channel}' bound to agent '{Agent}' via {Transport}",
+                    channelName, name, transportType);
+            }
         }
+
+        if (bindings.Count == 0)
+            throw new InvalidOperationException("No channels configured. Add at least one channel to an agent in config.yaml.");
 
         _gateway = new Gateway(bindings, sessionStore);
         await _gateway.StartAsync(cancellationToken);
@@ -187,21 +184,21 @@ public sealed class GatewayService(
         }
     }
 
-    private ITransport CreateTransport(string channelName, ChannelConfig channelConfig)
+    private ITransport CreateTransport(string agentName, string transportType, ChannelConfig channelConfig)
     {
-        return channelConfig.Transport switch
+        return transportType switch
         {
-            "websocket" => CreateWebSocketTransport(channelName),
+            "websocket" => CreateWebSocketTransport(agentName),
             "telegram" => CreateTelegramTransport(channelConfig),
             _ => throw new InvalidOperationException(
-                $"Unknown transport type '{channelConfig.Transport}' for channel '{channelName}'."),
+                $"Unknown transport type '{transportType}' for agent '{agentName}'."),
         };
     }
 
-    private WebSocketTransport CreateWebSocketTransport(string channelName)
+    private WebSocketTransport CreateWebSocketTransport(string agentName)
     {
         var transport = new WebSocketTransport();
-        _webSocketTransports[channelName] = transport;
+        _webSocketTransports[agentName] = transport;
         return transport;
     }
 

@@ -68,14 +68,14 @@ app.Map("/ws", async (HttpContext context, GatewayService gatewayService) =>
         return;
     }
 
-    var channel = context.Request.Query["channel"].FirstOrDefault() ?? "console";
+    var agent = context.Request.Query["agent"].FirstOrDefault() ?? "default";
     var peer = context.Request.Query["peer"].FirstOrDefault();
 
-    var transport = gatewayService.GetWebSocketTransport(channel);
+    var transport = gatewayService.GetWebSocketTransport(agent);
     if (transport is null)
     {
         context.Response.StatusCode = 404;
-        await context.Response.WriteAsync($"No WebSocket channel named '{channel}'.");
+        await context.Response.WriteAsync($"No WebSocket channel for agent '{agent}'.");
         return;
     }
 

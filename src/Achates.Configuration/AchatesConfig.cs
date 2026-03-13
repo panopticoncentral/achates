@@ -5,7 +5,6 @@ public sealed class AchatesConfig
     public string? Provider { get; set; }
     public ToolsConfig? Tools { get; set; }
     public Dictionary<string, AgentConfig>? Agents { get; set; }
-    public Dictionary<string, ChannelConfig>? Channels { get; set; }
     public ConsoleConfig? Console { get; set; }
 }
 
@@ -17,6 +16,7 @@ public sealed class AgentConfig
     public List<string>? Tools { get; set; }
     public string? Prompt { get; set; }
     public CompletionConfig? Completion { get; set; }
+    public Dictionary<string, ChannelConfig>? Channels { get; set; }
 }
 
 public sealed class ToolsConfig
@@ -60,8 +60,6 @@ public sealed class GraphConfig
 
 public sealed class ChannelConfig
 {
-    public string? Transport { get; set; }
-    public string? Agent { get; set; }
     public string? Token { get; set; }
     public long[]? AllowedChatIds { get; set; }
 }
@@ -76,6 +74,6 @@ public sealed class CompletionConfig
 public sealed class ConsoleConfig
 {
     public string? Url { get; set; }
-    public string? Channel { get; set; }
+    public string? Agent { get; set; }
     public string? Peer { get; set; }
 }
