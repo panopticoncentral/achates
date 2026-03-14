@@ -27,6 +27,7 @@ public sealed class Gateway : IAsyncDisposable
     private readonly IReadOnlyDictionary<string, AgentInfo>? _agentRegistry;
     private readonly ConcurrentDictionary<string, AgentRuntime> _sessions = new();
     private readonly CancellationTokenSource _cts = new();
+    private int _disposed;
 
     public IReadOnlyList<ChannelBinding> Bindings => _bindings;
     public ICollection<string> ActiveSessionKeys => _sessions.Keys;
@@ -68,6 +69,9 @@ public sealed class Gateway : IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         await _cts.CancelAsync();
 
         foreach (var binding in _bindings)
