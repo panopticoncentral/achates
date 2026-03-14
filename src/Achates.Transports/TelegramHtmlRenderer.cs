@@ -123,6 +123,7 @@ public static class TelegramHtmlRenderer
         {
             if (block is not TableRow row) continue;
             var cells = new string[table.ColumnDefinitions.Count];
+            Array.Fill(cells, "");
             for (var c = 0; c < row.Count && c < cells.Length; c++)
             {
                 if (row[c] is TableCell cell)
