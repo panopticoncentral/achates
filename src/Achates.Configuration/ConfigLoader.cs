@@ -56,7 +56,7 @@ public static class ConfigLoader
 
     private static AchatesConfig CreateDefault() => new()
     {
-        Provider = "openrouter",
+        Provider = new ProviderConfig { Name = "openrouter" },
         Agents = new Dictionary<string, AgentConfig>
         {
             ["default"] = new()

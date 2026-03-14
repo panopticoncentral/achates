@@ -15,9 +15,9 @@ Solution file is `Achates.slnx` (XML format, not legacy `.sln`).
 
 ## Running
 
-Server requires a config with at least one agent and channel:
+Server requires a config with at least one agent and channel. API key can be set in config (`api_key`) or via environment variable:
 ```bash
-OPENROUTER_API_KEY=... dotnet run --project src/Achates.Server
+dotnet run --project src/Achates.Server
 ```
 Config lives at `~/.achates/config.yaml`. Console client connects via WebSocket:
 ```bash
@@ -55,7 +55,7 @@ Console (standalone, no config dependency)
 ### Provider Layer (`Achates.Providers`)
 - `IModelProvider` — interface with `GetModelsAsync()` and `GetCompletions()` (streaming)
 - `ModelProviders.Create(id)` — factory for provider instances
-- Only implementation: `OpenRouterProvider` (SSE streaming, env var `OPENROUTER_API_KEY`)
+- Only implementation: `OpenRouterProvider` (SSE streaming, `api_key` in config or `OPENROUTER_API_KEY` env var)
 - Content types: `CompletionContent` base, subtypes for text, image, audio, thinking, tool calls, files
 - `CompletionUserContent` — input-only base. `CompletionAudioContent` is output-only (extends `CompletionContent`), `CompletionAudioInputContent` is input-only (extends `CompletionUserContent`). This asymmetry is intentional.
 - Event streaming via `CompletionEventStream` using `System.Threading.Channels`
@@ -119,7 +119,9 @@ Console (standalone, no config dependency)
 ## Configuration (`~/.achates/config.yaml`)
 
 ```yaml
-provider: openrouter
+provider:
+  name: openrouter
+  api_key: sk-...  # or set OPENROUTER_API_KEY env var
 
 tools:
   todo:

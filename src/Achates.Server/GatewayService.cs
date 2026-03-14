@@ -62,7 +62,7 @@ public sealed class GatewayService(
         foreach (var (name, agentConfig) in config.Agents)
         {
             var model = await ResolveModelAsync(
-                agentConfig.Provider ?? config.Provider,
+                agentConfig.Provider ?? config.Provider?.Name,
                 agentConfig.Model,
                 cancellationToken);
 
@@ -349,7 +349,7 @@ public sealed class GatewayService(
 
     private async Task<Model> ResolveModelAsync(string? providerId, string? modelId, CancellationToken cancellationToken)
     {
-        providerId ??= config.Provider
+        providerId ??= config.Provider?.Name
             ?? throw new InvalidOperationException("No provider specified.");
         if (modelId is null)
             throw new InvalidOperationException("No model specified.");
@@ -357,9 +357,10 @@ public sealed class GatewayService(
         var provider = ModelProviders.Create(providerId)
             ?? throw new InvalidOperationException($"Unknown provider: {providerId}");
 
-        var apiKey = Environment.GetEnvironmentVariable(provider.EnvironmentKey)
+        var apiKey = config.Provider?.ApiKey
+            ?? Environment.GetEnvironmentVariable(provider.EnvironmentKey)
             ?? throw new InvalidOperationException(
-                $"API key not found. Set the {provider.EnvironmentKey} environment variable.");
+                $"API key not found. Set api_key in provider config or the {provider.EnvironmentKey} environment variable.");
 
         provider.Key = apiKey;
         provider.HttpClient = httpClientFactory.CreateClient("achates");

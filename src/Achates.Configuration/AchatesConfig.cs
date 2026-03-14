@@ -2,7 +2,7 @@ namespace Achates.Configuration;
 
 public sealed class AchatesConfig
 {
-    public string? Provider { get; set; }
+    public ProviderConfig? Provider { get; set; }
     public ToolsConfig? Tools { get; set; }
     public Dictionary<string, AgentConfig>? Agents { get; set; }
     public ConsoleConfig? Console { get; set; }
@@ -70,6 +70,12 @@ public sealed class CompletionConfig
     public string? ReasoningEffort { get; set; }
     public double? Temperature { get; set; }
     public int? MaxTokens { get; set; }
+}
+
+public sealed class ProviderConfig
+{
+    public string? Name { get; set; }
+    public string? ApiKey { get; set; }
 }
 
 public sealed class ConsoleConfig

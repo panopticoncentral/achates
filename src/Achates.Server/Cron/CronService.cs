@@ -67,13 +67,18 @@ public sealed class CronService : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await _cts.CancelAsync();
+        try { await _cts.CancelAsync(); }
+        catch (ObjectDisposedException) { }
+
         if (_loopTask is not null)
         {
             try { await _loopTask; }
             catch (OperationCanceledException) { }
         }
-        _cts.Dispose();
+
+        try { _cts.Dispose(); }
+        catch (ObjectDisposedException) { }
+
         _poke.Dispose();
     }
 

@@ -196,6 +196,7 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
             var trimmed = line.TrimStart();
             if (trimmed.StartsWith("token:", StringComparison.OrdinalIgnoreCase)
                 || trimmed.StartsWith("client_secret:", StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith("api_key:", StringComparison.OrdinalIgnoreCase)
                 || trimmed.StartsWith("brave_api_key:", StringComparison.OrdinalIgnoreCase)
                 || trimmed.StartsWith("client_id:", StringComparison.OrdinalIgnoreCase))
             {
