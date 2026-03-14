@@ -18,7 +18,7 @@ internal sealed partial class TodoTool(string filePath) : AgentTool
         new Dictionary<string, JsonElement>
         {
             ["action"] = StringEnum(
-                ["list", "add", "complete", "uncomplete", "move", "create_section"],
+                ["list", "add", "complete", "uncomplete", "move", "reorder", "create_section"],
                 "Action to perform.",
                 "list"),
             ["section"] = StringSchema(
@@ -27,13 +27,15 @@ internal sealed partial class TodoTool(string filePath) : AgentTool
                 "Todo item text (without checkbox or emoji prefix). Required for 'add'. For 'complete'/'uncomplete'/'move', a substring to match the item."),
             ["category"] = StringSchema(
                 "Emoji category prefix (e.g. '🏠', '💵'). Required for 'add'. Omit for other actions."),
+            ["after"] = StringSchema(
+                "For 'reorder': substring to match the item to place after. If omitted, moves to the top of the section."),
             ["after_section"] = StringSchema(
                 "For 'create_section': insert the new section after this existing section. If omitted, appends at the end."),
         },
         required: ["action"]);
 
     public override string Name => "todo";
-    public override string Description => "Manage the todo list: list, add, complete/uncomplete, move items between sections, or create new sections. Cannot delete items.";
+    public override string Description => "Manage the todo list: list, add, complete/uncomplete, move items between sections, reorder items within a section, or create new sections. Cannot delete items.";
     public override string Label => "Todo List";
     public override JsonElement Parameters => _schema;
 
@@ -55,6 +57,7 @@ internal sealed partial class TodoTool(string filePath) : AgentTool
             "complete" => await SetCompletionAsync(GetString(arguments, "text"), completed: true),
             "uncomplete" => await SetCompletionAsync(GetString(arguments, "text"), completed: false),
             "move" => await MoveAsync(GetString(arguments, "text"), GetString(arguments, "section")),
+            "reorder" => await ReorderAsync(GetString(arguments, "text"), GetString(arguments, "after")),
             "create_section" => await CreateSectionAsync(
                 GetString(arguments, "section"),
                 GetString(arguments, "after_section")),
@@ -192,6 +195,68 @@ internal sealed partial class TodoTool(string filePath) : AgentTool
         await WriteLinesAsync(lines);
 
         return TextResult($"Moved to {targetSection}: {itemLines[0].Trim()}");
+    }
+
+    private async Task<AgentToolResult> ReorderAsync(string? searchText, string? afterText)
+    {
+        if (string.IsNullOrWhiteSpace(searchText))
+            return TextResult("Text is required to identify the todo item.");
+
+        var lines = await ReadLinesAsync();
+        var match = FindUniqueMatch(lines, searchText);
+        if (match.Error is not null)
+            return TextResult(match.Error);
+
+        var lineIndex = match.Index;
+
+        // Collect the item and any indented sub-items beneath it
+        var itemLines = new List<string> { lines[lineIndex] };
+        var nextIndex = lineIndex + 1;
+        while (nextIndex < lines.Count && lines[nextIndex].StartsWith('\t'))
+        {
+            itemLines.Add(lines[nextIndex]);
+            nextIndex++;
+        }
+
+        // Find the section boundaries for this item
+        var sectionStart = lineIndex;
+        while (sectionStart > 0 && !lines[sectionStart].TrimStart().StartsWith("### "))
+            sectionStart--;
+
+        var sectionEnd = lineIndex + 1;
+        while (sectionEnd < lines.Count && !lines[sectionEnd].TrimStart().StartsWith("### "))
+            sectionEnd++;
+
+        // Remove from original location
+        lines.RemoveRange(lineIndex, itemLines.Count);
+        sectionEnd -= itemLines.Count;
+
+        int insertIndex;
+        if (string.IsNullOrWhiteSpace(afterText))
+        {
+            // Move to top of section (first line after the header)
+            insertIndex = sectionStart + 1;
+        }
+        else
+        {
+            // Find the "after" item within the same section
+            var afterMatch = FindUniqueMatch(lines[sectionStart..sectionEnd], afterText);
+            if (afterMatch.Error is not null)
+                return TextResult(afterMatch.Error);
+
+            var afterIndex = sectionStart + afterMatch.Index;
+
+            // Skip past the after item's sub-items
+            insertIndex = afterIndex + 1;
+            while (insertIndex < sectionEnd && lines[insertIndex].StartsWith('\t'))
+                insertIndex++;
+        }
+
+        lines.InsertRange(insertIndex, itemLines);
+        await WriteLinesAsync(lines);
+
+        var position = string.IsNullOrWhiteSpace(afterText) ? "top of section" : $"after '{afterText}'";
+        return TextResult($"Reordered to {position}: {itemLines[0].Trim()}");
     }
 
     private async Task<AgentToolResult> CreateSectionAsync(string? sectionName, string? afterSection)
