@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Achates.Providers\Achates.Providers.csproj" />
     <ProjectReference Include="..\..\src\Achates.Agent\Achates.Agent.csproj" />
     <ProjectReference Include="..\..\src\Achates.Server\Achates.Server.csproj" />
   </ItemGroup>
