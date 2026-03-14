@@ -24,6 +24,7 @@ public sealed class Gateway : IAsyncDisposable
 
     private readonly IReadOnlyList<ChannelBinding> _bindings;
     private readonly ISessionStore? _sessionStore;
+    private readonly IReadOnlyDictionary<string, AgentInfo>? _agentRegistry;
     private readonly ConcurrentDictionary<string, AgentRuntime> _sessions = new();
     private readonly CancellationTokenSource _cts = new();
 
@@ -37,10 +38,12 @@ public sealed class Gateway : IAsyncDisposable
     /// </summary>
     public event Func<AgentEvent, Task>? AgentEvent;
 
-    public Gateway(IReadOnlyList<ChannelBinding> bindings, ISessionStore? sessionStore = null)
+    public Gateway(IReadOnlyList<ChannelBinding> bindings, ISessionStore? sessionStore = null,
+        IReadOnlyDictionary<string, AgentInfo>? agentRegistry = null)
     {
         _bindings = bindings;
         _sessionStore = sessionStore;
+        _agentRegistry = agentRegistry;
 
         foreach (var binding in _bindings)
         {
@@ -138,6 +141,10 @@ public sealed class Gateway : IAsyncDisposable
             tools.Add(new CostTool(costLedger));
         if (agentDef.CronStore is { } cronStore && CronService is { } cronService)
             tools.Add(new CronTool(cronStore, agentName, channelName, peerId, cronService));
+        if (_agentRegistry is { Count: > 1 } registry
+            && registry.TryGetValue(agentName, out var selfInfo)
+            && selfInfo.ToolNames?.Contains("chat") == true)
+            tools.Add(new ChatTool(agentName, registry, selfInfo.AllowChat));
         return tools;
     }
 

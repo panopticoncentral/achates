@@ -18,6 +18,12 @@ public sealed class AgentConfig
     public string? PromptFile { get; set; }
     public CompletionConfig? Completion { get; set; }
     public Dictionary<string, ChannelConfig>? Channels { get; set; }
+
+    /// <summary>
+    /// Allowlist of agent names this agent can chat with via the chat tool.
+    /// If null or empty when chat tool is enabled, all other agents are allowed.
+    /// </summary>
+    public List<string>? AllowChat { get; set; }
 }
 
 public sealed class ToolsConfig

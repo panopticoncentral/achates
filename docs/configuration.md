@@ -45,11 +45,12 @@ Each agent is a named entry with its own configuration. Channels are nested unde
 | `description` | string | _(none)_ | Agent description, used in system prompt (e.g. "a personal assistant"). |
 | `model` | string | _(required)_ | Model ID within the provider. |
 | `provider` | string | _(top-level)_ | Override the provider for this agent. |
-| `tools` | string[] | _(none)_ | Tool names to enable. Available: `session`, `memory`, `todo`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cost`, `cron`, `imessage`, `health`. |
+| `tools` | string[] | _(none)_ | Tool names to enable. Available: `session`, `memory`, `todo`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cost`, `cron`, `imessage`, `health`, `chat`. |
 | `prompt` | string | _(none)_ | Inline custom system prompt text. Cannot be used with `prompt_file`. |
 | `prompt_file` | string | _(none)_ | Path to a file containing the system prompt. Supports `~` expansion. Cannot be used with `prompt`. |
 | `completion` | object | _(none)_ | Completion options (see below). |
 | `channels` | map | _(none)_ | Transport bindings for this agent, keyed by transport type. |
+| `allow_chat` | string[] | _(all)_ | Allowlist of agent names this agent can chat with. Omit to allow all. Only relevant when `chat` is in `tools`. |
 
 ### `agents.<name>.completion`
 
@@ -154,7 +155,8 @@ agents:
     description: Personal assistant
     model: anthropic/claude-sonnet-4
     prompt_file: ~/.achates/agents/paul/prompt.md
-    tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost, cron, imessage, health]
+    tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost, cron, imessage, health, chat]
+    allow_chat: [research]  # optional; omit to allow all agents
     completion:
       reasoning_effort: medium
     channels:

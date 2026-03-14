@@ -311,3 +311,5 @@ Tokens are cached at `~/.achates/withings-tokens.json` and refresh automatically
 | `cost` | Query usage costs (summary, recent, breakdown) | None |
 | `imessage` | Read iMessage conversations (macOS only) | Full Disk Access on published binary |
 | `health` | Query Withings health data (weight, BP, sleep, activity) | `tools.withings` client_id and client_secret |
+| `chat` | Talk to other agents (discovery + ping-pong conversation) | At least 2 agents configured |
+| `cron` | Create and manage scheduled tasks | None |

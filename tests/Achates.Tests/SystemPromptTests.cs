@@ -200,6 +200,24 @@ public sealed class SystemPromptTests
     }
 
     [Fact]
+    public void Chat_section_included_when_enabled()
+    {
+        var result = SystemPrompt.Build(hasChat: true);
+
+        Assert.Contains("## Agent Chat", result);
+        Assert.Contains("<<DONE>>", result);
+    }
+
+    [Fact]
+    public void Chat_section_shows_allowed_agents()
+    {
+        var result = SystemPrompt.Build(hasChat: true, chatAgentNames: ["bob", "alice"]);
+
+        Assert.Contains("bob", result);
+        Assert.Contains("alice", result);
+    }
+
+    [Fact]
     public void Disabled_sections_are_excluded()
     {
         var result = SystemPrompt.Build();
@@ -214,6 +232,7 @@ public sealed class SystemPromptTests
         Assert.DoesNotContain("## iMessage", result);
         Assert.DoesNotContain("## Health", result);
         Assert.DoesNotContain("## Scheduled Tasks", result);
+        Assert.DoesNotContain("## Agent Chat", result);
     }
 
     // --- Tools section ---

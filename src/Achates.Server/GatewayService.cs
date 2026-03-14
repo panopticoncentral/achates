@@ -88,7 +88,9 @@ public sealed class GatewayService(
                 hasCost: hasTools.Contains("cost"),
                 hasIMessage: hasTools.Contains("imessage"),
                 hasCron: hasTools.Contains("cron"),
-                hasHealth: hasTools.Contains("health"));
+                hasHealth: hasTools.Contains("health"),
+                hasChat: hasTools.Contains("chat"),
+                chatAgentNames: agentConfig.AllowChat);
             var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
             var costLedgerPath = Path.Combine(achatesHome, "agents", name, "costs.jsonl");
             var costLedger = new CostLedger(costLedgerPath);
@@ -150,7 +152,10 @@ public sealed class GatewayService(
         if (bindings.Count == 0)
             throw new InvalidOperationException("No channels configured. Add at least one channel to an agent in config.yaml.");
 
-        _gateway = new Gateway(bindings, sessionStore);
+        // Build agent registry for inter-agent chat
+        var agentRegistry = BuildAgentRegistry(agents);
+
+        _gateway = new Gateway(bindings, sessionStore, agentRegistry);
         await _gateway.StartAsync(cancellationToken);
 
         // Start cron service for agents that have scheduled tasks enabled
@@ -241,6 +246,9 @@ public sealed class GatewayService(
                     break;
                 case "cron":
                     // CronTool is added per-session in Gateway.BuildSessionTools
+                    break;
+                case "chat":
+                    // ChatTool is added per-session in Gateway.BuildSessionTools
                     break;
                 case "mail":
                     if (graphClients.Count == 0)
@@ -343,6 +351,24 @@ public sealed class GatewayService(
         path is not null && path.StartsWith('~')
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..])
             : path;
+
+    private Dictionary<string, AgentInfo> BuildAgentRegistry(
+        Dictionary<string, AgentDefinition> agents)
+    {
+        var registry = new Dictionary<string, AgentInfo>();
+        foreach (var (name, agentDef) in agents)
+        {
+            var agentConfig = config.Agents![name];
+            registry[name] = new AgentInfo
+            {
+                AgentDef = agentDef,
+                Description = agentConfig.Description,
+                ToolNames = agentConfig.Tools,
+                AllowChat = agentConfig.AllowChat,
+            };
+        }
+        return registry;
+    }
 
     private static string ResolveNotesFolder(ToolsConfig? toolsConfig) =>
         string.IsNullOrWhiteSpace(toolsConfig?.Notes?.Folder) ? "Achates" : toolsConfig.Notes.Folder;

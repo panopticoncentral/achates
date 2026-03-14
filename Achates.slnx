@@ -10,6 +10,7 @@
   <Folder Name="/docs/">
     <File Path="README.md" />
     <File Path="CLAUDE.md" />
+    <File Path="docs\configuration.md" />
     <File Path="LICENSE" />
     <File Path="TODO.md" />
   </Folder>
