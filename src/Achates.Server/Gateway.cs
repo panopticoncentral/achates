@@ -198,7 +198,22 @@ public sealed class Gateway : IAsyncDisposable
                 Text = msg,
             }, _cts.Token));
 
-        var stream = agent.PromptAsync(message.Text);
+        var promptText = message.Text;
+
+        // If it's been a while since the last message, prepend a timestamp
+        // so the model stays oriented in time across long gaps.
+        var lastTimestamp = agent.Messages.Count > 0 ? agent.Messages[^1].Timestamp : 0;
+        if (lastTimestamp > 0)
+        {
+            var elapsed = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp);
+            if (elapsed.TotalMinutes >= 30)
+            {
+                var now = DateTimeOffset.Now;
+                promptText = $"[{now:ddd MMM d, yyyy h:mm tt}] {promptText}";
+            }
+        }
+
+        var stream = agent.PromptAsync(promptText);
         var responseText = "";
 
         // Start a typing indicator that repeats until processing finishes
