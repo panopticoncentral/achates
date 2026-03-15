@@ -11,7 +11,7 @@ namespace Achates.Server.Tools;
 /// Reads iMessage conversations from the local macOS Messages database (read-only).
 /// Requires Full Disk Access for the host process.
 /// </summary>
-internal sealed class IMessageTool(string dbPath) : AgentTool
+internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : AgentTool
 {
     // macOS Core Data epoch: 2001-01-01 00:00:00 UTC
     private static readonly DateTimeOffset CoreDataEpoch = new(2001, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -49,9 +49,13 @@ internal sealed class IMessageTool(string dbPath) : AgentTool
                 _ => TextResult($"Unknown action: {action}"),
             };
         }
-        catch (SqliteException ex) when (ex.SqliteErrorCode == 14) // SQLITE_CANTOPEN
+        catch (SqliteException ex) when (ex.SqliteErrorCode is 14 or 23) // CANTOPEN or AUTH
         {
-            return TextResult("Cannot open Messages database. Ensure Full Disk Access is granted.");
+            return TextResult("Cannot open Messages database. Ensure Full Disk Access is granted for the running process.");
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode is 5) // BUSY
+        {
+            return TextResult("Messages database is busy (locked by another process). Try again in a moment.");
         }
     }
 
@@ -62,30 +66,26 @@ internal sealed class IMessageTool(string dbPath) : AgentTool
 
         await using var conn = OpenConnection();
         await using var cmd = conn.CreateCommand();
+        // Use MAX(m.date) aggregate to find the last message per chat efficiently,
+        // avoiding correlated subqueries that are too slow on large databases.
         cmd.CommandText = """
             SELECT
                 c.ROWID,
                 c.chat_identifier,
                 c.display_name,
                 c.service_name,
-                (SELECT COUNT(*) FROM chat_message_join cmj WHERE cmj.chat_id = c.ROWID) as message_count,
+                latest.last_date,
                 m.text as last_message,
-                m.is_from_me as last_is_from_me,
-                m.date as last_date
+                m.is_from_me as last_is_from_me
             FROM chat c
-            LEFT JOIN (
-                SELECT cmj.chat_id, m2.text, m2.is_from_me, m2.date
+            INNER JOIN (
+                SELECT cmj.chat_id, MAX(m2.date) as last_date, MAX(m2.ROWID) as last_msg_id
                 FROM chat_message_join cmj
                 INNER JOIN message m2 ON cmj.message_id = m2.ROWID
-                WHERE m2.ROWID = (
-                    SELECT m3.ROWID FROM chat_message_join cmj2
-                    INNER JOIN message m3 ON cmj2.message_id = m3.ROWID
-                    WHERE cmj2.chat_id = cmj.chat_id
-                    ORDER BY m3.date DESC LIMIT 1
-                )
-            ) m ON m.chat_id = c.ROWID
-            WHERE message_count > 0
-            ORDER BY last_date DESC
+                GROUP BY cmj.chat_id
+            ) latest ON latest.chat_id = c.ROWID
+            LEFT JOIN message m ON m.ROWID = latest.last_msg_id
+            ORDER BY latest.last_date DESC
             LIMIT @count
             """;
         cmd.Parameters.AddWithValue("@count", count);
@@ -101,12 +101,11 @@ internal sealed class IMessageTool(string dbPath) : AgentTool
             var identifier = reader.GetString(1);
             var displayName = reader.IsDBNull(2) ? null : reader.GetString(2);
             var service = reader.IsDBNull(3) ? null : reader.GetString(3);
-            var msgCount = reader.GetInt64(4);
+            var lastDate = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4);
             var lastText = reader.IsDBNull(5) ? null : reader.GetString(5);
             var lastIsFromMe = !reader.IsDBNull(6) && reader.GetInt64(6) == 1;
-            var lastDate = reader.IsDBNull(7) ? (long?)null : reader.GetInt64(7);
 
-            var label = !string.IsNullOrWhiteSpace(displayName) ? displayName : identifier;
+            var label = !string.IsNullOrWhiteSpace(displayName) ? displayName : contacts.Resolve(identifier);
             var serviceTag = service switch
             {
                 "iMessage" => "iMessage",
@@ -114,7 +113,7 @@ internal sealed class IMessageTool(string dbPath) : AgentTool
                 _ => service ?? "",
             };
 
-            sb.AppendLine($"**{label}** [{serviceTag}, {msgCount} msgs]");
+            sb.AppendLine($"**{label}** [{serviceTag}]");
             if (lastText is not null)
             {
                 var preview = lastIsFromMe ? $"You: {Truncate(lastText, 100)}" : Truncate(lastText, 100);
@@ -153,14 +152,13 @@ internal sealed class IMessageTool(string dbPath) : AgentTool
         if (await infoReader.ReadAsync(cancellationToken))
         {
             var displayName = infoReader.IsDBNull(1) ? null : infoReader.GetString(1);
-            chatLabel = !string.IsNullOrWhiteSpace(displayName) ? displayName : infoReader.GetString(0);
+            chatLabel = !string.IsNullOrWhiteSpace(displayName) ? displayName : contacts.Resolve(infoReader.GetString(0));
         }
         else
         {
             return TextResult($"Chat {chatId} not found.");
         }
-
-        // Get messages (most recent N, displayed oldest-first)
+        // Get messages with audio attachment info (most recent N, displayed oldest-first)
         await using var msgCmd = conn.CreateCommand();
         msgCmd.CommandText = """
             SELECT
@@ -168,10 +166,14 @@ internal sealed class IMessageTool(string dbPath) : AgentTool
                 m.text,
                 m.is_from_me,
                 m.date,
-                h.id as sender
+                h.id as sender,
+                a.filename as audio_path
             FROM message m
             INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
             LEFT JOIN handle h ON m.handle_id = h.ROWID
+            LEFT JOIN message_attachment_join maj ON maj.message_id = m.ROWID
+            LEFT JOIN attachment a ON maj.attachment_id = a.ROWID
+                AND (a.mime_type LIKE 'audio/%' OR a.uti LIKE '%audio%' OR a.uti LIKE '%caf%')
             WHERE cmj.chat_id = @chatId
             ORDER BY m.date DESC
             LIMIT @count
@@ -188,12 +190,24 @@ internal sealed class IMessageTool(string dbPath) : AgentTool
             var isFromMe = reader.GetInt64(2) == 1;
             var date = reader.IsDBNull(3) ? (long?)null : reader.GetInt64(3);
             var sender = reader.IsDBNull(4) ? null : reader.GetString(4);
+            var audioPath = reader.IsDBNull(5) ? null : reader.GetString(5);
 
-            if (text is null) continue; // skip attachment-only messages with no text
+            if (text is null && audioPath is null) continue; // skip non-text, non-audio attachments
 
             var dateStr = date.HasValue ? FormatDate(date.Value) : "";
-            var who = isFromMe ? "You" : (sender ?? "Unknown");
-            messages.Add($"[{dateStr}] **{who}**: {text}");
+            var who = isFromMe ? "You" : contacts.Resolve(sender);
+
+            var content = text ?? "";
+            if (audioPath is not null)
+            {
+                var expandedPath = ExpandHome(audioPath);
+                if (text is not null)
+                    content += $"\n  [Voice message: `{expandedPath}`]";
+                else
+                    content = $"[Voice message: `{expandedPath}`]";
+            }
+
+            messages.Add($"[{dateStr}] **{who}**: {content}");
         }
 
         messages.Reverse(); // oldest first
@@ -227,11 +241,15 @@ internal sealed class IMessageTool(string dbPath) : AgentTool
                 h.id as sender,
                 c.ROWID as chat_id,
                 c.chat_identifier,
-                c.display_name
+                c.display_name,
+                a.filename as audio_path
             FROM message m
             INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
             INNER JOIN chat c ON cmj.chat_id = c.ROWID
             LEFT JOIN handle h ON m.handle_id = h.ROWID
+            LEFT JOIN message_attachment_join maj ON maj.message_id = m.ROWID
+            LEFT JOIN attachment a ON maj.attachment_id = a.ROWID
+                AND (a.mime_type LIKE 'audio/%' OR a.uti LIKE '%audio%' OR a.uti LIKE '%caf%')
             WHERE m.text LIKE @query
             ORDER BY m.date DESC
             LIMIT @count
@@ -255,13 +273,18 @@ internal sealed class IMessageTool(string dbPath) : AgentTool
             var chatId = reader.GetInt64(5);
             var chatIdentifier = reader.GetString(6);
             var displayName = reader.IsDBNull(7) ? null : reader.GetString(7);
+            var audioPath = reader.IsDBNull(8) ? null : reader.GetString(8);
 
-            var chatLabel = !string.IsNullOrWhiteSpace(displayName) ? displayName : chatIdentifier;
-            var who = isFromMe ? "You" : (sender ?? "Unknown");
+            var chatLabel = !string.IsNullOrWhiteSpace(displayName) ? displayName : contacts.Resolve(chatIdentifier);
+            var who = isFromMe ? "You" : contacts.Resolve(sender);
             var dateStr = date.HasValue ? FormatDate(date.Value) : "";
 
+            var content = text;
+            if (audioPath is not null)
+                content += $" [Voice message: `{ExpandHome(audioPath)}`]";
+
             sb.AppendLine($"**{who}** in *{chatLabel}* [{dateStr}]:");
-            sb.AppendLine($"  {Truncate(text, 200)}");
+            sb.AppendLine($"  {Truncate(content, 200)}");
             sb.AppendLine($"  Chat ID: `{chatId}`");
             sb.AppendLine();
         }
@@ -275,7 +298,14 @@ internal sealed class IMessageTool(string dbPath) : AgentTool
     private SqliteConnection OpenConnection()
     {
         var conn = new SqliteConnection($"Data Source={dbPath};Mode=ReadOnly");
+        conn.DefaultTimeout = 15; // seconds — prevent indefinite hangs on large databases
         conn.Open();
+
+        // Prevent indefinite hangs on WAL locks
+        using var pragma = conn.CreateCommand();
+        pragma.CommandText = "PRAGMA busy_timeout = 5000;";
+        pragma.ExecuteNonQuery();
+
         return conn;
     }
 
@@ -286,6 +316,11 @@ internal sealed class IMessageTool(string dbPath) : AgentTool
         var dt = CoreDataEpoch.AddSeconds(seconds);
         return TimeZoneInfo.ConvertTime(dt, TimeZoneInfo.Local).ToString("g");
     }
+
+    private static string ExpandHome(string path) =>
+        path.StartsWith('~')
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..])
+            : path;
 
     private static string Truncate(string text, int maxLength) =>
         text.Length <= maxLength ? text : text[..maxLength] + "...";

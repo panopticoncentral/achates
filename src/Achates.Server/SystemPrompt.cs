@@ -23,6 +23,7 @@ public static class SystemPrompt
         bool hasIMessage = false,
         bool hasCron = false,
         bool hasHealth = false,
+        bool hasTranscribe = false,
         bool hasChat = false,
         IReadOnlyList<string>? chatAgentNames = null)
     {
@@ -171,6 +172,15 @@ public static class SystemPrompt
             lines.Add("Schedule types: one-shot (at a specific time), recurring interval, or cron expression.");
             lines.Add("Jobs run independently and deliver results to the user's chat.");
             lines.Add("Use 'list' to see jobs, 'add' to create, 'update' to modify, 'remove' to delete, 'run' to execute immediately.");
+            lines.Add("");
+        }
+
+        if (hasTranscribe)
+        {
+            lines.Add("## Transcription");
+            lines.Add("You can transcribe audio files to text via the transcribe tool.");
+            lines.Add("Use this to transcribe voice messages from iMessage or any other audio file.");
+            lines.Add("Pass the absolute file path to the audio file.");
             lines.Add("");
         }
 

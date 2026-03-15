@@ -71,7 +71,7 @@ Console (standalone, no config dependency)
 ### Tool System (`AgentTool` subclasses)
 - `AgentTool` is the preferred pattern (class-based). Subclass and implement `Name`, `Description`, `Parameters` (JSON Schema as `JsonElement`), `ExecuteAsync()`.
 - Returns `AgentToolResult` with `Content` (list of `CompletionContent`) and optional `Details` (for UI display).
-- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`, `CronTool`, `IMessageTool`, `HealthTool`, `ChatTool`.
+- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`, `CronTool`, `IMessageTool`, `HealthTool`, `ChatTool`, `TranscribeTool`.
 - Tools can be shared (same instance for all sessions) or per-session. The Gateway builds per-session tool lists via `BuildSessionTools()` (e.g. `MemoryTool` uses per-agent memory path).
 - Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
 
@@ -92,7 +92,8 @@ Console (standalone, no config dependency)
 - `WebFetchTool` — fetches a URL and extracts readable content using SmartReader (Readability). Parameters: url, max_chars. Handles HTML, JSON, plain text. Singleton; no config required.
 - `CostTool` — queries the persistent cost ledger. Actions: summary (totals for a period), recent (last N entries), breakdown (grouped by day or model). Per-session; requires `cost` in agent's tools list. Ledger is always recorded regardless of tool config.
 - `CronTool` — manages scheduled tasks. Actions: list, add, update, remove, run. Per-session; requires `cron` in agent's tools list. Schedule types: `at` (one-shot timestamp), `every` (interval in minutes), `cron` (cron expression with optional timezone). Jobs run in isolation (fresh AgentRuntime) and deliver results to the configured channel+peer. Delivery target defaults to the current session's channel+peer.
-- `IMessageTool` — reads local macOS iMessage database (`~/Library/Messages/chat.db`) via SQLite (read-only). Actions: chats (list recent conversations), read (messages from a chat by ID), search (full-text search). Singleton; requires Full Disk Access for the host process.
+- `IMessageTool` — reads local macOS iMessage database (`~/Library/Messages/chat.db`) via SQLite (read-only). Actions: chats (list recent conversations), read (messages from a chat by ID), search (full-text search). Surfaces voice messages with their audio file paths (joins `attachment` table, filters by audio mime types). Resolves phone numbers and emails to contact names via `ContactResolver` (reads macOS AddressBook databases, cached 30 minutes). Singleton; requires Full Disk Access for the host process.
+- `TranscribeTool` — transcribes audio files to text using an audio-capable model. Parameters: file (absolute path). Reads the file, base64 encodes it, sends to the configured transcription model via `CompletionAudioInputContent`. Singleton; requires `transcribe` in agent's tools list. Model configured via `tools.transcribe.model` (default: `google/gemini-2.5-flash`). Useful for transcribing iMessage voice messages surfaced by `IMessageTool`.
 - `ChatTool` — inter-agent communication. Actions: agents (list available agents with descriptions and tools), chat (start a ping-pong conversation with another agent). Per-session; requires `chat` in agent's tools list. Creates isolated `AgentRuntime` instances for both agents (target gets all its tools except chat to prevent cascade). Supports up to 5 back-and-forth turns; either agent can end early with `<<DONE>>`. `allow_chat` in agent config restricts which agents can be contacted (null/empty = all). Costs recorded to each agent's ledger with channel `chat`. `AgentInfo` registry built at startup provides agent discovery metadata.
 - `HealthTool` — queries health data from Withings API. Actions: weight (body composition), blood_pressure, sleep, activity, authorize. Singleton; requires `withings` config with client_id and client_secret. OAuth 2.0 authorization code flow with browser redirect to `/withings/callback`.
 - `WithingsClient` (`src/Achates.Server/Withings/`) — Withings Health API client. OAuth 2.0 authorization code flow: user visits auth URL, Withings redirects to `/withings/callback`, tokens persisted at `~/.achates/withings-tokens.json`. Access tokens auto-refresh. All API calls are POST with form-encoded params; responses are `{ "status": 0, "body": { ... } }`.
@@ -139,6 +140,8 @@ tools:
       client_id: <app-client-id>
       client_secret: <secret>          # presence triggers client credentials flow; or set GRAPH_CLIENT_SECRET env var
       user_email: user@example.com     # required for client credentials
+  transcribe:
+    model: google/gemini-2.5-flash  # audio-capable model for transcription
   withings:
     client_id: <withings-client-id>
     client_secret: <withings-client-secret>  # or set WITHINGS_CLIENT_SECRET env var
@@ -149,7 +152,7 @@ agents:
     description: Personal assistant
     model: anthropic/claude-sonnet-4
     prompt_file: ~/.achates/agents/paul/prompt.md  # or inline: prompt: "You are..."
-    tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost, cron, imessage, health, chat]
+    tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost, cron, imessage, transcribe, health, chat]
     allow_chat: [other_agent_name]  # optional; omit to allow all agents
     completion:
       reasoning_effort: medium

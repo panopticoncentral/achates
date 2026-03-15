@@ -157,7 +157,9 @@ public sealed class Gateway : IAsyncDisposable
         var sessionKey = $"{binding.Name}:{message.PeerId}";
 
         // Handle /new command — reset the session
-        if (message.Text.Trim().Equals("/new", StringComparison.OrdinalIgnoreCase))
+        // Telegram sends commands as "/new@botname", so strip the @mention
+        var commandText = message.Text.Trim().Split('@')[0];
+        if (commandText.Equals("/new", StringComparison.OrdinalIgnoreCase))
         {
             if (_sessions.TryRemove(sessionKey, out var existing))
             {

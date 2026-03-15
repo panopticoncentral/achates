@@ -73,7 +73,21 @@ public sealed class GatewayService(
             var withingsClient = CreateWithingsClient(toolsConfig?.Withings);
             if (withingsClient is not null)
                 _withingsClient = withingsClient;
-            var tools = ResolveTools(agentConfig, toolsConfig, model, graphClients, withingsClient);
+
+            // Resolve transcription model if any agent uses the transcribe tool
+            Model? transcribeModel = null;
+            if (agentConfig.Tools?.Contains("transcribe") == true)
+            {
+                var transcribeModelId = toolsConfig?.Transcribe?.Model ?? "google/gemini-2.5-flash";
+                transcribeModel = await ResolveModelAsync(
+                    agentConfig.Provider ?? config.Provider?.Name,
+                    transcribeModelId,
+                    cancellationToken);
+                logger.LogInformation("Transcribe model resolved: {Model}", transcribeModel.Id);
+            }
+
+            var tools = ResolveTools(agentConfig, toolsConfig, model, graphClients, withingsClient,
+                transcribeModel);
             var hasTools = agentConfig.Tools ?? [];
             var graphAccountNames = graphClients.Keys.ToList();
             var systemPrompt = SystemPrompt.Build(agentConfig.Description, prompt, tools,
@@ -89,6 +103,7 @@ public sealed class GatewayService(
                 hasIMessage: hasTools.Contains("imessage"),
                 hasCron: hasTools.Contains("cron"),
                 hasHealth: hasTools.Contains("health"),
+                hasTranscribe: hasTools.Contains("transcribe"),
                 hasChat: hasTools.Contains("chat"),
                 chatAgentNames: agentConfig.AllowChat);
             var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
@@ -222,7 +237,8 @@ public sealed class GatewayService(
     }
 
     private IReadOnlyList<AgentTool> ResolveTools(AgentConfig agentConfig, ToolsConfig? toolsConfig,
-        Model model, IReadOnlyDictionary<string, GraphClient> graphClients, WithingsClient? withingsClient)
+        Model model, IReadOnlyDictionary<string, GraphClient> graphClients, WithingsClient? withingsClient,
+        Model? transcribeModel = null)
     {
         if (!model.Parameters.HasFlag(ModelParameters.Tools))
             return [];
@@ -277,12 +293,18 @@ public sealed class GatewayService(
                     var messagesDb = Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                         "Library", "Messages", "chat.db");
-                    tools.Add(new IMessageTool(messagesDb));
+                    tools.Add(new IMessageTool(messagesDb, new ContactResolver()));
                     break;
                 case "health":
                     if (withingsClient is null)
                         throw new InvalidOperationException("Health tool requires withings configuration.");
                     tools.Add(new HealthTool(withingsClient));
+                    break;
+                case "transcribe":
+                    if (transcribeModel is null)
+                        throw new InvalidOperationException(
+                            "Transcribe tool requires a transcribe model. Set tools.transcribe.model in config.");
+                    tools.Add(new TranscribeTool(transcribeModel));
                     break;
                 default:
                     throw new InvalidOperationException($"Unknown tool '{toolName}'.");
