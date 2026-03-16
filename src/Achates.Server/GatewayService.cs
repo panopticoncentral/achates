@@ -6,6 +6,7 @@ using Achates.Providers.Completions;
 using Achates.Providers.Models;
 using Achates.Server.Cron;
 using Achates.Server.Graph;
+using Achates.Server.Mobile;
 using Achates.Server.Tools;
 using Achates.Server.Withings;
 
@@ -27,6 +28,9 @@ public sealed class GatewayService(
     private FileSessionStore? _sessionStore;
     private readonly Dictionary<string, WebSocketTransport> _webSocketTransports = new();
     private WithingsClient? _withingsClient;
+    private MobileTransport? _mobileTransport;
+
+    public MobileTransport? MobileTransport => _mobileTransport;
 
     public Gateway Gateway =>
         _gateway ?? throw new InvalidOperationException("Gateway has not started yet.");
@@ -171,6 +175,15 @@ public sealed class GatewayService(
         var agentRegistry = BuildAgentRegistry(agents);
 
         _gateway = new Gateway(bindings, sessionStore, agentRegistry);
+
+        // Create MobileTransport with all agent definitions
+        var agentDefinitions = bindings
+            .GroupBy(b => b.AgentName)
+            .ToDictionary(g => g.Key, g => g.First().Agent);
+        var mobileSessionStore = new MobileSessionStore(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates"));
+        _mobileTransport = new MobileTransport(agentDefinitions, mobileSessionStore,
+            null, loggerFactory);
         await _gateway.StartAsync(cancellationToken);
 
         // Start cron service for agents that have scheduled tasks enabled

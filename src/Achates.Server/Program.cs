@@ -83,6 +83,27 @@ app.Map("/ws", async (HttpContext context, GatewayService gatewayService) =>
     await transport.AcceptAsync(ws, peer, context.RequestAborted);
 });
 
+// --- Mobile WebSocket (v2 protocol) ---
+app.Map("/ws/v2", async (HttpContext context, GatewayService gatewayService) =>
+{
+    if (!context.WebSockets.IsWebSocketRequest)
+    {
+        context.Response.StatusCode = 400;
+        return;
+    }
+
+    var mobileTransport = gatewayService.MobileTransport;
+    if (mobileTransport is null)
+    {
+        context.Response.StatusCode = 503;
+        return;
+    }
+
+    var peer = context.Request.Query["peer"].FirstOrDefault() ?? Guid.NewGuid().ToString("N");
+    using var ws = await context.WebSockets.AcceptWebSocketAsync();
+    await mobileTransport.HandleConnectionAsync(ws, peer, context.RequestAborted);
+});
+
 // --- Blazor admin console ---
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
