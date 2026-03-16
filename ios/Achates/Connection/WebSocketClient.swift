@@ -97,8 +97,17 @@ final class WebSocketClient {
     }
 
     func sendMessage(_ text: String) async {
+        guard let agent = appState.currentAgent,
+              let session = appState.currentSession else {
+            print("Cannot send message: no agent or session selected")
+            return
+        }
         do {
-            _ = try await sendRequest(method: "chat.send", params: ["text": .string(text)])
+            _ = try await sendRequest(method: "chat.send", params: [
+                "text": .string(text),
+                "agent": .string(agent.id),
+                "session_id": .string(session.id),
+            ])
         } catch {
             print("Failed to send message: \(error)")
         }

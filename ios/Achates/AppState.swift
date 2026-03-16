@@ -74,7 +74,8 @@ final class AppState {
 
         do {
             let payload = try await client?.sendRequest(method: "sessions.switch", params: [
-                "session_id": .string(session.id)
+                "agent": .string(session.agentId),
+                "session_id": .string(session.id),
             ])
 
             if let messagesArray = payload?["messages"]?.arrayValue {
@@ -105,7 +106,8 @@ final class AppState {
     func deleteSession(_ session: Session) async {
         do {
             _ = try await client?.sendRequest(method: "sessions.delete", params: [
-                "session_id": .string(session.id)
+                "agent": .string(session.agentId),
+                "session_id": .string(session.id),
             ])
             sessions.removeAll { $0.id == session.id }
             if currentSession?.id == session.id {
