@@ -97,7 +97,9 @@ Three frame types over WebSocket, all JSON:
 | `sessions.switch` | `session_id` | Switch to a different session |
 | `sessions.new` | `agent` | Create a new session |
 | `sessions.rename` | `session_id`, `title` | Rename a session |
+| `sessions.delete` | `session_id` | Delete a session |
 | `agents.list` | — | List available agents with descriptions |
+| `ping` | — | Client-to-server health check (used on foreground return) |
 
 **Server → Client (device commands):**
 
@@ -105,7 +107,19 @@ Three frame types over WebSocket, all JSON:
 |--------|--------|-------------|
 | `device.location` | — | Request current GPS location |
 | `device.camera` | `facing` (front/back) | Request a photo capture |
-| `device.ping` | — | Health check |
+
+### Error Codes
+
+| Code | Description |
+|------|-------------|
+| `UNKNOWN` | Unclassified server error |
+| `AGENT_NOT_FOUND` | Requested agent name doesn't exist |
+| `SESSION_NOT_FOUND` | Requested session ID doesn't exist |
+| `ALREADY_CONNECTED` | Another mobile connection is already active for this peer |
+| `PERMISSION_DENIED` | Device permission not granted (location, camera) |
+| `DEVICE_UNAVAILABLE` | No mobile client connected to fulfill device command |
+| `DEVICE_TIMEOUT` | Device command timed out |
+| `CANCELLED` | Agent turn was cancelled via `chat.cancel` |
 
 ### Streaming Events
 
@@ -130,7 +144,7 @@ Same semantics as the current protocol, wrapped in `evt` frames with sequence nu
 - Server replays buffered events if available (buffer: last 1000 events)
 - If buffer is flushed, server responds with `replay: false` and client reloads session history via `sessions.switch`
 - Reconnection uses exponential backoff: 500ms → 1s → 2s → 4s → ... → 30s max
-- On app foreground after ≥3s in background: send `device.ping`, reconnect if no response within 2s
+- On app foreground after ≥3s in background: send `ping` RPC, reconnect if no response within 2s
 
 ## Server-Side Changes
 
@@ -138,36 +152,65 @@ All changes are in `Achates.Server`. No changes to `Achates.Agent`, `Achates.Pro
 
 ### New Components
 
-**`MobileTransport`** — implements `ITransport`. Unlike `WebSocketTransport` (one connection = one peer), `MobileTransport` manages a single authenticated connection that can switch between agents and sessions. Responsibilities:
-- Parse incoming frames, dispatch RPC handlers
-- Route `chat.send` to Gateway
-- Translate `AgentEventStream` events into sequenced `evt` frames
-- Buffer recent events (last 1000) for reconnection replay
-- Forward device command requests from tools to the connected client
+**`MobileTransport`** — does NOT implement `ITransport`. Unlike the existing transports that map 1:1 to a Gateway `ChannelBinding`, `MobileTransport` operates outside the transport/channel model. It is a standalone WebSocket handler that:
+- Accepts the `/ws/v2` connection and manages the frame protocol
+- Holds references to all `AgentDefinition` instances (populated at startup by `GatewayService`)
+- Creates and manages its own `AgentRuntime` instances per agent+peer+session, independent of Gateway
+- Handles session lifecycle directly (list, switch, new, delete, rename) via `MobileSessionStore`
+- Translates `AgentEventStream` events into sequenced `evt` frames
+- Buffers recent events (last 1000) for reconnection replay
+- Forwards device command requests from tools to the connected client
+- Shares the same `AgentDefinition` objects as Gateway, so tool configuration, models, and prompts stay consistent
 
-**`DeviceCommandBridge`** — mediates between server-side tools and the connected iOS client. When a tool needs device data:
-1. Bridge sends an RPC frame to the client
-2. Awaits the response with a timeout (15s location, 30s camera)
-3. Returns the result to the tool
-4. If no mobile client is connected, returns an error
+This separation is intentional: `MobileTransport` needs multi-session and multi-agent support that doesn't fit the existing one-transport-one-agent `ChannelBinding` model. Gateway continues to handle Telegram and Console unchanged.
 
-**`LocationTool`** — `AgentTool` subclass. Parameters: none. Calls `DeviceCommandBridge` to request GPS coordinates. Returns lat/lon/accuracy/timestamp as text. Only available when a mobile client with `location` capability is connected.
+**`MobileSessionStore`** — extends the session concept for multi-session support. Unlike `FileSessionStore` (one session per transport+peer), this stores multiple named sessions per agent+peer:
+- Storage path: `~/.achates/agents/{agentName}/sessions/mobile/{peerId}/{sessionId}.json`
+- Each session file contains a JSON object with metadata header and message array:
+  ```json
+  {
+    "id": "<uuid>",
+    "title": "Calendar & email check",
+    "created": "2026-03-16T10:00:00Z",
+    "updated": "2026-03-16T10:05:00Z",
+    "messages": [...]
+  }
+  ```
+- `ListAsync(agentName, peerId)` — returns session metadata (reads headers only, not full message arrays) sorted by last updated
+- `LoadAsync(agentName, peerId, sessionId)` — returns full session with messages
+- `SaveAsync(agentName, peerId, sessionId, session)` — writes session to disk
+- `DeleteAsync(agentName, peerId, sessionId)` — removes session file
+- `UpdateMetadataAsync(agentName, peerId, sessionId, title)` — updates title without rewriting messages
 
-**`CameraTool`** — `AgentTool` subclass. Parameters: `facing` (front/back, default back). Calls `DeviceCommandBridge` to request a photo. Receives base64 JPEG, returns as `CompletionImageContent`. Only available when a mobile client with `camera` capability is connected.
+**`DeviceCommandBridge`** — singleton mediates between server-side tools and the connected iOS client. Holds a reference to the active `MobileTransport` connection (if any). When a tool needs device data:
+1. Bridge checks if a mobile client is connected with the required capability
+2. Sends an RPC frame to the client via `MobileTransport`
+3. Awaits the response with a timeout (15s location, 30s camera)
+4. Returns the result to the tool
+5. If no mobile client is connected, returns error with code `DEVICE_UNAVAILABLE`
 
-**Session Management RPCs** — thin wrappers over `FileSessionStore` and filesystem operations:
-- `sessions.list` scans `~/.achates/agents/{agentName}/sessions/mobile/{peerId}/` and returns metadata (id, title, last message preview, timestamp, message count)
-- `sessions.new` resets the current `AgentRuntime`
-- `sessions.switch` loads a different session file
-- `sessions.rename` writes a title to session metadata
+**`LocationTool`** — `AgentTool` subclass. Parameters: none. Calls `DeviceCommandBridge` to request GPS coordinates. Returns lat/lon/accuracy/timestamp as text. Always present in agent's tool list when configured; returns a clear error message if no mobile device is connected (the agent can explain this to the user).
+
+**`CameraTool`** — `AgentTool` subclass. Parameters: `facing` (front/back, default back). Calls `DeviceCommandBridge` to request a photo. Receives base64 JPEG (max ~500KB), returns as `CompletionImageContent`. Always present when configured; returns error if no mobile device is connected.
+
+**Session Management RPCs** — handled directly by `MobileTransport`, delegating to `MobileSessionStore`:
+- `sessions.list` returns metadata for all sessions (id, title, preview, timestamp, message count)
+- `sessions.new` creates a new session, switches the active `AgentRuntime` to it
+- `sessions.switch` loads a different session's messages into a new `AgentRuntime`
+- `sessions.rename` updates title via `MobileSessionStore.UpdateMetadataAsync`
+- `sessions.delete` removes session file and discards runtime if active
 
 **Session Naming** — after the first exchange in a new session completes (`message.end`), the server fires an async LLM call to generate a short title from the first user message + assistant response. Stored as metadata in the session JSON. Client receives a `session.renamed` event.
 
-**Push Notifications (APNs)** — when a cron job fires or an agent needs to notify the user and no WebSocket is connected:
-- Device token stored per peer during `connect` handshake
-- Server sends APNs notification with agent name and message preview
-- Tapping notification opens the app to that agent's session
-- APNs configuration in `config.yaml` under a new `apns` section
+**`PushNotificationService`** — singleton responsible for sending APNs notifications. Initialized at startup if `apns` config is present.
+- Stores device tokens per peer (persisted at `~/.achates/apns-tokens.json`)
+- Tokens registered during `connect` handshake via `MobileTransport`
+- `SendAsync(peerId, agentName, sessionId, preview)` — sends a push notification
+- Uses HTTP/2 APNs provider API with JWT authentication (from `.p8` key file)
+- Called by `CronService` when delivering a cron job result and `MobileTransport` has no active connection for that peer
+- In the future, a `notify` tool could also use this service
+
+Integration with `CronService`: After `CronService` delivers a cron result via the transport, if the transport's `SendAsync` fails (no active connection), `CronService` falls back to `PushNotificationService`. This requires `CronService` to receive `PushNotificationService` as a dependency.
 
 ### Endpoint
 
@@ -281,7 +324,7 @@ Settings (first launch) → Agent List (root) → Session List → Chat
 
 **Camera (`device.camera`):**
 - Uses `AVCaptureSession` to capture a still photo
-- Compresses to JPEG, max ~200KB
+- Compresses to JPEG, max ~500KB
 - Base64 encodes and returns in response frame
 - `facing` param selects front/back camera
 - Timeout: 30s
@@ -310,7 +353,7 @@ Settings (first launch) → Agent List (root) → Session List → Chat
 
 - `URLSessionWebSocketTask` for the WebSocket connection
 - Exponential backoff on disconnect: 500ms, 1s, 2s, 4s, 8s, 16s, 30s (max)
-- On app foreground after ≥3s background: send `device.ping` RPC, reconnect if no pong within 2s
+- On app foreground after ≥3s background: send `ping` RPC, reconnect if no pong within 2s
 - Sequence tracking: store `last_seq`, send on reconnect for event replay
 - If server can't replay (buffer flushed), reload session via `sessions.switch`
 - Connection status reflected in UI (green dot / "Connecting..." / "Offline")
@@ -333,7 +376,7 @@ Session storage path for mobile transport:
 ~/.achates/agents/{agentName}/sessions/mobile/{peerId}/{sessionId}.json
 ```
 
-Session metadata (title, created, last message) stored in a sidecar file or as a JSON header in the session file.
+Session metadata (title, created, updated) stored as fields in the session JSON file alongside the messages array. See `MobileSessionStore` above for the format.
 
 ## Data Paths (New)
 
@@ -341,6 +384,11 @@ Session metadata (title, created, last message) stored in a sidecar file or as a
 ~/.achates/agents/{agentName}/sessions/mobile/{peerId}/{sessionId}.json  — mobile session history
 ~/.achates/apns-key.p8                                                    — APNs auth key file
 ```
+
+## Design Notes
+
+- **`agents.list` vs `connect` response:** The `connect` response includes the agent list for the initial render. `agents.list` exists for refreshing without reconnecting (e.g., if server config changes while connected). Both return the same data.
+- **Voice input vs `TranscribeTool`:** These are fully independent. Voice input is client-side only (`SFSpeechRecognizer` → text → send as message). `TranscribeTool` is server-side (transcribes audio files like iMessage voice messages). They don't interact.
 
 ## Open Questions
 
