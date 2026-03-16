@@ -71,7 +71,7 @@ Console (standalone, no config dependency)
 ### Tool System (`AgentTool` subclasses)
 - `AgentTool` is the preferred pattern (class-based). Subclass and implement `Name`, `Description`, `Parameters` (JSON Schema as `JsonElement`), `ExecuteAsync()`.
 - Returns `AgentToolResult` with `Content` (list of `CompletionContent`) and optional `Details` (for UI display).
-- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`, `CronTool`, `IMessageTool`, `HealthTool`, `ChatTool`, `TranscribeTool`.
+- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`, `CronTool`, `IMessageTool`, `HealthTool`, `ChatTool`, `TranscribeTool`, `LocationTool`, `CameraTool`.
 - Tools can be shared (same instance for all sessions) or per-session. The Gateway builds per-session tool lists via `BuildSessionTools()` (e.g. `MemoryTool` uses per-agent memory path).
 - Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
 
@@ -95,6 +95,8 @@ Console (standalone, no config dependency)
 - `IMessageTool` — reads local macOS iMessage database (`~/Library/Messages/chat.db`) via SQLite (read-only). Actions: chats (list recent conversations), read (messages from a chat by ID), search (full-text search). Surfaces voice messages with their audio file paths (joins `attachment` table, filters by audio mime types). Resolves phone numbers and emails to contact names via `ContactResolver` (fetches from Microsoft Graph API contacts, cached 30 minutes; requires graph config). Singleton; requires Full Disk Access for the host process.
 - `TranscribeTool` — transcribes audio files to text using an audio-capable model. Parameters: file (absolute path). Reads the file, base64 encodes it, sends to the configured transcription model via `CompletionAudioInputContent`. Singleton; requires `transcribe` in agent's tools list. Model configured via `tools.transcribe.model` (default: `google/gemini-2.5-flash`). Useful for transcribing iMessage voice messages surfaced by `IMessageTool`.
 - `ChatTool` — inter-agent communication. Actions: agents (list available agents with descriptions and tools), chat (start a ping-pong conversation with another agent). Per-session; requires `chat` in agent's tools list. Creates isolated `AgentRuntime` instances for both agents (target gets all its tools except chat to prevent cascade). Supports up to 5 back-and-forth turns; either agent can end early with `<<DONE>>`. `allow_chat` in agent config restricts which agents can be contacted (null/empty = all). Costs recorded to each agent's ledger with channel `chat`. `AgentInfo` registry built at startup provides agent discovery metadata.
+- `LocationTool` — gets the user's current GPS location via the mobile device. Requires `DeviceCommandBridge` and an active mobile connection with `location` capability. Invokes `device.location` with 15s timeout. Singleton; requires `location` in agent's tools list.
+- `CameraTool` — captures a photo from the user's mobile device camera. Parameters: facing (back/front). Returns `CompletionImageContent` with base64 JPEG. Requires `DeviceCommandBridge` and an active mobile connection with `camera` capability. Singleton; requires `camera` in agent's tools list.
 - `HealthTool` — queries health data from Withings API. Actions: weight (body composition), blood_pressure, sleep, activity, authorize. Singleton; requires `withings` config with client_id and client_secret. OAuth 2.0 authorization code flow with browser redirect to `/withings/callback`.
 - `WithingsClient` (`src/Achates.Server/Withings/`) — Withings Health API client. OAuth 2.0 authorization code flow: user visits auth URL, Withings redirects to `/withings/callback`, tokens persisted at `~/.achates/withings-tokens.json`. Access tokens auto-refresh. All API calls are POST with form-encoded params; responses are `{ "status": 0, "body": { ... } }`.
 - `GraphClient` (`src/Achates.Server/Graph/`) — Microsoft Graph API client supporting two auth flows. Multiple named accounts per agent. Created per-account during startup. Eagerly authenticates so device code prompts appear at startup. `AsyncLocal` notifier routes device code messages through the transport to the user's chat. Flow is selected by presence of `client_secret`:
@@ -107,6 +109,18 @@ Console (standalone, no config dependency)
 - Admin console: Blazor Interactive Server UI at `/admin`. Pages: Dashboard, Sessions, Memory, Costs, Config.
 - `AdminService` — singleton data access layer for admin pages. Reads sessions, memory, costs, config from disk. Delegates session deletion to `Gateway.RemoveSessionAsync()`.
 - Blazor files live in `Components/` (App, Routes, Layout, Pages). Static assets in `wwwroot/css/` (Bootstrap 5, app.css).
+
+### Mobile Transport (`Achates.Server.Mobile`)
+- `MobileTransport` — WebSocket handler for `/ws/v2` mobile connections. Operates independently of Gateway (not an `ITransport`). Manages RPC dispatch, agent event streaming, and session persistence. Tracks `ActiveConnection` for device command routing.
+- `MobileConnection` — per-connection state: RPC correlation, event sequencing, agent runtimes, `Capabilities` set (populated from `connect` params).
+- `MobileSessionStore` — multi-session persistence per agent+peer under `~/.achates/agents/{agentName}/sessions/mobile/{peerId}/`.
+- `MobileSession` — session model with Id, Title, Created, Updated, Messages.
+- `DeviceCommandBridge` — routes tool requests (location, camera) to the active mobile connection. Checks `Capabilities` before invoking. Used by `LocationTool` and `CameraTool`.
+- Frame protocol: `RequestFrame` (req), `ResponseFrame` (res), `EventFrame` (evt). JSON with snake_case naming.
+- RPC methods: `connect`, `ping`, `agents.list`, `sessions.list`, `sessions.get`, `sessions.delete`, `sessions.update`, `chat.send`, `chat.cancel`.
+- Device commands (server-to-client requests): `device.location`, `device.camera`.
+- Session auto-naming: after first exchange, fires background LLM call to generate a short title, sends `session.renamed` event.
+- Per-session tool injection: `CreateRuntime` adds MemoryTool, TodoTool, CostTool, CronTool per-session (mirrors Gateway.BuildSessionTools).
 
 ## Conventions
 
