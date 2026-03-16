@@ -146,3 +146,4 @@ BenchmarkDotNet.Artifacts/
 *.received.*
 .claude/settings.local.json
 .superpowers/
+*.xcuserstate
