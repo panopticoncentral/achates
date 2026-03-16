@@ -135,9 +135,10 @@ public sealed class MobileTransport(
                 "ping" => HandlePing(request),
                 "agents.list" => HandleAgentsList(request),
                 "sessions.list" => await HandleSessionsListAsync(connection, request, ct),
-                "sessions.get" => await HandleSessionsGetAsync(connection, request, ct),
+                "sessions.new" => await HandleSessionsNewAsync(connection, request, ct),
+                "sessions.get" or "sessions.switch" => await HandleSessionsGetAsync(connection, request, ct),
                 "sessions.delete" => await HandleSessionsDeleteAsync(connection, request, ct),
-                "sessions.update" => await HandleSessionsUpdateAsync(connection, request, ct),
+                "sessions.update" or "sessions.rename" => await HandleSessionsUpdateAsync(connection, request, ct),
                 "chat.send" => await HandleChatSendAsync(connection, request, ct),
                 "chat.cancel" => HandleChatCancel(connection, request),
                 _ => ResponseFrame.Failure(request.Id, "unknown_method", $"Unknown method: {request.Method}"),
@@ -210,6 +211,33 @@ public sealed class MobileTransport(
 
         var sessions = await sessionStore.ListAsync(agentName, connection.PeerId, ct);
         var payload = JsonSerializer.SerializeToElement(new { sessions }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleSessionsNewAsync(MobileConnection connection, RequestFrame request, CancellationToken ct)
+    {
+        var agentName = GetStringParam(request.Params, "agent");
+        if (agentName is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
+
+        if (!agents.TryGetValue(agentName, out var agentDef))
+            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
+
+        var sessionId = Guid.NewGuid().ToString("N")[..12];
+        var session = new MobileSession { Id = sessionId };
+        await sessionStore.SaveAsync(agentName, connection.PeerId, session, ct);
+
+        // Create a fresh runtime for this session
+        var runtime = CreateRuntime(agentDef, agentName, connection.PeerId, sessionId);
+        connection.SetRuntime(agentName, runtime);
+
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            id = sessionId,
+            title = (string?)null,
+            message_count = 0,
+            preview = "",
+        }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
 
