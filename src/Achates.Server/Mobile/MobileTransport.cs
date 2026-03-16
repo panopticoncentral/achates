@@ -317,7 +317,7 @@ public sealed class MobileTransport(
                 switch (evt)
                 {
                     case MessageStreamEvent { Inner: CompletionTextDeltaEvent delta }:
-                        await connection.SendEventAsync("chat.text.delta", new
+                        await connection.SendEventAsync("text.delta", new
                         {
                             agent = agentName,
                             session_id = sessionId,
@@ -326,7 +326,7 @@ public sealed class MobileTransport(
                         break;
 
                     case MessageStreamEvent { Inner: CompletionThinkingDeltaEvent thinking }:
-                        await connection.SendEventAsync("chat.thinking.delta", new
+                        await connection.SendEventAsync("thinking.delta", new
                         {
                             agent = agentName,
                             session_id = sessionId,
@@ -335,7 +335,7 @@ public sealed class MobileTransport(
                         break;
 
                     case MessageStreamEvent { Inner: CompletionThinkingEndEvent }:
-                        await connection.SendEventAsync("chat.thinking.end", new
+                        await connection.SendEventAsync("thinking.end", new
                         {
                             agent = agentName,
                             session_id = sessionId,
@@ -343,7 +343,7 @@ public sealed class MobileTransport(
                         break;
 
                     case ToolStartEvent toolStart:
-                        await connection.SendEventAsync("chat.tool.start", new
+                        await connection.SendEventAsync("tool.start", new
                         {
                             agent = agentName,
                             session_id = sessionId,
@@ -353,7 +353,7 @@ public sealed class MobileTransport(
                         break;
 
                     case ToolEndEvent toolEnd:
-                        await connection.SendEventAsync("chat.tool.end", new
+                        await connection.SendEventAsync("tool.end", new
                         {
                             agent = agentName,
                             session_id = sessionId,
@@ -385,10 +385,22 @@ public sealed class MobileTransport(
                             });
                         }
 
+                        await connection.SendEventAsync("message.end", new
+                        {
+                            agent = agentName,
+                            session_id = sessionId,
+                            usage = new
+                            {
+                                input = assistantMsg.Usage.Input,
+                                output = assistantMsg.Usage.Output,
+                                cost = assistantMsg.Usage.Cost.Input + assistantMsg.Usage.Cost.Output,
+                            },
+                        }, ct);
+
                         // Notify text end when not continuing with tools
                         if (assistantMsg.StopReason is not CompletionStopReason.ToolUse)
                         {
-                            await connection.SendEventAsync("chat.text.end", new
+                            await connection.SendEventAsync("text.end", new
                             {
                                 agent = agentName,
                                 session_id = sessionId,
@@ -405,7 +417,7 @@ public sealed class MobileTransport(
                         };
                         await sessionStore.SaveAsync(agentName, connection.PeerId, session, ct);
 
-                        await connection.SendEventAsync("chat.done", new
+                        await connection.SendEventAsync("done", new
                         {
                             agent = agentName,
                             session_id = sessionId,
@@ -423,7 +435,7 @@ public sealed class MobileTransport(
             _logger.LogError(ex, "Error streaming agent response for {Agent}/{Session}", agentName, sessionId);
             try
             {
-                await connection.SendEventAsync("chat.error", new
+                await connection.SendEventAsync("error", new
                 {
                     agent = agentName,
                     session_id = sessionId,
