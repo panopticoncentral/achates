@@ -1,0 +1,363 @@
+import Foundation
+
+enum ConnectionStatus: String, Sendable {
+    case disconnected
+    case connecting
+    case connected
+    case reconnecting
+}
+
+@MainActor
+final class WebSocketClient {
+    private let appState: AppState
+    private let router: DeviceCommandRouter
+
+    private let pendingRequests = PendingRequestStore()
+    private let webSocketHolder = WebSocketTaskHolder()
+    private let lastSeqHolder = AtomicInt()
+    private let reconnectAttemptsHolder = AtomicInt()
+    private let shouldReconnectHolder = AtomicBool(true)
+
+    init(appState: AppState) {
+        self.appState = appState
+        self.router = DeviceCommandRouter()
+    }
+
+    func connect(url: URL, agent: String) {
+        shouldReconnectHolder.set(true)
+        reconnectAttemptsHolder.set(0)
+        appState.connectionStatus = .connecting
+
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        var queryItems = components.queryItems ?? []
+        queryItems.append(URLQueryItem(name: "agent", value: agent))
+        queryItems.append(URLQueryItem(name: "peer", value: devicePeerId()))
+        let lastSeq = lastSeqHolder.get()
+        if lastSeq > 0 {
+            queryItems.append(URLQueryItem(name: "last_seq", value: String(lastSeq)))
+        }
+        components.queryItems = queryItems
+
+        let session = URLSession(configuration: .default)
+        let task = session.webSocketTask(with: components.url!)
+        webSocketHolder.set(task)
+        task.resume()
+
+        Task { [weak self] in
+            await self?.receiveLoop(task: task)
+        }
+
+        Task { [weak self] in
+            await self?.performConnect()
+        }
+    }
+
+    func disconnect() {
+        shouldReconnectHolder.set(false)
+        webSocketHolder.get()?.cancel(with: .normalClosure, reason: nil)
+        webSocketHolder.set(nil)
+        appState.connectionStatus = .disconnected
+    }
+
+    func sendRequest(method: String, params: [String: JSONValue]? = nil) async throws -> [String: JSONValue]? {
+        guard let task = webSocketHolder.get() else {
+            throw FrameError.notConnected
+        }
+
+        let frame = RequestFrame(method: method, params: params)
+        let data = try JSONEncoder().encode(frame)
+        let frameId = frame.id
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[String: JSONValue]?, Error>) in
+            self.pendingRequests.set(frameId, continuation: continuation)
+
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await task.send(.data(data))
+                } catch {
+                    if let cont = self.pendingRequests.remove(frameId) {
+                        cont.resume(throwing: error)
+                    }
+                }
+            }
+
+            Task { [weak self] in
+                guard let self else { return }
+                try? await Task.sleep(for: .seconds(30))
+                if let cont = self.pendingRequests.remove(frameId) {
+                    cont.resume(throwing: FrameError.timeout)
+                }
+            }
+        }
+    }
+
+    func sendMessage(_ text: String) async {
+        do {
+            _ = try await sendRequest(method: "chat.send", params: ["text": .string(text)])
+        } catch {
+            print("Failed to send message: \(error)")
+        }
+    }
+
+    func cancelStreaming() async {
+        do {
+            _ = try await sendRequest(method: "chat.cancel")
+        } catch {
+            print("Failed to cancel: \(error)")
+        }
+    }
+
+    // MARK: - Private
+
+    private func performConnect() async {
+        do {
+            let payload = try await sendRequest(method: "connect", params: [
+                "client": .string("ios"),
+                "version": .string("1.0")
+            ])
+            reconnectAttemptsHolder.set(0)
+            appState.connectionStatus = .connected
+
+            if let agents = payload?["agents"]?.arrayValue {
+                appState.agents = agents.compactMap { val -> Agent? in
+                    guard let dict = val.objectValue else { return nil }
+                    return Agent.from(dict)
+                }
+            }
+        } catch {
+            print("Connect handshake failed: \(error)")
+        }
+    }
+
+    private nonisolated func receiveLoop(task: URLSessionWebSocketTask) async {
+        while shouldReconnectHolder.get() {
+            do {
+                let message = try await task.receive()
+                let data: Data
+                switch message {
+                case .data(let d):
+                    data = d
+                case .string(let s):
+                    data = Data(s.utf8)
+                @unknown default:
+                    continue
+                }
+
+                let frame = try Frame.parse(data)
+                await handleFrame(frame)
+
+            } catch {
+                if shouldReconnectHolder.get() {
+                    await handleDisconnect()
+                }
+                return
+            }
+        }
+    }
+
+    private func handleFrame(_ frame: Frame) async {
+        switch frame {
+        case .response(let res):
+            if let cont = pendingRequests.remove(res.id) {
+                if res.ok {
+                    cont.resume(returning: res.payload)
+                } else {
+                    let msg = res.error?.message ?? "Unknown error"
+                    cont.resume(throwing: FrameError.serverError(msg))
+                }
+            }
+
+        case .event(let evt):
+            if let seq = evt.seq {
+                lastSeqHolder.set(seq)
+            }
+            await handleEvent(evt)
+
+        case .request(let req):
+            await handleServerRequest(req)
+        }
+    }
+
+    private func handleEvent(_ evt: EventFrame) {
+        let payload = evt.payload ?? [:]
+
+        switch evt.event {
+        case "text.delta":
+            let delta = payload["delta"]?.stringValue ?? ""
+            appState.appendTextDelta(delta)
+
+        case "text.end":
+            break
+
+        case "thinking.delta":
+            let delta = payload["delta"]?.stringValue ?? ""
+            let thinkingId = payload["id"]?.stringValue ?? "default"
+            appState.appendThinkingDelta(delta, thinkingId: thinkingId)
+
+        case "thinking.end":
+            let thinkingId = payload["id"]?.stringValue ?? "default"
+            appState.collapseThinking(thinkingId: thinkingId)
+
+        case "tool.start":
+            let toolId = payload["id"]?.stringValue ?? UUID().uuidString
+            let name = payload["name"]?.stringValue ?? "unknown"
+            appState.addToolCall(toolId: toolId, name: name)
+
+        case "tool.end":
+            let toolId = payload["id"]?.stringValue ?? ""
+            let result = payload["result"]?.stringValue
+            let success = payload["success"]?.boolValue ?? true
+            appState.completeToolCall(toolId: toolId, result: result, success: success)
+
+        case "message.end":
+            appState.finalizeStreamingMessage()
+
+        case "done":
+            appState.isStreaming = false
+            appState.streamingMessageId = nil
+
+        case "session.renamed":
+            let title = payload["title"]?.stringValue ?? ""
+            let sessionId = payload["session_id"]?.stringValue
+            appState.renameSession(sessionId: sessionId, title: title)
+
+        default:
+            print("Unknown event: \(evt.event)")
+        }
+    }
+
+    private func handleServerRequest(_ req: RequestFrame) async {
+        let response = await router.handle(method: req.method, params: req.params ?? [:])
+
+        let resFrame: ResponseFrame
+        switch response {
+        case .success(let payload):
+            resFrame = ResponseFrame(id: req.id, ok: true, payload: payload)
+        case .failure(let error):
+            resFrame = ResponseFrame(id: req.id, ok: false, error: ResponseError(code: "error", message: error.localizedDescription))
+        }
+
+        if let task = webSocketHolder.get() {
+            do {
+                let data = try JSONEncoder().encode(resFrame)
+                try await task.send(.data(data))
+            } catch {
+                print("Failed to send response: \(error)")
+            }
+        }
+    }
+
+    private func handleDisconnect() async {
+        webSocketHolder.set(nil)
+        appState.connectionStatus = .reconnecting
+
+        let attempts = reconnectAttemptsHolder.increment()
+        let delay = min(0.5 * pow(2.0, Double(attempts - 1)), 30.0)
+
+        try? await Task.sleep(for: .milliseconds(Int(delay * 1000)))
+
+        guard shouldReconnectHolder.get(), let url = appState.serverURL, let agent = appState.currentAgent else {
+            appState.connectionStatus = .disconnected
+            return
+        }
+
+        connect(url: url, agent: agent.id)
+    }
+
+    private nonisolated func devicePeerId() -> String {
+        if let existing = UserDefaults.standard.string(forKey: "achates_peer_id") {
+            return existing
+        }
+        let id = UUID().uuidString.lowercased()
+        UserDefaults.standard.set(id, forKey: "achates_peer_id")
+        return id
+    }
+}
+
+// MARK: - Thread-safe helpers
+
+private final class PendingRequestStore: Sendable {
+    private let lock = NSLock()
+    private nonisolated(unsafe) var store: [String: CheckedContinuation<[String: JSONValue]?, Error>] = [:]
+
+    func set(_ id: String, continuation: CheckedContinuation<[String: JSONValue]?, Error>) {
+        lock.lock()
+        store[id] = continuation
+        lock.unlock()
+    }
+
+    func remove(_ id: String) -> CheckedContinuation<[String: JSONValue]?, Error>? {
+        lock.lock()
+        let cont = store.removeValue(forKey: id)
+        lock.unlock()
+        return cont
+    }
+}
+
+private final class WebSocketTaskHolder: Sendable {
+    private let lock = NSLock()
+    private nonisolated(unsafe) var task: URLSessionWebSocketTask?
+
+    func set(_ newTask: URLSessionWebSocketTask?) {
+        lock.lock()
+        task = newTask
+        lock.unlock()
+    }
+
+    func get() -> URLSessionWebSocketTask? {
+        lock.lock()
+        let t = task
+        lock.unlock()
+        return t
+    }
+}
+
+private final class AtomicInt: Sendable {
+    private let lock = NSLock()
+    private nonisolated(unsafe) var value: Int = 0
+
+    func get() -> Int {
+        lock.lock()
+        let v = value
+        lock.unlock()
+        return v
+    }
+
+    func set(_ newValue: Int) {
+        lock.lock()
+        value = newValue
+        lock.unlock()
+    }
+
+    @discardableResult
+    func increment() -> Int {
+        lock.lock()
+        value += 1
+        let v = value
+        lock.unlock()
+        return v
+    }
+}
+
+private final class AtomicBool: Sendable {
+    private let lock = NSLock()
+    private nonisolated(unsafe) var value: Bool
+
+    init(_ initial: Bool) {
+        self.value = initial
+    }
+
+    func get() -> Bool {
+        lock.lock()
+        let v = value
+        lock.unlock()
+        return v
+    }
+
+    func set(_ newValue: Bool) {
+        lock.lock()
+        value = newValue
+        lock.unlock()
+    }
+}
