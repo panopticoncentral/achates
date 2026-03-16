@@ -24,6 +24,7 @@ public sealed class MobileConnection(WebSocket socket, string peerId, ILoggerFac
 
     public string PeerId => peerId;
     public WebSocket Socket => socket;
+    public HashSet<string> Capabilities { get; } = [];
 
     /// <summary>
     /// Get or create an agent runtime for the given agent name.

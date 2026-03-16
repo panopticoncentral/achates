@@ -29,6 +29,7 @@ public sealed class GatewayService(
     private readonly Dictionary<string, WebSocketTransport> _webSocketTransports = new();
     private WithingsClient? _withingsClient;
     private MobileTransport? _mobileTransport;
+    private readonly DeviceCommandBridge _deviceBridge = new();
 
     public MobileTransport? MobileTransport => _mobileTransport;
 
@@ -184,6 +185,7 @@ public sealed class GatewayService(
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates"));
         _mobileTransport = new MobileTransport(agentDefinitions, mobileSessionStore,
             null, loggerFactory);
+        _deviceBridge.SetTransport(_mobileTransport);
         await _gateway.StartAsync(cancellationToken);
 
         // Start cron service for agents that have scheduled tasks enabled
@@ -318,6 +320,12 @@ public sealed class GatewayService(
                         throw new InvalidOperationException(
                             "Transcribe tool requires a transcribe model. Set tools.transcribe.model in config.");
                     tools.Add(new TranscribeTool(transcribeModel));
+                    break;
+                case "location":
+                    tools.Add(new LocationTool(_deviceBridge));
+                    break;
+                case "camera":
+                    tools.Add(new CameraTool(_deviceBridge));
                     break;
                 default:
                     throw new InvalidOperationException($"Unknown tool '{toolName}'.");

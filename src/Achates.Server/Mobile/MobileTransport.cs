@@ -9,6 +9,7 @@ using Achates.Providers.Completions;
 using Achates.Providers.Completions.Content;
 using Achates.Providers.Completions.Events;
 using Achates.Server.Cron;
+using Achates.Server.Tools;
 
 namespace Achates.Server.Mobile;
 
@@ -29,6 +30,12 @@ public sealed class MobileTransport(
     };
 
     private readonly ILogger _logger = loggerFactory.CreateLogger<MobileTransport>();
+    private volatile MobileConnection? _activeConnection;
+
+    /// <summary>
+    /// The currently connected mobile client, if any.
+    /// </summary>
+    public MobileConnection? ActiveConnection => _activeConnection;
 
     /// <summary>
     /// Handle a WebSocket connection for the given peer.
@@ -37,6 +44,7 @@ public sealed class MobileTransport(
     public async Task HandleConnectionAsync(WebSocket socket, string peerId, CancellationToken ct)
     {
         var connection = new MobileConnection(socket, peerId, loggerFactory);
+        _activeConnection = connection;
         _logger.LogInformation("Mobile connection opened for peer {PeerId}", peerId);
 
         try
@@ -57,6 +65,7 @@ public sealed class MobileTransport(
         }
         finally
         {
+            Interlocked.CompareExchange(ref _activeConnection, null, connection);
             connection.Dispose();
             _logger.LogInformation("Mobile connection closed for peer {PeerId}", peerId);
         }
@@ -148,6 +157,21 @@ public sealed class MobileTransport(
 
     private ResponseFrame HandleConnect(MobileConnection connection, RequestFrame request)
     {
+        // Parse capabilities from connect params (e.g. { "capabilities": ["location", "camera"] })
+        if (request.Params.ValueKind == JsonValueKind.Object
+            && request.Params.TryGetProperty("capabilities", out var caps)
+            && caps.ValueKind == JsonValueKind.Array)
+        {
+            connection.Capabilities.Clear();
+            foreach (var cap in caps.EnumerateArray())
+            {
+                if (cap.GetString() is { } c)
+                    connection.Capabilities.Add(c);
+            }
+            _logger.LogInformation("Peer {PeerId} capabilities: {Caps}",
+                connection.PeerId, string.Join(", ", connection.Capabilities));
+        }
+
         var payload = JsonSerializer.SerializeToElement(new
         {
             protocol_version = 1,
@@ -422,6 +446,13 @@ public sealed class MobileTransport(
                             agent = agentName,
                             session_id = sessionId,
                         }, ct);
+
+                        // Auto-name session after first exchange
+                        if (session.Title is null && session.Messages.Count >= 2)
+                        {
+                            _ = Task.Run(() => AutoNameSessionAsync(
+                                connection, agentName, session, ct), ct);
+                        }
                         break;
                 }
             }
@@ -446,12 +477,22 @@ public sealed class MobileTransport(
         }
     }
 
+    private static readonly string SharedMemoryPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
+
     private AgentRuntime CreateRuntime(AgentDefinition agentDef, string agentName, string peerId,
         string sessionId, IReadOnlyList<AgentMessage>? messages = null)
     {
-        // For now, use shared tools from the agent definition.
-        // Task 7 will add per-session tool injection.
         var tools = new List<AgentTool>(agentDef.Tools);
+
+        // Per-session tools (mirrors Gateway.BuildSessionTools)
+        tools.Add(new MemoryTool(SharedMemoryPath, agentDef.MemoryPath));
+        if (agentDef.TodoPath is { } todoPath)
+            tools.Add(new TodoTool(todoPath));
+        if (agentDef.CostLedger is { } costLedger)
+            tools.Add(new CostTool(costLedger));
+        if (agentDef.CronStore is { } cronStore && cronService is { } cron)
+            tools.Add(new CronTool(cronStore, agentName, $"{agentName}/mobile", peerId, cron));
 
         return new AgentRuntime(new AgentOptions
         {
@@ -462,6 +503,69 @@ public sealed class MobileTransport(
             Messages = messages,
         });
     }
+
+    private async Task AutoNameSessionAsync(MobileConnection connection, string agentName,
+        MobileSession session, CancellationToken ct)
+    {
+        try
+        {
+            if (!agents.TryGetValue(agentName, out var agentDef))
+                return;
+
+            // Extract first user text and first assistant text
+            var userText = session.Messages.OfType<UserMessage>().FirstOrDefault()?.Text;
+            var assistantText = session.Messages.OfType<AssistantMessage>().FirstOrDefault()
+                ?.Content.OfType<CompletionTextContent>().FirstOrDefault()?.Text;
+
+            if (userText is null)
+                return;
+
+            var snippet = $"User: {Truncate(userText, 200)}";
+            if (assistantText is not null)
+                snippet += $"\nAssistant: {Truncate(assistantText, 200)}";
+
+            var namingRuntime = new AgentRuntime(new AgentOptions
+            {
+                Model = agentDef.Model,
+                SystemPrompt = "Generate a short title (3-6 words) for the following conversation. "
+                    + "Return ONLY the title text, nothing else. No quotes, no punctuation at the end.",
+                Tools = [],
+                CompletionOptions = agentDef.CompletionOptions,
+            });
+
+            var title = "";
+            var stream = namingRuntime.PromptAsync(snippet);
+            await foreach (var evt in stream.WithCancellation(ct))
+            {
+                if (evt is MessageStreamEvent { Inner: CompletionTextDeltaEvent delta })
+                    title += delta.Delta;
+            }
+
+            title = title.Trim().Trim('"');
+            if (string.IsNullOrWhiteSpace(title))
+                return;
+
+            // Update session metadata
+            await sessionStore.UpdateMetadataAsync(agentName, connection.PeerId, session.Id, title, ct);
+
+            // Notify client
+            await connection.SendEventAsync("session.renamed", new
+            {
+                agent = agentName,
+                session_id = session.Id,
+                title,
+            }, ct);
+
+            _logger.LogDebug("Auto-named session {Agent}/{Session}: {Title}", agentName, session.Id, title);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to auto-name session {Agent}/{Session}", agentName, session.Id);
+        }
+    }
+
+    private static string Truncate(string text, int maxLength) =>
+        text.Length <= maxLength ? text : text[..maxLength] + "...";
 
     private static string? GetStringParam(JsonElement element, string name)
     {
