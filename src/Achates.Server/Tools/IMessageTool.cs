@@ -41,6 +41,8 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
 
         try
         {
+            await contacts.EnsureLoadedAsync(cancellationToken);
+
             return action switch
             {
                 "chats" => await ListChatsAsync(arguments, cancellationToken),

@@ -293,7 +293,7 @@ public sealed class GatewayService(
                     var messagesDb = Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                         "Library", "Messages", "chat.db");
-                    tools.Add(new IMessageTool(messagesDb, new ContactResolver()));
+                    tools.Add(new IMessageTool(messagesDb, new ContactResolver(graphClients)));
                     break;
                 case "health":
                     if (withingsClient is null)

@@ -12,7 +12,7 @@ namespace Achates.Server.Graph;
 public sealed class GraphClient
 {
     private static readonly string[] ClientCredentialScopes = ["https://graph.microsoft.com/.default"];
-    private static readonly string[] DelegatedScopes = ["Mail.Read", "Calendars.Read"];
+    private static readonly string[] DelegatedScopes = ["Mail.Read", "Calendars.Read", "Contacts.Read"];
 
     /// <summary>
     /// AsyncLocal callback for surfacing device code messages to the current caller

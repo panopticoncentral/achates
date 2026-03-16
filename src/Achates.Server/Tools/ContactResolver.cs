@@ -1,32 +1,40 @@
-using Microsoft.Data.Sqlite;
+using System.Text.Json;
+using Achates.Server.Graph;
 
 namespace Achates.Server.Tools;
 
 /// <summary>
-/// Resolves phone numbers and email addresses to contact names by reading the macOS AddressBook databases.
-/// Results are cached in memory and refreshed periodically.
+/// Resolves phone numbers and email addresses to contact names by fetching contacts
+/// from Microsoft Graph API. Results are cached in memory and refreshed periodically.
 /// </summary>
-internal sealed class ContactResolver
+internal sealed class ContactResolver(IReadOnlyDictionary<string, GraphClient> graphClients)
 {
-    private static readonly string AddressBookPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        "Library", "Application Support", "AddressBook");
-
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(30);
 
     private Dictionary<string, string>? _contacts;
     private DateTime _loadedAt;
 
     /// <summary>
+    /// Ensure contacts are loaded from Graph API. Call once before using Resolve().
+    /// </summary>
+    public async Task EnsureLoadedAsync(CancellationToken cancellationToken = default)
+    {
+        if (_contacts is not null && DateTime.UtcNow - _loadedAt < CacheDuration)
+            return;
+
+        _contacts = await LoadContactsAsync(cancellationToken);
+        _loadedAt = DateTime.UtcNow;
+    }
+
+    /// <summary>
     /// Resolve a handle ID (phone number or email) to a contact name.
     /// Returns the original handle ID if no match is found.
+    /// Call EnsureLoadedAsync() before first use.
     /// </summary>
     public string Resolve(string? handleId)
     {
         if (string.IsNullOrWhiteSpace(handleId))
             return "Unknown";
-
-        EnsureLoaded();
 
         if (_contacts is not { Count: > 0 })
             return handleId;
@@ -38,101 +46,100 @@ internal sealed class ContactResolver
         return _contacts.TryGetValue(normalized, out var name) ? name : handleId;
     }
 
-    private void EnsureLoaded()
-    {
-        if (_contacts is not null && DateTime.UtcNow - _loadedAt < CacheDuration)
-            return;
-
-        _contacts = LoadContacts();
-        _loadedAt = DateTime.UtcNow;
-    }
-
-    private static Dictionary<string, string> LoadContacts()
+    private async Task<Dictionary<string, string>> LoadContactsAsync(CancellationToken cancellationToken)
     {
         var contacts = new Dictionary<string, string>();
 
-        if (!Directory.Exists(AddressBookPath))
-            return contacts;
-
-        string[] dbFiles;
-        try
-        {
-            dbFiles = Directory.GetFiles(AddressBookPath, "AddressBook-v22.abcddb", SearchOption.AllDirectories);
-        }
-        catch
-        {
-            return contacts;
-        }
-
-        foreach (var dbFile in dbFiles)
+        foreach (var (_, client) in graphClients)
         {
             try
             {
-                LoadFromDatabase(dbFile, contacts);
+                await LoadFromGraphAsync(client, contacts, cancellationToken);
             }
-            catch (SqliteException)
+            catch (HttpRequestException)
             {
-                // Skip inaccessible databases (FDA not granted, corrupt, etc.)
+                // Skip accounts that fail (insufficient permissions, etc.)
             }
         }
 
         return contacts;
     }
 
-    private static void LoadFromDatabase(string dbPath, Dictionary<string, string> contacts)
+    private static async Task LoadFromGraphAsync(
+        GraphClient client, Dictionary<string, string> contacts, CancellationToken cancellationToken)
     {
-        using var conn = new SqliteConnection($"Data Source={dbPath};Mode=ReadOnly");
-        conn.Open();
+        var path = "contacts?$select=givenName,surname,emailAddresses,phones&$top=999";
 
-        using var pragma = conn.CreateCommand();
-        pragma.CommandText = "PRAGMA busy_timeout = 3000;";
-        pragma.ExecuteNonQuery();
-
-        // Load phone number mappings
-        using var phoneCmd = conn.CreateCommand();
-        phoneCmd.CommandText = """
-            SELECT r.ZFIRSTNAME, r.ZLASTNAME, p.ZFULLNUMBER
-            FROM ZABCDPHONENUMBER p
-            INNER JOIN ZABCDRECORD r ON p.ZOWNER = r.Z_PK
-            WHERE (r.ZFIRSTNAME IS NOT NULL OR r.ZLASTNAME IS NOT NULL)
-              AND p.ZFULLNUMBER IS NOT NULL
-            """;
-
-        using var phoneReader = phoneCmd.ExecuteReader();
-        while (phoneReader.Read())
+        while (path is not null)
         {
-            var name = BuildName(
-                phoneReader.IsDBNull(0) ? null : phoneReader.GetString(0),
-                phoneReader.IsDBNull(1) ? null : phoneReader.GetString(1));
-            var phone = phoneReader.GetString(2);
+            var result = await client.GetAsync<JsonElement>(path, cancellationToken);
 
-            if (name is not null)
+            if (result.TryGetProperty("value", out var items))
             {
-                var normalized = NormalizePhone(phone);
-                contacts.TryAdd(normalized, name);
+                foreach (var contact in items.EnumerateArray())
+                {
+                    var givenName = contact.TryGetProperty("givenName", out var gn) && gn.ValueKind == JsonValueKind.String
+                        ? gn.GetString() : null;
+                    var surname = contact.TryGetProperty("surname", out var sn) && sn.ValueKind == JsonValueKind.String
+                        ? sn.GetString() : null;
+
+                    var name = BuildName(givenName, surname);
+                    if (name is null)
+                        continue;
+
+                    // Index email addresses
+                    if (contact.TryGetProperty("emailAddresses", out var emails))
+                    {
+                        foreach (var email in emails.EnumerateArray())
+                        {
+                            if (email.TryGetProperty("address", out var addr) && addr.ValueKind == JsonValueKind.String)
+                            {
+                                var address = addr.GetString();
+                                if (address is not null)
+                                    contacts.TryAdd(address.ToLowerInvariant(), name);
+                            }
+                        }
+                    }
+
+                    // Index phone numbers
+                    if (contact.TryGetProperty("phones", out var phones))
+                    {
+                        foreach (var phone in phones.EnumerateArray())
+                        {
+                            if (phone.TryGetProperty("number", out var num) && num.ValueKind == JsonValueKind.String)
+                            {
+                                var number = num.GetString();
+                                if (number is not null)
+                                    contacts.TryAdd(NormalizePhone(number), name);
+                            }
+                        }
+                    }
+                }
             }
-        }
 
-        // Load email mappings
-        using var emailCmd = conn.CreateCommand();
-        emailCmd.CommandText = """
-            SELECT r.ZFIRSTNAME, r.ZLASTNAME, e.ZADDRESS
-            FROM ZABCDEMAILADDRESS e
-            INNER JOIN ZABCDRECORD r ON e.ZOWNER = r.Z_PK
-            WHERE (r.ZFIRSTNAME IS NOT NULL OR r.ZLASTNAME IS NOT NULL)
-              AND e.ZADDRESS IS NOT NULL
-            """;
+            // Follow pagination
+            path = result.TryGetProperty("@odata.nextLink", out var nextLink) && nextLink.ValueKind == JsonValueKind.String
+                ? nextLink.GetString() : null;
 
-        using var emailReader = emailCmd.ExecuteReader();
-        while (emailReader.Read())
-        {
-            var name = BuildName(
-                emailReader.IsDBNull(0) ? null : emailReader.GetString(0),
-                emailReader.IsDBNull(1) ? null : emailReader.GetString(1));
-            var email = emailReader.GetString(2);
-
-            if (name is not null)
-                contacts.TryAdd(email.ToLowerInvariant(), name);
+            // nextLink is a full URL — strip the base path prefix to get the relative path
+            if (path is not null && path.StartsWith("https://graph.microsoft.com/v1.0/", StringComparison.OrdinalIgnoreCase))
+            {
+                // Extract everything after /me/ or /users/{email}/
+                var meIndex = path.IndexOf("/me/", StringComparison.OrdinalIgnoreCase);
+                if (meIndex >= 0)
+                    path = path[(meIndex + 4)..];
+                else
+                {
+                    var usersIndex = path.IndexOf("/users/", StringComparison.OrdinalIgnoreCase);
+                    if (usersIndex >= 0)
+                    {
+                        // Skip /users/{email}/
+                        var afterUsers = path[(usersIndex + 7)..];
+                        var slashIndex = afterUsers.IndexOf('/');
+                        path = slashIndex >= 0 ? afterUsers[(slashIndex + 1)..] : afterUsers;
+                    }
+                }
+            }
         }
     }
 

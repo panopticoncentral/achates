@@ -27,6 +27,7 @@ This uses **device code flow** — you sign in once in a browser, and Achates ca
 2. Add these permissions:
    - `Mail.Read`
    - `Calendars.Read`
+   - `Contacts.Read`
 3. Click **Add permissions**
 
 No admin consent is needed — you consent for yourself during sign-in.
@@ -59,7 +60,7 @@ https://microsoft.com/devicelogin and enter the code ABCD1234
 
 If re-authentication is needed later (e.g. token expired), the sign-in message is also sent through your chat (Telegram, WebSocket, etc.).
 
-Open the URL, enter the code, and sign in with your Microsoft account. You'll see a consent screen listing "Read your mail" and "Read your calendars". Accept it.
+Open the URL, enter the code, and sign in with your Microsoft account. You'll see a consent screen listing "Read your mail", "Read your calendars", and "Read your contacts". Accept it.
 
 The token is cached at `~/.achates/graph-token-cache.bin` and reused automatically on future runs. You won't need to sign in again unless the refresh token expires (typically 90 days of inactivity).
 
@@ -95,6 +96,7 @@ This uses **client credentials flow** — fully automatic, no interactive sign-i
 2. Add these permissions:
    - `Mail.Read` — read mail in all mailboxes
    - `Calendars.Read` — read calendars in all mailboxes
+   - `Contacts.Read` — read contacts in all mailboxes
 3. Click **Add permissions**
 4. Click **Grant admin consent for [your tenant]** and confirm
 
@@ -309,7 +311,7 @@ Tokens are cached at `~/.achates/withings-tokens.json` and refresh automatically
 | `web_search` | Search the web via Brave Search | `BRAVE_API_KEY` or `tools.web_search.brave_api_key` |
 | `web_fetch` | Fetch and extract web page content | None |
 | `cost` | Query usage costs (summary, recent, breakdown) | None |
-| `imessage` | Read iMessage conversations (macOS only) | Full Disk Access on published binary |
+| `imessage` | Read iMessage conversations (macOS only) | Full Disk Access on published binary; `tools.graph` for contact names |
 | `health` | Query Withings health data (weight, BP, sleep, activity) | `tools.withings` client_id and client_secret |
 | `chat` | Talk to other agents (discovery + ping-pong conversation) | At least 2 agents configured |
 | `cron` | Create and manage scheduled tasks | None |
