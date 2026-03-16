@@ -38,6 +38,16 @@ final class AppState {
         client?.connect(url: url, agent: agentId)
     }
 
+    func disconnect() {
+        client?.disconnect()
+        connectionStatus = .disconnected
+        agents = []
+        currentAgent = nil
+        sessions = []
+        currentSession = nil
+        messages = []
+    }
+
     func selectAgent(_ agent: Agent) async {
         currentAgent = agent
         sessions = []

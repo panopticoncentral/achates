@@ -26,7 +26,7 @@ struct SettingsView: View {
                 }
 
                 Section("Server") {
-                    TextField("Server URL", text: $urlString, prompt: Text("ws://192.168.1.100:5000/ws/v2"))
+                    TextField("Server URL", text: $urlString, prompt: Text("http://192.168.1.100:5000"))
                         .textContentType(.URL)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
@@ -34,25 +34,38 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Button(action: connect) {
-                        HStack {
-                            Spacer()
-                            if appState.connectionStatus == .connecting {
-                                ProgressView()
-                                    .padding(.trailing, 8)
+                    if appState.connectionStatus == .connecting {
+                        Button(action: { appState.disconnect() }) {
+                            HStack {
+                                Spacer()
+                                Text("Cancel")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.red)
+                                Spacer()
                             }
-                            Text(appState.connectionStatus == .connecting ? "Connecting..." : "Connect")
-                                .fontWeight(.semibold)
-                            Spacer()
                         }
+                    } else {
+                        Button(action: connect) {
+                            HStack {
+                                Spacer()
+                                Text("Connect")
+                                    .fontWeight(.semibold)
+                                Spacer()
+                            }
+                        }
+                        .disabled(urlString.isEmpty)
                     }
-                    .disabled(urlString.isEmpty || appState.connectionStatus == .connecting)
                 }
 
                 if appState.connectionStatus == .connected {
                     Section {
                         Label("Connected", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
+
+                        Button(action: { appState.disconnect() }) {
+                            Text("Disconnect")
+                                .foregroundStyle(.red)
+                        }
                     }
                 }
             }

@@ -145,3 +145,4 @@ BenchmarkDotNet.Artifacts/
 # Verify
 *.received.*
 .claude/settings.local.json
+.superpowers/

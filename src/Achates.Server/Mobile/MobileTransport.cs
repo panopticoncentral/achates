@@ -192,6 +192,7 @@ public sealed class MobileTransport(
         {
             name = a.Key,
             model = a.Value.Model.Id,
+            tools = a.Value.Tools.Select(t => t.Name).ToArray(),
         }).ToList();
 
         var payload = JsonSerializer.SerializeToElement(new { agents = agentList }, JsonOptions);

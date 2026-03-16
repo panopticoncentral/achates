@@ -28,7 +28,11 @@ final class WebSocketClient {
         reconnectAttemptsHolder.set(0)
         appState.connectionStatus = .connecting
 
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        // Build WebSocket URL: convert http(s) to ws(s) and append /ws/v2
+        let wsURL = url.appendingPathComponent("ws/v2")
+        var components = URLComponents(url: wsURL, resolvingAgainstBaseURL: false)!
+        if components.scheme == "http" { components.scheme = "ws" }
+        else if components.scheme == "https" { components.scheme = "wss" }
         var queryItems = components.queryItems ?? []
         queryItems.append(URLQueryItem(name: "agent", value: agent))
         queryItems.append(URLQueryItem(name: "peer", value: devicePeerId()))
@@ -112,21 +116,26 @@ final class WebSocketClient {
 
     private func performConnect() async {
         do {
-            let payload = try await sendRequest(method: "connect", params: [
+            // Step 1: Handshake
+            _ = try await sendRequest(method: "connect", params: [
                 "client": .string("ios"),
-                "version": .string("1.0")
+                "version": .string("1.0"),
+                "capabilities": .array([.string("location"), .string("camera")])
             ])
             reconnectAttemptsHolder.set(0)
             appState.connectionStatus = .connected
 
-            if let agents = payload?["agents"]?.arrayValue {
-                appState.agents = agents.compactMap { val -> Agent? in
+            // Step 2: Fetch agent list
+            let agentsPayload = try await sendRequest(method: "agents.list")
+            if let agentsList = agentsPayload?["agents"]?.arrayValue {
+                appState.agents = agentsList.compactMap { val -> Agent? in
                     guard let dict = val.objectValue else { return nil }
                     return Agent.from(dict)
                 }
             }
         } catch {
             print("Connect handshake failed: \(error)")
+            appState.connectionStatus = .disconnected
         }
     }
 
