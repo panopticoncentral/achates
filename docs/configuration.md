@@ -21,8 +21,6 @@ agents:
     channels:
       websocket: {}
 
-console:
-  url: ws://localhost:5000/ws
 ```
 
 ## All settings
@@ -34,7 +32,6 @@ console:
 | `provider` | string | `openrouter` | Default LLM provider ID. Agents can override this. |
 | `agents` | map | _(required)_ | Named agent definitions. At least one required. |
 | `tools` | object | _(none)_ | Shared tool configuration (see below). |
-| `console` | object | _(none)_ | CLI WebSocket client settings. |
 
 ### `agents.<name>`
 
@@ -62,12 +59,7 @@ Each agent is a named entry with its own configuration. Channels are nested unde
 
 ### `agents.<name>.channels.<type>`
 
-Each channel is keyed by transport type (`websocket` or `telegram`). The channel name is derived as `{agentName}/{transportType}`.
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `token` | string | _(none)_ | Telegram bot token. Falls back to `TELEGRAM_BOT_TOKEN` env var. Required for `telegram`. |
-| `allowed_chat_ids` | long[] | _(none)_ | Restrict Telegram bot to specific chat IDs. |
+Each channel is keyed by transport type (`websocket`). The channel name is derived as `{agentName}/{transportType}`.
 
 WebSocket channels have no required config — use `websocket: {}`.
 
@@ -118,16 +110,6 @@ Withings Health API for the `health` tool. OAuth 2.0 authorization code flow —
 | `client_secret` | string | _(none)_ | Withings app secret. Falls back to `WITHINGS_CLIENT_SECRET` env var. |
 | `redirect_uri` | string | `http://localhost:5000/withings/callback` | OAuth callback URL. |
 
-### `console`
-
-Settings for the CLI WebSocket client (`Achates.Console`).
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `url` | string | `ws://localhost:5000/ws` | WebSocket server URL to connect to. |
-| `agent` | string | _(none)_ | Agent name sent to the server. |
-| `peer` | string | _(none)_ | Peer ID sent to the server. |
-
 ## Full example
 
 ```yaml
@@ -160,13 +142,7 @@ agents:
     completion:
       reasoning_effort: medium
     channels:
-      telegram:
-        token: your-bot-token
-        allowed_chat_ids: [12345]
       websocket: {}
-
-console:
-  url: ws://localhost:5000/ws
 ```
 
 ## Environment variables
@@ -175,7 +151,6 @@ console:
 |----------|---------|
 | `ACHATES_CONFIG_PATH` | Override the config file path (default: `~/.achates/config.yaml`). |
 | `OPENROUTER_API_KEY` | **Required.** API key for the OpenRouter provider. |
-| `TELEGRAM_BOT_TOKEN` | Fallback Telegram bot token if not set in channel config. |
 | `BRAVE_API_KEY` | Brave Search API key fallback. |
 | `GRAPH_CLIENT_SECRET` | Microsoft Graph client secret fallback. |
 | `WITHINGS_CLIENT_SECRET` | Withings client secret fallback. |
@@ -200,4 +175,4 @@ These features are always on and not configurable:
 - **Session compaction** — When a conversation approaches 80% of the model's context window, older messages are summarized via the LLM and replaced with a compact summary. Falls back to truncation if summarization fails.
 - **Agent memory** — Each agent has a persistent memory file that survives session resets (`/new`). The agent reads it at conversation start and saves important facts.
 - **Cost tracking** — Every completion is logged to the agent's cost ledger, regardless of whether the `cost` tool is enabled.
-- **Typing indicators** — Sent to transports every 4 seconds while processing. Telegram shows native typing; WebSocket sends a `{"type":"typing"}` JSON event.
+- **Typing indicators** — Sent to transports every 4 seconds while processing. WebSocket sends a `{"type":"typing"}` JSON event.

@@ -58,7 +58,7 @@ Graph sign-in required: To sign in, use a web browser to open
 https://microsoft.com/devicelogin and enter the code ABCD1234
 ```
 
-If re-authentication is needed later (e.g. token expired), the sign-in message is also sent through your chat (Telegram, WebSocket, etc.).
+If re-authentication is needed later (e.g. token expired), the sign-in message is also sent through your chat.
 
 Open the URL, enter the code, and sign in with your Microsoft account. You'll see a consent screen listing "Read your mail", "Read your calendars", and "Read your contacts". Accept it.
 

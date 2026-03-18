@@ -226,7 +226,6 @@ public sealed class GatewayService(
         return transportType switch
         {
             "websocket" => CreateWebSocketTransport(agentName),
-            "telegram" => CreateTelegramTransport(channelConfig),
             _ => throw new InvalidOperationException(
                 $"Unknown transport type '{transportType}' for agent '{agentName}'."),
         };
@@ -237,18 +236,6 @@ public sealed class GatewayService(
         var transport = new WebSocketTransport();
         _webSocketTransports[agentName] = transport;
         return transport;
-    }
-
-    private TelegramTransport CreateTelegramTransport(ChannelConfig channelConfig)
-    {
-        var token = channelConfig.Token
-            ?? Environment.GetEnvironmentVariable("TELEGRAM_BOT_TOKEN")
-            ?? throw new InvalidOperationException("Telegram channel requires a token.");
-
-        return new TelegramTransport(
-            token,
-            channelConfig.AllowedChatIds,
-            loggerFactory.CreateLogger<TelegramTransport>());
     }
 
     private IReadOnlyList<AgentTool> ResolveTools(AgentConfig agentConfig, ToolsConfig? toolsConfig,

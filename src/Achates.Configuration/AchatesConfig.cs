@@ -5,7 +5,6 @@ public sealed class AchatesConfig
     public ProviderConfig? Provider { get; set; }
     public ToolsConfig? Tools { get; set; }
     public Dictionary<string, AgentConfig>? Agents { get; set; }
-    public ConsoleConfig? Console { get; set; }
 }
 
 public sealed class AgentConfig
@@ -73,8 +72,6 @@ public sealed class GraphConfig
 
 public sealed class ChannelConfig
 {
-    public string? Token { get; set; }
-    public long[]? AllowedChatIds { get; set; }
 }
 
 public sealed class CompletionConfig
@@ -90,9 +87,3 @@ public sealed class ProviderConfig
     public string? ApiKey { get; set; }
 }
 
-public sealed class ConsoleConfig
-{
-    public string? Url { get; set; }
-    public string? Agent { get; set; }
-    public string? Peer { get; set; }
-}

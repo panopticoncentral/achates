@@ -73,9 +73,5 @@ public static class ConfigLoader
                 },
             },
         },
-        Console = new ConsoleConfig
-        {
-            Url = "ws://localhost:5000/ws",
-        },
     };
 }
