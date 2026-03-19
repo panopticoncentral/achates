@@ -67,10 +67,6 @@ public static class ConfigLoader
                 {
                     ReasoningEffort = "medium",
                 },
-                Channels = new Dictionary<string, ChannelConfig>
-                {
-                    ["websocket"] = new(),
-                },
             },
         },
     };

@@ -8,7 +8,7 @@ namespace Achates.Server;
 
 /// <summary>
 /// A resolved agent configuration with runtime objects (model, tools, prompt).
-/// Created from <see cref="Achates.Configuration.AgentConfig"/> during startup.
+/// Created from <see cref="AgentConfig"/> during startup.
 /// </summary>
 public sealed record AgentDefinition
 {

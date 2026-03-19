@@ -24,7 +24,6 @@ public abstract record CronSchedule
 /// </summary>
 public sealed record CronDeliveryTarget
 {
-    public required string ChannelName { get; init; }
     public required string PeerId { get; init; }
 }
 

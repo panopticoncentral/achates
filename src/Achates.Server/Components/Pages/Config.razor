@@ -5,35 +5,27 @@
     <h1 class="mb-4">Configuration</h1>
 
     <div class="row g-3 mb-4">
-        @foreach (var binding in bindings)
+        @foreach (var (name, agent) in agents)
         {
             <div class="col-md-6">
                 <div class="card">
                     <div class="card-header">
-                        Channel: <strong>@binding.Name</strong>
+                        Agent: <strong>@name</strong>
                     </div>
                     <div class="card-body">
                         <table class="table table-sm mb-0">
                             <tr>
-                                <td class="text-muted" style="width: 120px;">Agent</td>
-                                <td>@binding.AgentName</td>
-                            </tr>
-                            <tr>
-                                <td class="text-muted">Transport</td>
-                                <td>@binding.Transport.GetType().Name</td>
-                            </tr>
-                            <tr>
-                                <td class="text-muted">Model</td>
-                                <td>@binding.Agent.Model.Id</td>
+                                <td class="text-muted" style="width: 120px;">Model</td>
+                                <td>@agent.Model.Id</td>
                             </tr>
                             <tr>
                                 <td class="text-muted">Context</td>
-                                <td>@binding.Agent.Model.ContextWindow.ToString("N0") tokens</td>
+                                <td>@agent.Model.ContextWindow.ToString("N0") tokens</td>
                             </tr>
                             <tr>
                                 <td class="text-muted">Tools</td>
                                 <td>
-                                    @foreach (var tool in binding.Agent.Tools)
+                                    @foreach (var tool in agent.Tools)
                                     {
                                         <span class="badge bg-secondary me-1">@tool.Name</span>
                                     }
@@ -55,12 +47,12 @@
 </div>
 
 @code {
-    private IReadOnlyList<ChannelBinding> bindings = [];
+    private IReadOnlyDictionary<string, AgentDefinition> agents = new Dictionary<string, AgentDefinition>();
     private string rawConfig = "";
 
     protected override async Task OnInitializedAsync()
     {
-        bindings = Admin.GetBindings();
+        agents = Admin.GetAgents();
         rawConfig = await Admin.GetRawConfigAsync();
     }
 }

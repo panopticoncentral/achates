@@ -16,7 +16,6 @@ public sealed class AgentConfig
     public string? Prompt { get; set; }
     public string? PromptFile { get; set; }
     public CompletionConfig? Completion { get; set; }
-    public Dictionary<string, ChannelConfig>? Channels { get; set; }
 
     /// <summary>
     /// Allowlist of agent names this agent can chat with via the chat tool.
@@ -68,10 +67,6 @@ public sealed class GraphConfig
     public string? ClientId { get; set; }
     public string? ClientSecret { get; set; }
     public string? UserEmail { get; set; }
-}
-
-public sealed class ChannelConfig
-{
 }
 
 public sealed class CompletionConfig

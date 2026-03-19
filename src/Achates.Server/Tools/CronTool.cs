@@ -14,7 +14,6 @@ namespace Achates.Server.Tools;
 internal sealed class CronTool(
     CronStore store,
     string agentName,
-    string channelName,
     string peerId,
     CronService cronService) : AgentTool
 {
@@ -31,7 +30,6 @@ internal sealed class CronTool(
             ["schedule_interval_minutes"] = NumberSchema("Interval in minutes for recurring schedule. Required when schedule_kind is 'every'."),
             ["schedule_cron"] = StringSchema("Cron expression (e.g. '0 9 * * *' for daily at 9am). Required when schedule_kind is 'cron'."),
             ["schedule_timezone"] = StringSchema("IANA timezone for cron/at schedules (e.g. 'America/New_York'). Defaults to local timezone."),
-            ["channel"] = StringSchema("Delivery channel name. Defaults to current channel."),
             ["peer"] = StringSchema("Delivery peer ID. Defaults to current peer."),
             ["job_id"] = StringSchema("Job ID. Required for 'update', 'remove', 'run'."),
             ["enabled"] = BooleanSchema("Enable or disable a job. Used with 'update'."),
@@ -80,7 +78,7 @@ internal sealed class CronTool(
             sb.AppendLine($"**{job.Name}** (`{job.Id}`)");
             sb.AppendLine($"  Schedule: {schedule} | Status: {status} | Next: {nextRun} | Last: {lastStatus}");
             sb.AppendLine($"  Message: {Truncate(job.Message, 80)}");
-            sb.AppendLine($"  Deliver to: {job.Delivery.ChannelName}:{job.Delivery.PeerId}");
+            sb.AppendLine($"  Deliver to: {job.Delivery.PeerId}");
             sb.AppendLine();
         }
 
@@ -110,7 +108,6 @@ internal sealed class CronTool(
             return TextResult($"Error parsing schedule: {ex.Message}");
         }
 
-        var deliveryChannel = GetString(args, "channel") ?? channelName;
         var deliveryPeer = GetString(args, "peer") ?? peerId;
 
         var now = DateTimeOffset.UtcNow;
@@ -125,7 +122,6 @@ internal sealed class CronTool(
             Message = message,
             Delivery = new CronDeliveryTarget
             {
-                ChannelName = deliveryChannel,
                 PeerId = deliveryPeer,
             },
             State = { NextRunAt = nextRun },

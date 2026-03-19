@@ -2,17 +2,19 @@ using Achates.Agent;
 using Achates.Agent.Events;
 using Achates.Agent.Tools;
 using Achates.Providers.Completions.Events;
+using Achates.Server.Mobile;
 using Achates.Server.Tools;
+
 namespace Achates.Server.Cron;
 
 /// <summary>
 /// Background service that manages a timer loop, finds due cron jobs, and executes them.
-/// Created manually by GatewayService after the Gateway is ready.
+/// Created manually by GatewayService after agents are resolved.
 /// </summary>
 public sealed class CronService : IAsyncDisposable
 {
     private readonly IReadOnlyDictionary<string, (CronStore Store, AgentDefinition Agent)> _agents;
-    private readonly IReadOnlyList<ChannelBinding> _bindings;
+    private readonly MobileTransport _transport;
     private readonly ILogger<CronService> _logger;
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _poke = new(0);
@@ -23,11 +25,11 @@ public sealed class CronService : IAsyncDisposable
 
     public CronService(
         IReadOnlyDictionary<string, (CronStore Store, AgentDefinition Agent)> agents,
-        IReadOnlyList<ChannelBinding> bindings,
+        MobileTransport transport,
         ILogger<CronService> logger)
     {
         _agents = agents;
-        _bindings = bindings;
+        _transport = transport;
         _logger = logger;
     }
 
@@ -258,10 +260,10 @@ public sealed class CronService : IAsyncDisposable
             }
         }
 
-        // Deliver result to the target channel+peer
+        // Deliver result to the active mobile connection
         if (!string.IsNullOrWhiteSpace(responseText))
         {
-            await DeliverAsync(job, responseText.Trim(), ct);
+            await DeliverAsync(job, agentName, responseText.Trim(), ct);
         }
 
         return responseText;
@@ -289,24 +291,29 @@ public sealed class CronService : IAsyncDisposable
         return tools;
     }
 
-    private async Task DeliverAsync(CronJob job, string text, CancellationToken ct)
+    private async Task DeliverAsync(CronJob job, string agentName, string text, CancellationToken ct)
     {
-        var binding = _bindings.FirstOrDefault(b =>
-            b.Name.Equals(job.Delivery.ChannelName, StringComparison.OrdinalIgnoreCase));
-
-        if (binding is null)
+        var connection = _transport.ActiveConnection;
+        if (connection is null)
         {
-            _logger.LogWarning("Cron job '{Name}' delivery target channel '{Channel}' not found",
-                job.Name, job.Delivery.ChannelName);
+            _logger.LogWarning("Cron job '{Name}' — no active connection to deliver result", job.Name);
             return;
         }
 
-        await binding.Transport.SendAsync(new TransportMessage
+        try
         {
-            TransportId = binding.Transport.Id,
-            PeerId = job.Delivery.PeerId,
-            Text = text,
-        }, ct);
+            await connection.SendEventAsync("cron.result", new
+            {
+                agent = agentName,
+                job_id = job.Id,
+                job_name = job.Name,
+                text,
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Cron job '{Name}' — failed to deliver result", job.Name);
+        }
     }
 
     private async Task UpdateJobStateAfterRunAsync(

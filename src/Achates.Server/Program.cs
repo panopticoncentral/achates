@@ -67,30 +67,6 @@ app.Map("/ws", async (HttpContext context, GatewayService gatewayService) =>
         return;
     }
 
-    var agent = context.Request.Query["agent"].FirstOrDefault() ?? "default";
-    var peer = context.Request.Query["peer"].FirstOrDefault();
-
-    var transport = gatewayService.GetWebSocketTransport(agent);
-    if (transport is null)
-    {
-        context.Response.StatusCode = 404;
-        await context.Response.WriteAsync($"No WebSocket channel for agent '{agent}'.");
-        return;
-    }
-
-    var ws = await context.WebSockets.AcceptWebSocketAsync();
-    await transport.AcceptAsync(ws, peer, context.RequestAborted);
-});
-
-// --- Mobile WebSocket (v2 protocol) ---
-app.Map("/ws/v2", async (HttpContext context, GatewayService gatewayService) =>
-{
-    if (!context.WebSockets.IsWebSocketRequest)
-    {
-        context.Response.StatusCode = 400;
-        return;
-    }
-
     var mobileTransport = gatewayService.MobileTransport;
     if (mobileTransport is null)
     {

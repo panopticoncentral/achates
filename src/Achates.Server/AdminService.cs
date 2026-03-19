@@ -1,5 +1,5 @@
-using Achates.Agent.Messages;
 using Achates.Server.Cron;
+using Achates.Server.Mobile;
 
 namespace Achates.Server;
 
@@ -8,13 +8,13 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
     private static readonly string AchatesHome = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates");
 
-    // --- Dashboard ---
+    // --- Agents ---
 
-    public IReadOnlyList<ChannelBinding> GetBindings() =>
-        gatewayService.Gateway.Bindings;
+    public IReadOnlyDictionary<string, AgentDefinition> GetAgents() =>
+        gatewayService.Agents;
 
-    public ICollection<string> GetActiveSessionKeys() =>
-        gatewayService.Gateway.ActiveSessionKeys;
+    public IEnumerable<string> GetAgentNames() =>
+        gatewayService.Agents.Keys;
 
     // --- Sessions ---
 
@@ -35,17 +35,26 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
             foreach (var transportDir in Directory.GetDirectories(sessionsDir))
             {
                 var transportType = Path.GetFileName(transportDir);
-                var channelName = $"{agentName}/{transportType}";
-                foreach (var file in Directory.GetFiles(transportDir, "*.json"))
+
+                // Mobile sessions have a peer subdirectory with multiple session files
+                if (transportType == "mobile")
                 {
-                    var fi = new FileInfo(file);
-                    sessions.Add(new SessionInfo
+                    foreach (var peerDir in Directory.GetDirectories(transportDir))
                     {
-                        Channel = channelName,
-                        Peer = Path.GetFileNameWithoutExtension(file),
-                        SizeBytes = fi.Length,
-                        LastModified = fi.LastWriteTimeUtc,
-                    });
+                        var peerId = Path.GetFileName(peerDir);
+                        foreach (var file in Directory.GetFiles(peerDir, "*.json"))
+                        {
+                            var fi = new FileInfo(file);
+                            sessions.Add(new SessionInfo
+                            {
+                                AgentName = agentName,
+                                PeerId = peerId,
+                                SessionId = Path.GetFileNameWithoutExtension(file),
+                                SizeBytes = fi.Length,
+                                LastModified = fi.LastWriteTimeUtc,
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -53,16 +62,18 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
         return sessions;
     }
 
-    public async Task<IReadOnlyList<AgentMessage>?> LoadSessionAsync(string channel, string peer)
+    public async Task<MobileSession?> LoadSessionAsync(string agentName, string peerId, string sessionId)
     {
-        var key = $"{channel}:{peer}";
-        return await gatewayService.SessionStore.LoadAsync(key);
+        var store = gatewayService.MobileSessionStore;
+        if (store is null) return null;
+        return await store.LoadAsync(agentName, peerId, sessionId);
     }
 
-    public async Task DeleteSessionAsync(string channel, string peer)
+    public async Task DeleteSessionAsync(string agentName, string peerId, string sessionId)
     {
-        var key = $"{channel}:{peer}";
-        await gatewayService.Gateway.RemoveSessionAsync(key);
+        var store = gatewayService.MobileSessionStore;
+        if (store is null) return;
+        await store.DeleteAsync(agentName, peerId, sessionId);
     }
 
     // --- Memory ---
@@ -131,43 +142,32 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
 
     // --- Costs ---
 
-    public CostLedger? GetCostLedger(string agentName)
-    {
-        var bindings = gatewayService.Gateway.Bindings;
-        return bindings.FirstOrDefault(b => b.AgentName == agentName)?.Agent.CostLedger;
-    }
-
-    public IEnumerable<string> GetAgentNames() =>
-        gatewayService.Gateway.Bindings
-            .Select(b => b.AgentName)
-            .Distinct();
+    public CostLedger? GetCostLedger(string agentName) =>
+        gatewayService.Agents.TryGetValue(agentName, out var agent)
+            ? agent.CostLedger
+            : null;
 
     // --- Jobs ---
 
     public async Task<List<(string AgentName, CronJob Job)>> GetAllJobsAsync()
     {
         var result = new List<(string, CronJob)>();
-        foreach (var binding in gatewayService.Gateway.Bindings)
+        foreach (var (agentName, agentDef) in gatewayService.Agents)
         {
-            if (binding.Agent.CronStore is not { } store)
-                continue;
-
-            // Avoid duplicates if multiple channels share the same agent
-            if (result.Any(r => r.Item1 == binding.AgentName))
+            if (agentDef.CronStore is not { } store)
                 continue;
 
             var jobs = await store.LoadAsync();
             foreach (var job in jobs)
-                result.Add((binding.AgentName, job));
+                result.Add((agentName, job));
         }
         return result;
     }
 
-    public CronStore? GetCronStore(string agentName)
-    {
-        return gatewayService.Gateway.Bindings
-            .FirstOrDefault(b => b.AgentName == agentName)?.Agent.CronStore;
-    }
+    public CronStore? GetCronStore(string agentName) =>
+        gatewayService.Agents.TryGetValue(agentName, out var agent)
+            ? agent.CronStore
+            : null;
 
     // --- Config ---
 
@@ -211,8 +211,9 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
 
 public sealed record SessionInfo
 {
-    public required string Channel { get; init; }
-    public required string Peer { get; init; }
+    public required string AgentName { get; init; }
+    public required string PeerId { get; init; }
+    public required string SessionId { get; init; }
     public long SizeBytes { get; init; }
     public DateTime LastModified { get; init; }
 }

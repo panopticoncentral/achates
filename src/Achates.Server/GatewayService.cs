@@ -11,8 +11,8 @@ using Achates.Server.Withings;
 namespace Achates.Server;
 
 /// <summary>
-/// Hosted service that creates and manages the gateway lifecycle.
-/// Resolves agents and channels from config, creates the gateway, starts all transports.
+/// Hosted service that resolves agents from config, creates the mobile transport,
+/// and manages cron jobs.
 /// </summary>
 public sealed class GatewayService(
     AchatesConfig config,
@@ -21,29 +21,17 @@ public sealed class GatewayService(
     ILogger<GatewayService> logger)
     : IHostedLifecycleService, IAsyncDisposable
 {
-    private Gateway? _gateway;
+    private Dictionary<string, AgentDefinition> _agents = new();
     private CronService? _cronService;
-    private FileSessionStore? _sessionStore;
-    private readonly Dictionary<string, WebSocketTransport> _webSocketTransports = new();
     private WithingsClient? _withingsClient;
     private MobileTransport? _mobileTransport;
+    private MobileSessionStore? _mobileSessionStore;
     private readonly DeviceCommandBridge _deviceBridge = new();
 
+    public IReadOnlyDictionary<string, AgentDefinition> Agents => _agents;
     public MobileTransport? MobileTransport => _mobileTransport;
-
-    public Gateway Gateway =>
-        _gateway ?? throw new InvalidOperationException("Gateway has not started yet.");
-
-    public FileSessionStore SessionStore =>
-        _sessionStore ?? throw new InvalidOperationException("Gateway has not started yet.");
-
-    /// <summary>
-    /// Get the WebSocket transport for a given channel name.
-    /// </summary>
+    public MobileSessionStore? MobileSessionStore => _mobileSessionStore;
     public WithingsClient? WithingsClient => _withingsClient;
-
-    public WebSocketTransport? GetWebSocketTransport(string agentName) =>
-        _webSocketTransports.GetValueOrDefault(agentName);
 
     public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -55,12 +43,8 @@ public sealed class GatewayService(
         var achatesHome = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".achates");
-        _sessionStore = new FileSessionStore(achatesHome);
-        var sessionStore = _sessionStore;
 
-        // Resolve agents and their channels
         var agents = new Dictionary<string, AgentDefinition>();
-        var bindings = new List<ChannelBinding>();
 
         foreach (var (name, agentConfig) in config.Agents)
         {
@@ -147,44 +131,14 @@ public sealed class GatewayService(
                         name, accountName);
                 }
             }
-
-            // Resolve channels for this agent
-            foreach (var (transportType, _) in agentConfig.Channels ?? [])
-            {
-                var channelName = $"{name}/{transportType}";
-                var transport = CreateTransport(name, transportType);
-
-                bindings.Add(new ChannelBinding
-                {
-                    Name = channelName,
-                    Transport = transport,
-                    AgentName = name,
-                    Agent = agentDef,
-                });
-
-                logger.LogInformation("Channel '{Channel}' bound to agent '{Agent}' via {Transport}",
-                    channelName, name, transportType);
-            }
         }
 
-        if (bindings.Count == 0)
-            throw new InvalidOperationException("No channels configured. Add at least one channel to an agent in config.yaml.");
+        _agents = agents;
 
-        // Build agent registry for inter-agent chat
-        var agentRegistry = BuildAgentRegistry(agents);
-
-        _gateway = new Gateway(bindings, sessionStore, agentRegistry);
-
-        // Create MobileTransport with all agent definitions
-        var agentDefinitions = bindings
-            .GroupBy(b => b.AgentName)
-            .ToDictionary(g => g.Key, g => g.First().Agent);
-        var mobileSessionStore = new MobileSessionStore(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates"));
-        _mobileTransport = new MobileTransport(agentDefinitions, mobileSessionStore,
-            null, loggerFactory);
+        // Create MobileTransport
+        _mobileSessionStore = new MobileSessionStore(achatesHome);
+        _mobileTransport = new MobileTransport(agents, _mobileSessionStore, loggerFactory);
         _deviceBridge.SetTransport(_mobileTransport);
-        await _gateway.StartAsync(cancellationToken);
 
         // Start cron service for agents that have scheduled tasks enabled
         var cronAgents = agents
@@ -192,14 +146,13 @@ public sealed class GatewayService(
             .ToDictionary(a => a.Key, a => (a.Value.CronStore!, a.Value));
         if (cronAgents.Count > 0)
         {
-            _cronService = new CronService(cronAgents, bindings,
+            _cronService = new CronService(cronAgents, _mobileTransport,
                 loggerFactory.CreateLogger<CronService>());
-            _gateway.CronService = _cronService;
+            _mobileTransport.CronService = _cronService;
             await _cronService.StartAsync(cancellationToken);
         }
 
-        logger.LogInformation("Gateway started with {AgentCount} agent(s) and {ChannelCount} channel(s)",
-            agents.Count, bindings.Count);
+        logger.LogInformation("Started with {AgentCount} agent(s)", agents.Count);
     }
 
     public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -213,21 +166,6 @@ public sealed class GatewayService(
         {
             await _cronService.DisposeAsync();
         }
-        if (_gateway is not null)
-        {
-            await _gateway.DisposeAsync();
-        }
-    }
-
-    private WebSocketTransport CreateTransport(string agentName, string transportType)
-    {
-        if (transportType != "websocket")
-            throw new InvalidOperationException(
-                $"Unknown transport type '{transportType}' for agent '{agentName}'.");
-
-        var transport = new WebSocketTransport();
-        _webSocketTransports[agentName] = transport;
-        return transport;
     }
 
     private IReadOnlyList<AgentTool> ResolveTools(AgentConfig agentConfig, ToolsConfig? toolsConfig,
@@ -246,19 +184,11 @@ public sealed class GatewayService(
                     tools.Add(new SessionTool(model));
                     break;
                 case "memory":
-                    // MemoryTool is added per-session in Gateway.BuildSessionTools
-                    break;
                 case "todo":
-                    // TodoTool is added per-session in Gateway.BuildSessionTools
-                    break;
                 case "cost":
-                    // CostTool is added per-session in Gateway.BuildSessionTools
-                    break;
                 case "cron":
-                    // CronTool is added per-session in Gateway.BuildSessionTools
-                    break;
                 case "chat":
-                    // ChatTool is added per-session in Gateway.BuildSessionTools
+                    // Per-session tools — added in MobileTransport.CreateRuntime
                     break;
                 case "mail":
                     if (graphClients.Count == 0)
@@ -373,24 +303,6 @@ public sealed class GatewayService(
         path is not null && path.StartsWith('~')
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..])
             : path;
-
-    private Dictionary<string, AgentInfo> BuildAgentRegistry(
-        Dictionary<string, AgentDefinition> agents)
-    {
-        var registry = new Dictionary<string, AgentInfo>();
-        foreach (var (name, agentDef) in agents)
-        {
-            var agentConfig = config.Agents![name];
-            registry[name] = new AgentInfo
-            {
-                AgentDef = agentDef,
-                Description = agentConfig.Description,
-                ToolNames = agentConfig.Tools,
-                AllowChat = agentConfig.AllowChat,
-            };
-        }
-        return registry;
-    }
 
     private static string ResolveNotesFolder(ToolsConfig? toolsConfig) =>
         string.IsNullOrWhiteSpace(toolsConfig?.Notes?.Folder) ? "Achates" : toolsConfig.Notes.Folder;

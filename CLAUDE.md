@@ -1,6 +1,6 @@
 # Achates
 
-AI agent framework with pluggable providers, transports, and tools. .NET 10 preview.
+AI agent framework with pluggable providers and tools. .NET 10 preview.
 
 > **Keep this file up to date.** When you add, remove, or rename projects, change architectural patterns, or modify conventions, update the relevant sections of this file before finishing the task. Also update `README.md` when changes affect configuration format, tool setup instructions, or user-facing behavior. Update `docs/configuration.md` when changing the config system (adding/removing/renaming fields, env vars, data paths).
 
@@ -41,8 +41,6 @@ Providers <- Agent <- Server
 ### Core Concepts
 
 - **Agent** — Named entity with identity (name, description), prompt, model, tools, and persistent memory. Defined in config, resolved at startup into `AgentDefinition`.
-- **Transport** — A messaging mechanism. Only implementation: `WebSocketTransport` (in Server project).
-- **Channel** — A binding of a transport instance to an agent (`ChannelBinding`). Defined under the agent in config, keyed by transport type (e.g. `websocket`). The channel name is derived as `{agentName}/{transportType}`.
 
 ### Provider Layer (`Achates.Providers`)
 - `IModelProvider` — interface with `GetModelsAsync()` and `GetCompletions()` (streaming)
@@ -64,25 +62,18 @@ Providers <- Agent <- Server
 - `AgentTool` is the preferred pattern (class-based). Subclass and implement `Name`, `Description`, `Parameters` (JSON Schema as `JsonElement`), `ExecuteAsync()`.
 - Returns `AgentToolResult` with `Content` (list of `CompletionContent`) and optional `Details` (for UI display).
 - Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`, `CronTool`, `IMessageTool`, `HealthTool`, `ChatTool`, `TranscribeTool`, `LocationTool`, `CameraTool`.
-- Tools can be shared (same instance for all sessions) or per-session. The Gateway builds per-session tool lists via `BuildSessionTools()` (e.g. `MemoryTool` uses per-agent memory path).
+- Tools can be shared (same instance for all sessions) or per-session. `MobileTransport.CreateRuntime` builds per-session tool lists (e.g. `MemoryTool` uses per-agent memory path).
 - Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
 
-### Transport (`Achates.Server`)
-- `WebSocketTransport` — accepts WebSocket connections, routes messages via `MessageReceived` event. `SendAsync()`, `SendTypingAsync()`, `StartAsync()`, `StopAsync()`.
-- `TransportMessage` — TransportId, PeerId, Text, Timestamp
-
-### Gateway (`Achates.Server`)
-- `Gateway` — takes a list of `ChannelBinding` (transport + agent pairs) and an optional `ISessionStore`. Each `channelName:peerId` pair gets its own `AgentRuntime` instance configured from the channel's `AgentDefinition`. Routes inbound messages, accumulates text deltas, sends responses back. Persists sessions after each completed response. Sends typing indicators via a keepalive loop (4s interval). Handles `/new` command to reset sessions.
-- `ChannelBinding` — binds a derived channel name (`{agentName}/{transportType}`) to a transport and an agent definition.
+### Server (`Achates.Server`)
 - `AgentDefinition` — resolved agent with Model, SystemPrompt, Tools, CompletionOptions, MemoryPath, CostLedger, CronStore, GraphClient.
-- `FileSessionStore` — stores conversation history as JSON files in `~/.achates/agents/{agentName}/sessions/{transportType}/{peerId}.json`.
 - `MemoryTool` — layered persistent memory with two scopes. **Shared memory** at `~/.achates/memory.md` stores universal user facts (name, family, preferences) accessible to all agents. **Agent memory** at `~/.achates/agents/{agentName}/memory.md` stores agent-specific notes. `scope` parameter (`shared` or `agent`) controls which file to target; `read` without a scope returns both. Survives `/new` resets.
 - `MailTool` — reads Outlook email via Microsoft Graph API. Actions: list, read, search. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
 - `CalendarTool` — reads Outlook calendar via Microsoft Graph API. Actions: upcoming, read, availability. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
 - `WebSearchTool` — searches the web via Brave Search API. Parameters: query, count. Returns numbered results with title, URL, description. Singleton; requires `brave_api_key` in config or `BRAVE_API_KEY` env var.
 - `WebFetchTool` — fetches a URL and extracts readable content using SmartReader (Readability). Parameters: url, max_chars. Handles HTML, JSON, plain text. Singleton; no config required.
 - `CostTool` — queries the persistent cost ledger. Actions: summary (totals for a period), recent (last N entries), breakdown (grouped by day or model). Per-session; requires `cost` in agent's tools list. Ledger is always recorded regardless of tool config.
-- `CronTool` — manages scheduled tasks. Actions: list, add, update, remove, run. Per-session; requires `cron` in agent's tools list. Schedule types: `at` (one-shot timestamp), `every` (interval in minutes), `cron` (cron expression with optional timezone). Jobs run in isolation (fresh AgentRuntime) and deliver results to the configured channel+peer. Delivery target defaults to the current session's channel+peer.
+- `CronTool` — manages scheduled tasks. Actions: list, add, update, remove, run. Per-session; requires `cron` in agent's tools list. Schedule types: `at` (one-shot timestamp), `every` (interval in minutes), `cron` (cron expression with optional timezone). Jobs run in isolation (fresh AgentRuntime) and deliver results to the active mobile connection as `cron.result` events. Delivery target defaults to the current session's peer.
 - `IMessageTool` — reads local macOS iMessage database (`~/Library/Messages/chat.db`) via SQLite (read-only). Actions: chats (list recent conversations), read (messages from a chat by ID), search (full-text search). Surfaces voice messages with their audio file paths (joins `attachment` table, filters by audio mime types). Resolves phone numbers and emails to contact names via `ContactResolver` (fetches from Microsoft Graph API contacts, cached 30 minutes; requires graph config). Singleton; requires Full Disk Access for the host process.
 - `TranscribeTool` — transcribes audio files to text using an audio-capable model. Parameters: file (absolute path). Reads the file, base64 encodes it, sends to the configured transcription model via `CompletionAudioInputContent`. Singleton; requires `transcribe` in agent's tools list. Model configured via `tools.transcribe.model` (default: `google/gemini-2.5-flash`). Useful for transcribing iMessage voice messages surfaced by `IMessageTool`.
 - `ChatTool` — inter-agent communication. Actions: agents (list available agents with descriptions and tools), chat (start a ping-pong conversation with another agent). Per-session; requires `chat` in agent's tools list. Creates isolated `AgentRuntime` instances for both agents (target gets all its tools except chat to prevent cascade). Supports up to 5 back-and-forth turns; either agent can end early with `<<DONE>>`. `allow_chat` in agent config restricts which agents can be contacted (null/empty = all). Costs recorded to each agent's ledger with channel `chat`. `AgentInfo` registry built at startup provides agent discovery metadata.
@@ -93,16 +84,16 @@ Providers <- Agent <- Server
 - `GraphClient` (`src/Achates.Server/Graph/`) — Microsoft Graph API client supporting two auth flows. Multiple named accounts per agent. Created per-account during startup. Eagerly authenticates so device code prompts appear at startup. `AsyncLocal` notifier routes device code messages through the transport to the user's chat. Flow is selected by presence of `client_secret`:
   - **Client credentials** (work/school): `client_secret` set → application permissions, `/users/{email}/` paths. Requires `tenant_id`, `user_email`.
   - **Device code** (personal or work/school): no `client_secret` → delegated permissions, `/me/` paths. `tenant_id` defaults to `consumers`. Token cache persisted at `~/.achates/graph-token-cache.bin`.
-- `CronService` (`src/Achates.Server/Cron/`) — background timer loop for scheduled task execution. Not DI-registered; created by `GatewayService` after Gateway starts. Timer sleeps until next due job (max 60s), executes due jobs sequentially, delivers results via transports. `CronStore` persists jobs per-agent as JSON. `CronScheduler` computes next run times using Cronos library for cron expressions.
-- `GatewayService` — ASP.NET Core `IHostedLifecycleService`. Resolves agents and their channels from config at startup, creates transports, builds `ChannelBinding` list, creates gateway. Channels are nested under agents in config; the channel name is derived as `{agentName}/{transportType}`.
-- WebSocket endpoint: `/ws` (query params: `agent`, `peer`)
+- `CronService` (`src/Achates.Server/Cron/`) — background timer loop for scheduled task execution. Not DI-registered; created by `GatewayService` after agents are resolved. Timer sleeps until next due job (max 60s), executes due jobs sequentially, delivers results via `MobileTransport`. `CronStore` persists jobs per-agent as JSON. `CronScheduler` computes next run times using Cronos library for cron expressions.
+- `GatewayService` — ASP.NET Core `IHostedLifecycleService`. Resolves agents from config at startup, creates `MobileTransport` and `CronService`.
+- WebSocket endpoint: `/ws` (query params: `peer`)
 - Health check: `GET /health`
 - Admin console: Blazor Interactive Server UI at `/admin`. Pages: Dashboard, Sessions, Memory, Costs, Config.
-- `AdminService` — singleton data access layer for admin pages. Reads sessions, memory, costs, config from disk. Delegates session deletion to `Gateway.RemoveSessionAsync()`.
+- `AdminService` — singleton data access layer for admin pages. Reads sessions, memory, costs, config from disk.
 - Blazor files live in `Components/` (App, Routes, Layout, Pages). Static assets in `wwwroot/css/` (Bootstrap 5, app.css).
 
-### Mobile Transport (`Achates.Server.Mobile`)
-- `MobileTransport` — WebSocket handler for `/ws/v2` mobile connections. Operates independently of Gateway. Manages RPC dispatch, agent event streaming, and session persistence. Tracks `ActiveConnection` for device command routing.
+### Transport (`Achates.Server.Mobile`)
+- `MobileTransport` — WebSocket handler for `/ws` connections. Manages RPC dispatch, agent event streaming, and session persistence. Tracks `ActiveConnection` for device command routing and cron delivery.
 - `MobileConnection` — per-connection state: RPC correlation, event sequencing, agent runtimes, `Capabilities` set (populated from `connect` params).
 - `MobileSessionStore` — multi-session persistence per agent+peer under `~/.achates/agents/{agentName}/sessions/mobile/{peerId}/`.
 - `MobileSession` — session model with Id, Title, Created, Updated, Messages.
@@ -111,7 +102,7 @@ Providers <- Agent <- Server
 - RPC methods: `connect`, `ping`, `agents.list`, `sessions.list`, `sessions.get`, `sessions.delete`, `sessions.update`, `chat.send`, `chat.cancel`.
 - Device commands (server-to-client requests): `device.location`, `device.camera`.
 - Session auto-naming: after first exchange, fires background LLM call to generate a short title, sends `session.renamed` event.
-- Per-session tool injection: `CreateRuntime` adds MemoryTool, TodoTool, CostTool, CronTool per-session (mirrors Gateway.BuildSessionTools).
+- Per-session tool injection: `CreateRuntime` adds MemoryTool, TodoTool, CostTool, CronTool per-session.
 
 ## Conventions
 
@@ -161,17 +152,15 @@ agents:
     allow_chat: [other_agent_name]  # optional; omit to allow all agents
     completion:
       reasoning_effort: medium
-    channels:
-      websocket: {}
 ```
 
-Loaded by `ConfigLoader.Load()` (in Server project). Env var override: `ACHATES_CONFIG_PATH`. YAML uses underscore naming convention (C# PascalCase <-> YAML snake_case). `~` is expanded in file paths (e.g. `todo_file`). `${ENV_VAR}` expansion is **not yet supported** — use literal values or env vars directly. Channels are nested under agents, keyed by transport type (`websocket`). The channel name is derived as `{agentName}/{transportType}`.
+Loaded by `ConfigLoader.Load()` (in Server project). Env var override: `ACHATES_CONFIG_PATH`. YAML uses underscore naming convention (C# PascalCase <-> YAML snake_case). `~` is expanded in file paths (e.g. `todo_file`). `${ENV_VAR}` expansion is **not yet supported** — use literal values or env vars directly.
 
 ### Data paths
 
 ```
 ~/.achates/config.yaml                                        Configuration
-~/.achates/agents/{agentName}/sessions/{transportType}/{peerId}.json  Conversation history
+~/.achates/agents/{agentName}/sessions/mobile/{peerId}/{sessionId}.json  Conversation history
 ~/.achates/memory.md                                           Shared memory (universal user facts, all agents)
 ~/.achates/agents/{agentName}/memory.md                        Agent memory (agent-specific notes)
 ~/.achates/agents/{agentName}/costs.jsonl                      Cost ledger (append-only, always recorded)

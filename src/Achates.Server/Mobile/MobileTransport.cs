@@ -14,14 +14,12 @@ using Achates.Server.Tools;
 namespace Achates.Server.Mobile;
 
 /// <summary>
-/// WebSocket handler for /ws/v2 mobile connections.
+/// WebSocket handler for /ws connections.
 /// Manages the read loop, RPC dispatch, agent event streaming, and session persistence.
-/// Operates independently of Gateway — not an ITransport implementation.
 /// </summary>
 public sealed class MobileTransport(
     IReadOnlyDictionary<string, AgentDefinition> agents,
     MobileSessionStore sessionStore,
-    CronService? cronService,
     ILoggerFactory loggerFactory)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -31,6 +29,8 @@ public sealed class MobileTransport(
 
     private readonly ILogger _logger = loggerFactory.CreateLogger<MobileTransport>();
     private volatile MobileConnection? _activeConnection;
+
+    public CronService? CronService { get; set; }
 
     /// <summary>
     /// The currently connected mobile client, if any.
@@ -520,8 +520,8 @@ public sealed class MobileTransport(
             tools.Add(new TodoTool(todoPath));
         if (agentDef.CostLedger is { } costLedger)
             tools.Add(new CostTool(costLedger));
-        if (agentDef.CronStore is { } cronStore && cronService is { } cron)
-            tools.Add(new CronTool(cronStore, agentName, $"{agentName}/mobile", peerId, cron));
+        if (agentDef.CronStore is { } cronStore && CronService is { } cron)
+            tools.Add(new CronTool(cronStore, agentName, peerId, cron));
 
         return new AgentRuntime(new AgentOptions
         {
