@@ -20,12 +20,9 @@ public abstract record CronSchedule
 }
 
 /// <summary>
-/// Where to deliver the job's output.
+/// Where to deliver the job's output. Reserved for future routing fields.
 /// </summary>
-public sealed record CronDeliveryTarget
-{
-    public required string PeerId { get; init; }
-}
+public sealed record CronDeliveryTarget;
 
 /// <summary>
 /// Mutable execution state tracked between runs.

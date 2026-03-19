@@ -4,7 +4,7 @@ namespace Achates.Server.Mobile;
 
 /// <summary>
 /// Bridge between server-side tools and mobile device capabilities.
-/// Routes device command requests through the active mobile connection.
+/// Routes device command requests through any connected client that has the capability.
 /// </summary>
 public sealed class DeviceCommandBridge
 {
@@ -14,14 +14,24 @@ public sealed class DeviceCommandBridge
 
     public bool IsAvailable(string capability)
     {
-        var conn = _transport?.ActiveConnection;
-        return conn is not null && conn.Capabilities.Contains(capability);
+        return _transport?.Connections.Any(c => c.Capabilities.Contains(capability)) == true;
     }
 
     public async Task<JsonElement?> InvokeAsync(string method, JsonElement? parameters = null,
         TimeSpan? timeout = null, CancellationToken ct = default)
     {
-        var conn = _transport?.ActiveConnection;
+        var conn = _transport?.Connections.FirstOrDefault(c =>
+        {
+            // Pick a connected client — prefer one with relevant capabilities
+            var capability = method switch
+            {
+                "device.location" => "location",
+                "device.camera" => "camera",
+                _ => null,
+            };
+            return capability is null || c.Capabilities.Contains(capability);
+        });
+
         if (conn is null) return null;
 
         try

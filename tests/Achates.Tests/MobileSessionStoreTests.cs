@@ -25,8 +25,8 @@ public sealed class MobileSessionStoreTests : IDisposable
             Messages = [new UserMessage { Text = "Hello" }]
         };
 
-        await _store.SaveAsync("agent1", "peer1", session);
-        var loaded = await _store.LoadAsync("agent1", "peer1", "sess-1");
+        await _store.SaveAsync("agent1", session);
+        var loaded = await _store.LoadAsync("agent1", "sess-1");
 
         Assert.NotNull(loaded);
         Assert.Equal("Test Session", loaded.Title);
@@ -39,10 +39,10 @@ public sealed class MobileSessionStoreTests : IDisposable
         var s1 = new MobileSession { Id = "a", Title = "First", Messages = [new UserMessage { Text = "Hi" }] };
         var s2 = new MobileSession { Id = "b", Title = "Second", Messages = [new UserMessage { Text = "Hey" }, new UserMessage { Text = "There" }] };
 
-        await _store.SaveAsync("agent1", "peer1", s1);
-        await _store.SaveAsync("agent1", "peer1", s2);
+        await _store.SaveAsync("agent1", s1);
+        await _store.SaveAsync("agent1", s2);
 
-        var list = await _store.ListAsync("agent1", "peer1");
+        var list = await _store.ListAsync("agent1");
         Assert.Equal(2, list.Count);
         Assert.Contains(list, m => m.Id == "a" && m.Title == "First" && m.MessageCount == 1);
         Assert.Contains(list, m => m.Id == "b" && m.Title == "Second" && m.MessageCount == 2);
@@ -52,10 +52,10 @@ public sealed class MobileSessionStoreTests : IDisposable
     public async Task DeleteAsync_RemovesSession()
     {
         var session = new MobileSession { Id = "del-1", Title = "Doomed" };
-        await _store.SaveAsync("agent1", "peer1", session);
-        await _store.DeleteAsync("agent1", "peer1", "del-1");
+        await _store.SaveAsync("agent1", session);
+        await _store.DeleteAsync("agent1", "del-1");
 
-        var loaded = await _store.LoadAsync("agent1", "peer1", "del-1");
+        var loaded = await _store.LoadAsync("agent1", "del-1");
         Assert.Null(loaded);
     }
 
@@ -68,10 +68,10 @@ public sealed class MobileSessionStoreTests : IDisposable
             Title = "Old Title",
             Messages = [new UserMessage { Text = "Keep me" }]
         };
-        await _store.SaveAsync("agent1", "peer1", session);
-        await _store.UpdateMetadataAsync("agent1", "peer1", "meta-1", "New Title");
+        await _store.SaveAsync("agent1", session);
+        await _store.UpdateMetadataAsync("agent1", "meta-1", "New Title");
 
-        var loaded = await _store.LoadAsync("agent1", "peer1", "meta-1");
+        var loaded = await _store.LoadAsync("agent1", "meta-1");
         Assert.Equal("New Title", loaded!.Title);
         Assert.Single(loaded.Messages);
     }
@@ -79,14 +79,14 @@ public sealed class MobileSessionStoreTests : IDisposable
     [Fact]
     public async Task LoadAsync_ReturnsNull_WhenNotFound()
     {
-        var result = await _store.LoadAsync("agent1", "peer1", "nonexistent");
+        var result = await _store.LoadAsync("agent1", "nonexistent");
         Assert.Null(result);
     }
 
     [Fact]
     public async Task ListAsync_ReturnsEmpty_WhenNone()
     {
-        var list = await _store.ListAsync("agent1", "peer1");
+        var list = await _store.ListAsync("agent1");
         Assert.Empty(list);
     }
 }

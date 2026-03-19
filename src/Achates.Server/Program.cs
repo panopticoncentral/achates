@@ -74,9 +74,8 @@ app.Map("/ws", async (HttpContext context, GatewayService gatewayService) =>
         return;
     }
 
-    var peer = context.Request.Query["peer"].FirstOrDefault() ?? Guid.NewGuid().ToString("N");
     using var ws = await context.WebSockets.AcceptWebSocketAsync();
-    await mobileTransport.HandleConnectionAsync(ws, peer, context.RequestAborted);
+    await mobileTransport.HandleConnectionAsync(ws, context.RequestAborted);
 });
 
 // --- Blazor admin console ---

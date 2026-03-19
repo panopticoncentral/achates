@@ -2,15 +2,14 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
-using Achates.Agent;
 
 namespace Achates.Server.Mobile;
 
 /// <summary>
-/// Per-connection state for a mobile WebSocket client.
-/// Manages RPC correlation, event sequencing, agent runtimes, and frame sending.
+/// Per-connection state for a WebSocket client.
+/// Manages RPC correlation, event sequencing, and frame sending.
 /// </summary>
-public sealed class MobileConnection(WebSocket socket, string peerId, ILoggerFactory loggerFactory)
+public sealed class MobileConnection(WebSocket socket, string connectionId, ILoggerFactory loggerFactory)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -18,25 +17,12 @@ public sealed class MobileConnection(WebSocket socket, string peerId, ILoggerFac
     };
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ResponseFrame>> _pendingRequests = new();
-    private readonly ConcurrentDictionary<string, AgentRuntime> _runtimes = new();
     private readonly ILogger _logger = loggerFactory.CreateLogger<MobileConnection>();
     private long _seq;
 
-    public string PeerId => peerId;
+    public string ConnectionId => connectionId;
     public WebSocket Socket => socket;
     public HashSet<string> Capabilities { get; } = [];
-
-    /// <summary>
-    /// Get or create an agent runtime for the given agent name.
-    /// </summary>
-    public AgentRuntime? GetRuntime(string agentName) =>
-        _runtimes.GetValueOrDefault(agentName);
-
-    public void SetRuntime(string agentName, AgentRuntime runtime) =>
-        _runtimes[agentName] = runtime;
-
-    public bool RemoveRuntime(string agentName) =>
-        _runtimes.TryRemove(agentName, out _);
 
     /// <summary>
     /// Send a response frame to the client.
@@ -126,16 +112,10 @@ public sealed class MobileConnection(WebSocket socket, string peerId, ILoggerFac
     }
 
     /// <summary>
-    /// Abort all runtimes and cancel pending requests.
+    /// Cancel pending requests on disconnect.
     /// </summary>
     public void Dispose()
     {
-        foreach (var runtime in _runtimes.Values)
-        {
-            runtime.Abort();
-        }
-        _runtimes.Clear();
-
         foreach (var tcs in _pendingRequests.Values)
         {
             tcs.TrySetCanceled();

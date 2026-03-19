@@ -93,11 +93,11 @@ Providers <- Agent <- Server
 - Blazor files live in `Components/` (App, Routes, Layout, Pages). Static assets in `wwwroot/css/` (Bootstrap 5, app.css).
 
 ### Transport (`Achates.Server.Mobile`)
-- `MobileTransport` — WebSocket handler for `/ws` connections. Manages RPC dispatch, agent event streaming, and session persistence. Tracks `ActiveConnection` for device command routing and cron delivery.
+- `MobileTransport` — WebSocket handler for `/ws` connections. Supports multiple concurrent clients. All clients share the same session namespace (sessions are per-agent, not per-client). Events are broadcast to all connected clients. Manages RPC dispatch, agent event streaming, and session persistence.
 - `MobileConnection` — per-connection state: RPC correlation, event sequencing, agent runtimes, `Capabilities` set (populated from `connect` params).
-- `MobileSessionStore` — multi-session persistence per agent+peer under `~/.achates/agents/{agentName}/sessions/mobile/{peerId}/`.
+- `MobileSessionStore` — session persistence per agent under `~/.achates/agents/{agentName}/sessions/{sessionId}.json`.
 - `MobileSession` — session model with Id, Title, Created, Updated, Messages.
-- `DeviceCommandBridge` — routes tool requests (location, camera) to the active mobile connection. Checks `Capabilities` before invoking. Used by `LocationTool` and `CameraTool`.
+- `DeviceCommandBridge` — routes tool requests (location, camera) to any connected client with the required capability. Used by `LocationTool` and `CameraTool`.
 - Frame protocol: `RequestFrame` (req), `ResponseFrame` (res), `EventFrame` (evt). JSON with snake_case naming.
 - RPC methods: `connect`, `ping`, `agents.list`, `sessions.list`, `sessions.get`, `sessions.delete`, `sessions.update`, `chat.send`, `chat.cancel`.
 - Device commands (server-to-client requests): `device.location`, `device.camera`.
@@ -160,7 +160,7 @@ Loaded by `ConfigLoader.Load()` (in Server project). Env var override: `ACHATES_
 
 ```
 ~/.achates/config.yaml                                        Configuration
-~/.achates/agents/{agentName}/sessions/mobile/{peerId}/{sessionId}.json  Conversation history
+~/.achates/agents/{agentName}/sessions/{sessionId}.json                  Conversation history
 ~/.achates/memory.md                                           Shared memory (universal user facts, all agents)
 ~/.achates/agents/{agentName}/memory.md                        Agent memory (agent-specific notes)
 ~/.achates/agents/{agentName}/costs.jsonl                      Cost ledger (append-only, always recorded)

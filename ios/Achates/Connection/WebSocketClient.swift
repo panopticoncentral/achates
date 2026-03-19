@@ -34,8 +34,6 @@ final class WebSocketClient {
         if components.scheme == "http" { components.scheme = "ws" }
         else if components.scheme == "https" { components.scheme = "wss" }
         var queryItems = components.queryItems ?? []
-        queryItems.append(URLQueryItem(name: "agent", value: agent))
-        queryItems.append(URLQueryItem(name: "peer", value: devicePeerId()))
         let lastSeq = lastSeqHolder.get()
         if lastSeq > 0 {
             queryItems.append(URLQueryItem(name: "last_seq", value: String(lastSeq)))
@@ -283,14 +281,6 @@ final class WebSocketClient {
         connect(url: url, agent: agent.id)
     }
 
-    private nonisolated func devicePeerId() -> String {
-        if let existing = UserDefaults.standard.string(forKey: "achates_peer_id") {
-            return existing
-        }
-        let id = UUID().uuidString.lowercased()
-        UserDefaults.standard.set(id, forKey: "achates_peer_id")
-        return id
-    }
 }
 
 // MARK: - Thread-safe helpers

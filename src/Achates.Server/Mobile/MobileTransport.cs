@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -14,7 +15,8 @@ using Achates.Server.Tools;
 namespace Achates.Server.Mobile;
 
 /// <summary>
-/// WebSocket handler for /ws connections.
+/// WebSocket handler for /ws connections. Supports multiple concurrent clients.
+/// All clients share the same session namespace — sessions are per-agent, not per-client.
 /// Manages the read loop, RPC dispatch, agent event streaming, and session persistence.
 /// </summary>
 public sealed class MobileTransport(
@@ -28,24 +30,25 @@ public sealed class MobileTransport(
     };
 
     private readonly ILogger _logger = loggerFactory.CreateLogger<MobileTransport>();
-    private volatile MobileConnection? _activeConnection;
+    private readonly ConcurrentDictionary<string, MobileConnection> _connections = new();
+    private readonly ConcurrentDictionary<string, AgentRuntime> _runtimes = new();
 
     public CronService? CronService { get; set; }
 
     /// <summary>
-    /// The currently connected mobile client, if any.
+    /// All currently connected clients.
     /// </summary>
-    public MobileConnection? ActiveConnection => _activeConnection;
+    public ICollection<MobileConnection> Connections => _connections.Values;
 
     /// <summary>
-    /// Handle a WebSocket connection for the given peer.
-    /// Runs the read loop until the socket closes or is cancelled.
+    /// Handle a WebSocket connection. Runs the read loop until the socket closes or is cancelled.
     /// </summary>
-    public async Task HandleConnectionAsync(WebSocket socket, string peerId, CancellationToken ct)
+    public async Task HandleConnectionAsync(WebSocket socket, CancellationToken ct)
     {
-        var connection = new MobileConnection(socket, peerId, loggerFactory);
-        _activeConnection = connection;
-        _logger.LogInformation("Mobile connection opened for peer {PeerId}", peerId);
+        var connectionId = Guid.NewGuid().ToString("N")[..8];
+        var connection = new MobileConnection(socket, connectionId, loggerFactory);
+        _connections[connectionId] = connection;
+        _logger.LogInformation("Connection {Id} opened", connectionId);
 
         try
         {
@@ -53,21 +56,36 @@ public sealed class MobileTransport(
         }
         catch (WebSocketException ex) when (ex.WebSocketErrorCode == WebSocketError.ConnectionClosedPrematurely)
         {
-            _logger.LogDebug("Mobile connection closed prematurely for peer {PeerId}", peerId);
+            _logger.LogDebug("Connection {Id} closed prematurely", connectionId);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogDebug("Mobile connection cancelled for peer {PeerId}", peerId);
+            _logger.LogDebug("Connection {Id} cancelled", connectionId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Mobile connection error for peer {PeerId}", peerId);
+            _logger.LogError(ex, "Connection {Id} error", connectionId);
         }
         finally
         {
-            Interlocked.CompareExchange(ref _activeConnection, null, connection);
+            _connections.TryRemove(connectionId, out _);
             connection.Dispose();
-            _logger.LogInformation("Mobile connection closed for peer {PeerId}", peerId);
+            _logger.LogInformation("Connection {Id} closed", connectionId);
+        }
+    }
+
+    /// <summary>
+    /// Broadcast an event to all connected clients.
+    /// </summary>
+    public async Task BroadcastEventAsync(string eventName, object? payload, CancellationToken ct = default)
+    {
+        foreach (var conn in _connections.Values)
+        {
+            try
+            {
+                await conn.SendEventAsync(eventName, payload, ct);
+            }
+            catch { /* best effort */ }
         }
     }
 
@@ -98,7 +116,7 @@ public sealed class MobileTransport(
             }
             catch (JsonException ex)
             {
-                _logger.LogWarning(ex, "Failed to parse frame from peer {PeerId}", connection.PeerId);
+                _logger.LogWarning(ex, "Failed to parse frame from connection {Id}", connection.ConnectionId);
                 continue;
             }
 
@@ -109,17 +127,16 @@ public sealed class MobileTransport(
                     break;
 
                 case ResponseFrame response:
-                    // Client responding to a server-initiated request (device commands)
                     if (!connection.CompleteRequest(response.Id, response))
                     {
-                        _logger.LogWarning("No pending request for response {Id} from peer {PeerId}",
-                            response.Id, connection.PeerId);
+                        _logger.LogWarning("No pending request for response {Id} from connection {ConnId}",
+                            response.Id, connection.ConnectionId);
                     }
                     break;
 
                 default:
-                    _logger.LogWarning("Unexpected frame type from peer {PeerId}: {Type}",
-                        connection.PeerId, frame.Type);
+                    _logger.LogWarning("Unexpected frame type from connection {Id}: {Type}",
+                        connection.ConnectionId, frame.Type);
                     break;
             }
         }
@@ -134,23 +151,22 @@ public sealed class MobileTransport(
                 "connect" => HandleConnect(connection, request),
                 "ping" => HandlePing(request),
                 "agents.list" => HandleAgentsList(request),
-                "sessions.list" => await HandleSessionsListAsync(connection, request, ct),
-                "sessions.new" => await HandleSessionsNewAsync(connection, request, ct),
-                "sessions.get" or "sessions.switch" => await HandleSessionsGetAsync(connection, request, ct),
-                "sessions.delete" => await HandleSessionsDeleteAsync(connection, request, ct),
-                "sessions.update" or "sessions.rename" => await HandleSessionsUpdateAsync(connection, request, ct),
+                "sessions.list" => await HandleSessionsListAsync(request, ct),
+                "sessions.new" => await HandleSessionsNewAsync(request, ct),
+                "sessions.get" or "sessions.switch" => await HandleSessionsGetAsync(request, ct),
+                "sessions.delete" => await HandleSessionsDeleteAsync(request, ct),
+                "sessions.update" or "sessions.rename" => await HandleSessionsUpdateAsync(request, ct),
                 "chat.send" => await HandleChatSendAsync(connection, request, ct),
-                "chat.cancel" => HandleChatCancel(connection, request),
+                "chat.cancel" => HandleChatCancel(request),
                 _ => ResponseFrame.Failure(request.Id, "unknown_method", $"Unknown method: {request.Method}"),
             };
 
-            // chat.send sends its own response before streaming, so it returns null
             if (response is not null)
                 await connection.SendResponseAsync(response, ct);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error dispatching {Method} from peer {PeerId}", request.Method, connection.PeerId);
+            _logger.LogError(ex, "Error dispatching {Method} from connection {Id}", request.Method, connection.ConnectionId);
             var errorResponse = ResponseFrame.Failure(request.Id, "internal_error", ex.Message);
             await connection.SendResponseAsync(errorResponse, ct);
         }
@@ -158,7 +174,6 @@ public sealed class MobileTransport(
 
     private ResponseFrame HandleConnect(MobileConnection connection, RequestFrame request)
     {
-        // Parse capabilities from connect params (e.g. { "capabilities": ["location", "camera"] })
         if (request.Params.ValueKind == JsonValueKind.Object
             && request.Params.TryGetProperty("capabilities", out var caps)
             && caps.ValueKind == JsonValueKind.Array)
@@ -169,14 +184,14 @@ public sealed class MobileTransport(
                 if (cap.GetString() is { } c)
                     connection.Capabilities.Add(c);
             }
-            _logger.LogInformation("Peer {PeerId} capabilities: {Caps}",
-                connection.PeerId, string.Join(", ", connection.Capabilities));
+            _logger.LogInformation("Connection {Id} capabilities: {Caps}",
+                connection.ConnectionId, string.Join(", ", connection.Capabilities));
         }
 
         var payload = JsonSerializer.SerializeToElement(new
         {
-            protocol_version = 1,
-            peer_id = connection.PeerId,
+            protocol_version = 2,
+            connection_id = connection.ConnectionId,
         }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
@@ -200,7 +215,7 @@ public sealed class MobileTransport(
         return ResponseFrame.Success(request.Id, payload);
     }
 
-    private async Task<ResponseFrame> HandleSessionsListAsync(MobileConnection connection, RequestFrame request, CancellationToken ct)
+    private async Task<ResponseFrame> HandleSessionsListAsync(RequestFrame request, CancellationToken ct)
     {
         var agentName = GetStringParam(request.Params, "agent");
         if (agentName is null)
@@ -209,12 +224,12 @@ public sealed class MobileTransport(
         if (!agents.ContainsKey(agentName))
             return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
 
-        var sessions = await sessionStore.ListAsync(agentName, connection.PeerId, ct);
+        var sessions = await sessionStore.ListAsync(agentName, ct);
         var payload = JsonSerializer.SerializeToElement(new { sessions }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
 
-    private async Task<ResponseFrame> HandleSessionsNewAsync(MobileConnection connection, RequestFrame request, CancellationToken ct)
+    private async Task<ResponseFrame> HandleSessionsNewAsync(RequestFrame request, CancellationToken ct)
     {
         var agentName = GetStringParam(request.Params, "agent");
         if (agentName is null)
@@ -225,11 +240,11 @@ public sealed class MobileTransport(
 
         var sessionId = Guid.NewGuid().ToString("N")[..12];
         var session = new MobileSession { Id = sessionId };
-        await sessionStore.SaveAsync(agentName, connection.PeerId, session, ct);
+        await sessionStore.SaveAsync(agentName, session, ct);
 
-        // Create a fresh runtime for this session
-        var runtime = CreateRuntime(agentDef, agentName, connection.PeerId, sessionId);
-        connection.SetRuntime(agentName, runtime);
+        var runtimeKey = $"{agentName}:{sessionId}";
+        var runtime = CreateRuntime(agentDef, agentName);
+        _runtimes[runtimeKey] = runtime;
 
         var payload = JsonSerializer.SerializeToElement(new
         {
@@ -241,14 +256,14 @@ public sealed class MobileTransport(
         return ResponseFrame.Success(request.Id, payload);
     }
 
-    private async Task<ResponseFrame> HandleSessionsGetAsync(MobileConnection connection, RequestFrame request, CancellationToken ct)
+    private async Task<ResponseFrame> HandleSessionsGetAsync(RequestFrame request, CancellationToken ct)
     {
         var agentName = GetStringParam(request.Params, "agent");
         var sessionId = GetStringParam(request.Params, "session_id");
         if (agentName is null || sessionId is null)
             return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'session_id' parameter.");
 
-        var session = await sessionStore.LoadAsync(agentName, connection.PeerId, sessionId, ct);
+        var session = await sessionStore.LoadAsync(agentName, sessionId, ct);
         if (session is null)
             return ResponseFrame.Failure(request.Id, "not_found", $"Session '{sessionId}' not found.");
 
@@ -256,27 +271,23 @@ public sealed class MobileTransport(
         return ResponseFrame.Success(request.Id, payload);
     }
 
-    private async Task<ResponseFrame> HandleSessionsDeleteAsync(MobileConnection connection, RequestFrame request, CancellationToken ct)
+    private async Task<ResponseFrame> HandleSessionsDeleteAsync(RequestFrame request, CancellationToken ct)
     {
         var agentName = GetStringParam(request.Params, "agent");
         var sessionId = GetStringParam(request.Params, "session_id");
         if (agentName is null || sessionId is null)
             return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'session_id' parameter.");
 
-        // Abort and remove the runtime if it's active
-        var runtime = connection.GetRuntime(agentName);
-        if (runtime is not null)
-        {
+        var runtimeKey = $"{agentName}:{sessionId}";
+        if (_runtimes.TryRemove(runtimeKey, out var runtime))
             runtime.Abort();
-            connection.RemoveRuntime(agentName);
-        }
 
-        await sessionStore.DeleteAsync(agentName, connection.PeerId, sessionId, ct);
+        await sessionStore.DeleteAsync(agentName, sessionId, ct);
         var payload = JsonSerializer.SerializeToElement(new { deleted = true }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
 
-    private async Task<ResponseFrame> HandleSessionsUpdateAsync(MobileConnection connection, RequestFrame request, CancellationToken ct)
+    private async Task<ResponseFrame> HandleSessionsUpdateAsync(RequestFrame request, CancellationToken ct)
     {
         var agentName = GetStringParam(request.Params, "agent");
         var sessionId = GetStringParam(request.Params, "session_id");
@@ -284,7 +295,7 @@ public sealed class MobileTransport(
         if (agentName is null || sessionId is null || title is null)
             return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent', 'session_id', or 'title' parameter.");
 
-        await sessionStore.UpdateMetadataAsync(agentName, connection.PeerId, sessionId, title, ct);
+        await sessionStore.UpdateMetadataAsync(agentName, sessionId, title, ct);
         var payload = JsonSerializer.SerializeToElement(new { updated = true }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
@@ -300,23 +311,18 @@ public sealed class MobileTransport(
         if (!agents.TryGetValue(agentName, out var agentDef))
             return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
 
-        // Create or get session ID
         sessionId ??= Guid.NewGuid().ToString("N")[..12];
+        var runtimeKey = $"{agentName}:{sessionId}";
 
-        // Get or create the runtime for this agent
-        var runtime = connection.GetRuntime(agentName);
-        if (runtime is null)
+        // Get or create the runtime for this session
+        if (!_runtimes.TryGetValue(runtimeKey, out var runtime))
         {
-            runtime = CreateRuntime(agentDef, agentName, connection.PeerId, sessionId);
-
             // Try to load existing session messages
-            var session = await sessionStore.LoadAsync(agentName, connection.PeerId, sessionId, ct);
-            if (session is not null && session.Messages.Count > 0)
-            {
-                runtime = CreateRuntime(agentDef, agentName, connection.PeerId, sessionId, session.Messages);
-            }
-
-            connection.SetRuntime(agentName, runtime);
+            var session = await sessionStore.LoadAsync(agentName, sessionId, ct);
+            runtime = session is not null && session.Messages.Count > 0
+                ? CreateRuntime(agentDef, agentName, session.Messages)
+                : CreateRuntime(agentDef, agentName);
+            _runtimes[runtimeKey] = runtime;
         }
 
         // If already running, queue as follow-up
@@ -327,25 +333,30 @@ public sealed class MobileTransport(
             return ResponseFrame.Success(request.Id, payload);
         }
 
-        // Send immediate response with session ID, then stream events
+        // Send immediate response to the requesting client
         var responsePayload = JsonSerializer.SerializeToElement(new { session_id = sessionId }, JsonOptions);
         var response = ResponseFrame.Success(request.Id, responsePayload);
         await connection.SendResponseAsync(response, ct);
 
-        // Stream the agent response as events (fire and forget — errors logged internally)
-        _ = StreamAgentResponseAsync(connection, runtime, agentName, sessionId, text, ct);
+        // Stream the agent response as events to all connected clients
+        _ = StreamAgentResponseAsync(runtime, agentName, sessionId, text, ct);
 
-        // Response already sent above; return null so DispatchRequestAsync skips sending
         return null;
     }
 
-    private ResponseFrame HandleChatCancel(MobileConnection connection, RequestFrame request)
+    private ResponseFrame HandleChatCancel(RequestFrame request)
     {
         var agentName = GetStringParam(request.Params, "agent");
+        var sessionId = GetStringParam(request.Params, "session_id");
         if (agentName is null)
             return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
 
-        var runtime = connection.GetRuntime(agentName);
+        var runtimeKey = sessionId is not null ? $"{agentName}:{sessionId}" : null;
+        AgentRuntime? runtime = null;
+
+        if (runtimeKey is not null)
+            _runtimes.TryGetValue(runtimeKey, out runtime);
+
         if (runtime is null || !runtime.IsRunning)
         {
             var payload = JsonSerializer.SerializeToElement(new { cancelled = false }, JsonOptions);
@@ -358,8 +369,7 @@ public sealed class MobileTransport(
     }
 
     private async Task StreamAgentResponseAsync(
-        MobileConnection connection, AgentRuntime runtime, string agentName,
-        string sessionId, string text, CancellationToken ct)
+        AgentRuntime runtime, string agentName, string sessionId, string text, CancellationToken ct)
     {
         try
         {
@@ -370,7 +380,7 @@ public sealed class MobileTransport(
                 switch (evt)
                 {
                     case MessageStreamEvent { Inner: CompletionTextDeltaEvent delta }:
-                        await connection.SendEventAsync("text.delta", new
+                        await BroadcastEventAsync("text.delta", new
                         {
                             agent = agentName,
                             session_id = sessionId,
@@ -379,7 +389,7 @@ public sealed class MobileTransport(
                         break;
 
                     case MessageStreamEvent { Inner: CompletionThinkingDeltaEvent thinking }:
-                        await connection.SendEventAsync("thinking.delta", new
+                        await BroadcastEventAsync("thinking.delta", new
                         {
                             agent = agentName,
                             session_id = sessionId,
@@ -388,7 +398,7 @@ public sealed class MobileTransport(
                         break;
 
                     case MessageStreamEvent { Inner: CompletionThinkingEndEvent }:
-                        await connection.SendEventAsync("thinking.end", new
+                        await BroadcastEventAsync("thinking.end", new
                         {
                             agent = agentName,
                             session_id = sessionId,
@@ -396,7 +406,7 @@ public sealed class MobileTransport(
                         break;
 
                     case ToolStartEvent toolStart:
-                        await connection.SendEventAsync("tool.start", new
+                        await BroadcastEventAsync("tool.start", new
                         {
                             agent = agentName,
                             session_id = sessionId,
@@ -406,7 +416,7 @@ public sealed class MobileTransport(
                         break;
 
                     case ToolEndEvent toolEnd:
-                        await connection.SendEventAsync("tool.end", new
+                        await BroadcastEventAsync("tool.end", new
                         {
                             agent = agentName,
                             session_id = sessionId,
@@ -417,15 +427,14 @@ public sealed class MobileTransport(
                         break;
 
                     case MessageEndEvent { Message: AssistantMessage assistantMsg }:
-                        // Record cost
                         if (agents.TryGetValue(agentName, out var agentDef) && agentDef.CostLedger is { } costLedger)
                         {
                             _ = costLedger.AppendAsync(new CostEntry
                             {
                                 Timestamp = DateTimeOffset.UtcNow,
                                 Model = assistantMsg.Model,
-                                Channel = $"{agentName}/mobile",
-                                Peer = connection.PeerId,
+                                Channel = agentName,
+                                Peer = "shared",
                                 InputTokens = assistantMsg.Usage.Input,
                                 OutputTokens = assistantMsg.Usage.Output,
                                 CacheReadTokens = assistantMsg.Usage.CacheRead,
@@ -438,7 +447,7 @@ public sealed class MobileTransport(
                             });
                         }
 
-                        await connection.SendEventAsync("message.end", new
+                        await BroadcastEventAsync("message.end", new
                         {
                             agent = agentName,
                             session_id = sessionId,
@@ -450,10 +459,9 @@ public sealed class MobileTransport(
                             },
                         }, ct);
 
-                        // Notify text end when not continuing with tools
                         if (assistantMsg.StopReason is not CompletionStopReason.ToolUse)
                         {
-                            await connection.SendEventAsync("text.end", new
+                            await BroadcastEventAsync("text.end", new
                             {
                                 agent = agentName,
                                 session_id = sessionId,
@@ -462,25 +470,22 @@ public sealed class MobileTransport(
                         break;
 
                     case AgentEndEvent:
-                        // Persist session
                         var session = new MobileSession
                         {
                             Id = sessionId,
                             Messages = [.. runtime.Messages],
                         };
-                        await sessionStore.SaveAsync(agentName, connection.PeerId, session, ct);
+                        await sessionStore.SaveAsync(agentName, session, ct);
 
-                        await connection.SendEventAsync("done", new
+                        await BroadcastEventAsync("done", new
                         {
                             agent = agentName,
                             session_id = sessionId,
                         }, ct);
 
-                        // Auto-name session after first exchange
                         if (session.Title is null && session.Messages.Count >= 2)
                         {
-                            _ = Task.Run(() => AutoNameSessionAsync(
-                                connection, agentName, session, ct), ct);
+                            _ = Task.Run(() => AutoNameSessionAsync(agentName, session, ct), ct);
                         }
                         break;
                 }
@@ -495,7 +500,7 @@ public sealed class MobileTransport(
             _logger.LogError(ex, "Error streaming agent response for {Agent}/{Session}", agentName, sessionId);
             try
             {
-                await connection.SendEventAsync("error", new
+                await BroadcastEventAsync("error", new
                 {
                     agent = agentName,
                     session_id = sessionId,
@@ -509,19 +514,18 @@ public sealed class MobileTransport(
     private static readonly string SharedMemoryPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
 
-    private AgentRuntime CreateRuntime(AgentDefinition agentDef, string agentName, string peerId,
-        string sessionId, IReadOnlyList<AgentMessage>? messages = null)
+    private AgentRuntime CreateRuntime(AgentDefinition agentDef, string agentName,
+        IReadOnlyList<AgentMessage>? messages = null)
     {
         var tools = new List<AgentTool>(agentDef.Tools);
 
-        // Per-session tools (mirrors Gateway.BuildSessionTools)
         tools.Add(new MemoryTool(SharedMemoryPath, agentDef.MemoryPath));
         if (agentDef.TodoPath is { } todoPath)
             tools.Add(new TodoTool(todoPath));
         if (agentDef.CostLedger is { } costLedger)
             tools.Add(new CostTool(costLedger));
         if (agentDef.CronStore is { } cronStore && CronService is { } cron)
-            tools.Add(new CronTool(cronStore, agentName, peerId, cron));
+            tools.Add(new CronTool(cronStore, agentName, cron));
 
         return new AgentRuntime(new AgentOptions
         {
@@ -533,15 +537,13 @@ public sealed class MobileTransport(
         });
     }
 
-    private async Task AutoNameSessionAsync(MobileConnection connection, string agentName,
-        MobileSession session, CancellationToken ct)
+    private async Task AutoNameSessionAsync(string agentName, MobileSession session, CancellationToken ct)
     {
         try
         {
             if (!agents.TryGetValue(agentName, out var agentDef))
                 return;
 
-            // Extract first user text and first assistant text
             var userText = session.Messages.OfType<UserMessage>().FirstOrDefault()?.Text;
             var assistantText = session.Messages.OfType<AssistantMessage>().FirstOrDefault()
                 ?.Content.OfType<CompletionTextContent>().FirstOrDefault()?.Text;
@@ -574,11 +576,9 @@ public sealed class MobileTransport(
             if (string.IsNullOrWhiteSpace(title))
                 return;
 
-            // Update session metadata
-            await sessionStore.UpdateMetadataAsync(agentName, connection.PeerId, session.Id, title, ct);
+            await sessionStore.UpdateMetadataAsync(agentName, session.Id, title, ct);
 
-            // Notify client
-            await connection.SendEventAsync("session.renamed", new
+            await BroadcastEventAsync("session.renamed", new
             {
                 agent = agentName,
                 session_id = session.Id,

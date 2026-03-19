@@ -14,7 +14,6 @@ namespace Achates.Server.Tools;
 internal sealed class CronTool(
     CronStore store,
     string agentName,
-    string peerId,
     CronService cronService) : AgentTool
 {
     private static readonly JsonElement _schema = ObjectSchema(
@@ -30,7 +29,6 @@ internal sealed class CronTool(
             ["schedule_interval_minutes"] = NumberSchema("Interval in minutes for recurring schedule. Required when schedule_kind is 'every'."),
             ["schedule_cron"] = StringSchema("Cron expression (e.g. '0 9 * * *' for daily at 9am). Required when schedule_kind is 'cron'."),
             ["schedule_timezone"] = StringSchema("IANA timezone for cron/at schedules (e.g. 'America/New_York'). Defaults to local timezone."),
-            ["peer"] = StringSchema("Delivery peer ID. Defaults to current peer."),
             ["job_id"] = StringSchema("Job ID. Required for 'update', 'remove', 'run'."),
             ["enabled"] = BooleanSchema("Enable or disable a job. Used with 'update'."),
         },
@@ -78,7 +76,6 @@ internal sealed class CronTool(
             sb.AppendLine($"**{job.Name}** (`{job.Id}`)");
             sb.AppendLine($"  Schedule: {schedule} | Status: {status} | Next: {nextRun} | Last: {lastStatus}");
             sb.AppendLine($"  Message: {Truncate(job.Message, 80)}");
-            sb.AppendLine($"  Deliver to: {job.Delivery.PeerId}");
             sb.AppendLine();
         }
 
@@ -108,8 +105,6 @@ internal sealed class CronTool(
             return TextResult($"Error parsing schedule: {ex.Message}");
         }
 
-        var deliveryPeer = GetString(args, "peer") ?? peerId;
-
         var now = DateTimeOffset.UtcNow;
         var nextRun = CronScheduler.ComputeNextRun(schedule, now);
 
@@ -120,10 +115,7 @@ internal sealed class CronTool(
             AgentName = agentName,
             Schedule = schedule,
             Message = message,
-            Delivery = new CronDeliveryTarget
-            {
-                PeerId = deliveryPeer,
-            },
+            Delivery = new CronDeliveryTarget(),
             State = { NextRunAt = nextRun },
         };
 

@@ -32,48 +32,34 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
             if (!Directory.Exists(sessionsDir))
                 continue;
 
-            foreach (var transportDir in Directory.GetDirectories(sessionsDir))
+            foreach (var file in Directory.GetFiles(sessionsDir, "*.json"))
             {
-                var transportType = Path.GetFileName(transportDir);
-
-                // Mobile sessions have a peer subdirectory with multiple session files
-                if (transportType == "mobile")
+                var fi = new FileInfo(file);
+                sessions.Add(new SessionInfo
                 {
-                    foreach (var peerDir in Directory.GetDirectories(transportDir))
-                    {
-                        var peerId = Path.GetFileName(peerDir);
-                        foreach (var file in Directory.GetFiles(peerDir, "*.json"))
-                        {
-                            var fi = new FileInfo(file);
-                            sessions.Add(new SessionInfo
-                            {
-                                AgentName = agentName,
-                                PeerId = peerId,
-                                SessionId = Path.GetFileNameWithoutExtension(file),
-                                SizeBytes = fi.Length,
-                                LastModified = fi.LastWriteTimeUtc,
-                            });
-                        }
-                    }
-                }
+                    AgentName = agentName,
+                    SessionId = Path.GetFileNameWithoutExtension(file),
+                    SizeBytes = fi.Length,
+                    LastModified = fi.LastWriteTimeUtc,
+                });
             }
         }
 
         return sessions;
     }
 
-    public async Task<MobileSession?> LoadSessionAsync(string agentName, string peerId, string sessionId)
+    public async Task<MobileSession?> LoadSessionAsync(string agentName, string sessionId)
     {
         var store = gatewayService.MobileSessionStore;
         if (store is null) return null;
-        return await store.LoadAsync(agentName, peerId, sessionId);
+        return await store.LoadAsync(agentName, sessionId);
     }
 
-    public async Task DeleteSessionAsync(string agentName, string peerId, string sessionId)
+    public async Task DeleteSessionAsync(string agentName, string sessionId)
     {
         var store = gatewayService.MobileSessionStore;
         if (store is null) return;
-        await store.DeleteAsync(agentName, peerId, sessionId);
+        await store.DeleteAsync(agentName, sessionId);
     }
 
     // --- Memory ---
@@ -82,7 +68,6 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
     {
         var memories = new List<MemoryInfo>();
 
-        // Shared memory file
         var sharedPath = Path.Combine(AchatesHome, "memory.md");
         if (File.Exists(sharedPath))
         {
@@ -96,7 +81,6 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
             });
         }
 
-        // Per-agent memory files
         var agentsPath = Path.Combine(AchatesHome, "agents");
         if (Directory.Exists(agentsPath))
         {
@@ -187,7 +171,6 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
 
     private static string MaskSecrets(string yaml)
     {
-        // Mask values for known sensitive keys
         var lines = yaml.Split('\n');
         for (var i = 0; i < lines.Length; i++)
         {
@@ -212,7 +195,6 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
 public sealed record SessionInfo
 {
     public required string AgentName { get; init; }
-    public required string PeerId { get; init; }
     public required string SessionId { get; init; }
     public long SizeBytes { get; init; }
     public DateTime LastModified { get; init; }

@@ -273,7 +273,7 @@ public sealed class CronService : IAsyncDisposable
                 Title = $"[Cron] {job.Name}",
                 Messages = [.. agent.Messages],
             };
-            await _sessionStore.SaveAsync(agentName, job.Delivery.PeerId, session, ct);
+            await _sessionStore.SaveAsync(agentName, session, ct);
 
             // Also notify the active connection in real time
             await DeliverAsync(job, agentName, sessionId, ct);
@@ -306,24 +306,14 @@ public sealed class CronService : IAsyncDisposable
 
     private async Task DeliverAsync(CronJob job, string agentName, string sessionId, CancellationToken ct)
     {
-        var connection = _transport.ActiveConnection;
-        if (connection is null)
-            return; // Result is persisted as a session; user will see it on next connect
-
-        try
+        // Broadcast to all connected clients; result is also persisted as a session
+        await _transport.BroadcastEventAsync("cron.result", new
         {
-            await connection.SendEventAsync("cron.result", new
-            {
-                agent = agentName,
-                session_id = sessionId,
-                job_id = job.Id,
-                job_name = job.Name,
-            }, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Cron job '{Name}' — failed to notify active connection", job.Name);
-        }
+            agent = agentName,
+            session_id = sessionId,
+            job_id = job.Id,
+            job_name = job.Name,
+        }, ct);
     }
 
     private async Task UpdateJobStateAfterRunAsync(
