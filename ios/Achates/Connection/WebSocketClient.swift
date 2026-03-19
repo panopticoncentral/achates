@@ -28,8 +28,8 @@ final class WebSocketClient {
         reconnectAttemptsHolder.set(0)
         appState.connectionStatus = .connecting
 
-        // Build WebSocket URL: convert http(s) to ws(s) and append /ws/v2
-        let wsURL = url.appendingPathComponent("ws/v2")
+        // Build WebSocket URL: convert http(s) to ws(s) and append /ws
+        let wsURL = url.appendingPathComponent("ws")
         var components = URLComponents(url: wsURL, resolvingAgainstBaseURL: false)!
         if components.scheme == "http" { components.scheme = "ws" }
         else if components.scheme == "https" { components.scheme = "wss" }

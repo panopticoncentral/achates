@@ -15,6 +15,7 @@ public sealed class CronService : IAsyncDisposable
 {
     private readonly IReadOnlyDictionary<string, (CronStore Store, AgentDefinition Agent)> _agents;
     private readonly MobileTransport _transport;
+    private readonly MobileSessionStore _sessionStore;
     private readonly ILogger<CronService> _logger;
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _poke = new(0);
@@ -26,10 +27,12 @@ public sealed class CronService : IAsyncDisposable
     public CronService(
         IReadOnlyDictionary<string, (CronStore Store, AgentDefinition Agent)> agents,
         MobileTransport transport,
+        MobileSessionStore sessionStore,
         ILogger<CronService> logger)
     {
         _agents = agents;
         _transport = transport;
+        _sessionStore = sessionStore;
         _logger = logger;
     }
 
@@ -260,10 +263,20 @@ public sealed class CronService : IAsyncDisposable
             }
         }
 
-        // Deliver result to the active mobile connection
-        if (!string.IsNullOrWhiteSpace(responseText))
+        // Save as a session so results are visible in the app
+        if (agent.Messages.Count > 0)
         {
-            await DeliverAsync(job, agentName, responseText.Trim(), ct);
+            var sessionId = Guid.NewGuid().ToString("N")[..12];
+            var session = new MobileSession
+            {
+                Id = sessionId,
+                Title = $"[Cron] {job.Name}",
+                Messages = [.. agent.Messages],
+            };
+            await _sessionStore.SaveAsync(agentName, job.Delivery.PeerId, session, ct);
+
+            // Also notify the active connection in real time
+            await DeliverAsync(job, agentName, sessionId, ct);
         }
 
         return responseText;
@@ -291,28 +304,25 @@ public sealed class CronService : IAsyncDisposable
         return tools;
     }
 
-    private async Task DeliverAsync(CronJob job, string agentName, string text, CancellationToken ct)
+    private async Task DeliverAsync(CronJob job, string agentName, string sessionId, CancellationToken ct)
     {
         var connection = _transport.ActiveConnection;
         if (connection is null)
-        {
-            _logger.LogWarning("Cron job '{Name}' — no active connection to deliver result", job.Name);
-            return;
-        }
+            return; // Result is persisted as a session; user will see it on next connect
 
         try
         {
             await connection.SendEventAsync("cron.result", new
             {
                 agent = agentName,
+                session_id = sessionId,
                 job_id = job.Id,
                 job_name = job.Name,
-                text,
             }, ct);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Cron job '{Name}' — failed to deliver result", job.Name);
+            _logger.LogWarning(ex, "Cron job '{Name}' — failed to notify active connection", job.Name);
         }
     }
 

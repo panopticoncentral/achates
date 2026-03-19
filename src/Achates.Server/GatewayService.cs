@@ -146,7 +146,7 @@ public sealed class GatewayService(
             .ToDictionary(a => a.Key, a => (a.Value.CronStore!, a.Value));
         if (cronAgents.Count > 0)
         {
-            _cronService = new CronService(cronAgents, _mobileTransport,
+            _cronService = new CronService(cronAgents, _mobileTransport, _mobileSessionStore,
                 loggerFactory.CreateLogger<CronService>());
             _mobileTransport.CronService = _cronService;
             await _cronService.StartAsync(cancellationToken);
