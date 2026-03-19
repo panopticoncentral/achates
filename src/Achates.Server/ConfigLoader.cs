@@ -1,7 +1,7 @@
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
-namespace Achates.Configuration;
+namespace Achates.Server;
 
 public static class ConfigLoader
 {

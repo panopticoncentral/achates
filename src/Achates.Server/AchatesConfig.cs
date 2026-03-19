@@ -1,4 +1,4 @@
-namespace Achates.Configuration;
+namespace Achates.Server;
 
 public sealed class AchatesConfig
 {
@@ -86,4 +86,3 @@ public sealed class ProviderConfig
     public string? Name { get; set; }
     public string? ApiKey { get; set; }
 }
-

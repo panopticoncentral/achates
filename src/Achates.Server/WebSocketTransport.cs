@@ -2,15 +2,13 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 
-using Achates.Transports;
-
 namespace Achates.Server;
 
 /// <summary>
-/// A transport that accepts WebSocket connections from a mapped endpoint.
+/// Accepts WebSocket connections from a mapped endpoint.
 /// Each connection is treated as a separate peer.
 /// </summary>
-public sealed class WebSocketTransport : ITransport
+public sealed class WebSocketTransport
 {
     private readonly ConcurrentDictionary<string, WebSocket> _connections = new();
     private int _nextPeerId;

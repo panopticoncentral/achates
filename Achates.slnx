@@ -2,9 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Achates.Providers/Achates.Providers.csproj" />
     <Project Path="src/Achates.Agent/Achates.Agent.csproj" />
-    <Project Path="src/Achates.Transports/Achates.Transports.csproj" />
     <Project Path="src/Achates.Server/Achates.Server.csproj" />
-    <Project Path="src/Achates.Configuration/Achates.Configuration.csproj" />
   </Folder>
   <Folder Name="/docs/">
     <File Path="README.md" />

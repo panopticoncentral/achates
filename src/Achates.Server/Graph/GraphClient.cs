@@ -1,6 +1,5 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
-using Achates.Configuration;
 using Microsoft.Identity.Client;
 
 namespace Achates.Server.Graph;

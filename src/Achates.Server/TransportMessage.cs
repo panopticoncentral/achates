@@ -1,4 +1,4 @@
-namespace Achates.Transports;
+namespace Achates.Server;
 
 /// <summary>
 /// A message received from or sent to a transport.
@@ -12,7 +12,7 @@ public sealed record TransportMessage
 
     /// <summary>
     /// Identity of the peer (user, group, thread) within the transport.
-    /// For console this is fixed; for Telegram it might be a chat ID, etc.
+    /// For console this is fixed; for WebSocket it might be an auto-assigned ID, etc.
     /// </summary>
     public required string PeerId { get; init; }
 

@@ -3,7 +3,6 @@ using Achates.Agent;
 using Achates.Agent.Events;
 using Achates.Agent.Messages;
 using Achates.Agent.Tools;
-using Achates.Transports;
 using Achates.Providers.Completions;
 using Achates.Providers.Completions.Events;
 using Achates.Server.Cron;
@@ -94,7 +93,7 @@ public sealed class Gateway : IAsyncDisposable
             await store.DeleteAsync(sessionKey, _cts.Token);
     }
 
-    private static async Task SendTypingLoopAsync(ITransport transport, string peerId, CancellationToken cancellationToken)
+    private static async Task SendTypingLoopAsync(WebSocketTransport transport, string peerId, CancellationToken cancellationToken)
     {
         try
         {

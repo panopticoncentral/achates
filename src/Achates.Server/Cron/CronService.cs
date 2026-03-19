@@ -3,8 +3,6 @@ using Achates.Agent.Events;
 using Achates.Agent.Tools;
 using Achates.Providers.Completions.Events;
 using Achates.Server.Tools;
-using Achates.Transports;
-
 namespace Achates.Server.Cron;
 
 /// <summary>

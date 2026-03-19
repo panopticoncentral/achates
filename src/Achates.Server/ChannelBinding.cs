@@ -1,5 +1,3 @@
-using Achates.Transports;
-
 namespace Achates.Server;
 
 /// <summary>
@@ -9,14 +7,14 @@ namespace Achates.Server;
 public sealed record ChannelBinding
 {
     /// <summary>
-    /// The channel name from config (e.g. "telegram", "console").
+    /// The channel name from config (e.g. "paul/websocket").
     /// </summary>
     public required string Name { get; init; }
 
     /// <summary>
     /// The transport that handles message delivery.
     /// </summary>
-    public required ITransport Transport { get; init; }
+    public required WebSocketTransport Transport { get; init; }
 
     /// <summary>
     /// The name of the agent this channel is bound to.

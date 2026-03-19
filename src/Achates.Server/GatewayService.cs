@@ -1,6 +1,4 @@
 using Achates.Agent.Tools;
-using Achates.Transports;
-using Achates.Configuration;
 using Achates.Providers;
 using Achates.Providers.Completions;
 using Achates.Providers.Models;
@@ -151,10 +149,10 @@ public sealed class GatewayService(
             }
 
             // Resolve channels for this agent
-            foreach (var (transportType, channelConfig) in agentConfig.Channels ?? [])
+            foreach (var (transportType, _) in agentConfig.Channels ?? [])
             {
                 var channelName = $"{name}/{transportType}";
-                var transport = CreateTransport(name, transportType, channelConfig);
+                var transport = CreateTransport(name, transportType);
 
                 bindings.Add(new ChannelBinding
                 {
@@ -221,18 +219,12 @@ public sealed class GatewayService(
         }
     }
 
-    private ITransport CreateTransport(string agentName, string transportType, ChannelConfig channelConfig)
+    private WebSocketTransport CreateTransport(string agentName, string transportType)
     {
-        return transportType switch
-        {
-            "websocket" => CreateWebSocketTransport(agentName),
-            _ => throw new InvalidOperationException(
-                $"Unknown transport type '{transportType}' for agent '{agentName}'."),
-        };
-    }
+        if (transportType != "websocket")
+            throw new InvalidOperationException(
+                $"Unknown transport type '{transportType}' for agent '{agentName}'.");
 
-    private WebSocketTransport CreateWebSocketTransport(string agentName)
-    {
         var transport = new WebSocketTransport();
         _webSocketTransports[agentName] = transport;
         return transport;

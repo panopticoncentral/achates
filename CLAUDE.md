@@ -27,16 +27,13 @@ Config lives at `~/.achates/config.yaml`.
 src/
   Achates.Providers/     LLM provider abstraction + OpenRouter implementation
   Achates.Agent/         Stateful agent runtime engine (messages, tools, event streaming)
-  Achates.Transports/    Transport interface (ITransport, TransportMessage)
-  Achates.Configuration/ YAML config loading (YamlDotNet, underscore naming)
-  Achates.Server/        ASP.NET Core gateway service, tools, system prompt
+  Achates.Server/        ASP.NET Core gateway service, config, transports, tools, system prompt
 ```
 
 ### Dependency flow
 
 ```
-Providers <- Agent <- Server -> Transports
-                      Server -> Configuration
+Providers <- Agent <- Server
 ```
 
 ## Architecture
@@ -44,7 +41,7 @@ Providers <- Agent <- Server -> Transports
 ### Core Concepts
 
 - **Agent** — Named entity with identity (name, description), prompt, model, tools, and persistent memory. Defined in config, resolved at startup into `AgentDefinition`.
-- **Transport** — A messaging mechanism (`ITransport`). Implementation: `WebSocketTransport` (in Server project).
+- **Transport** — A messaging mechanism. Only implementation: `WebSocketTransport` (in Server project).
 - **Channel** — A binding of a transport instance to an agent (`ChannelBinding`). Defined under the agent in config, keyed by transport type (e.g. `websocket`). The channel name is derived as `{agentName}/{transportType}`.
 
 ### Provider Layer (`Achates.Providers`)
@@ -70,10 +67,9 @@ Providers <- Agent <- Server -> Transports
 - Tools can be shared (same instance for all sessions) or per-session. The Gateway builds per-session tool lists via `BuildSessionTools()` (e.g. `MemoryTool` uses per-agent memory path).
 - Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
 
-### Transport System (`Achates.Transports`)
-- `ITransport` — `SendAsync()`, `SendTypingAsync()` (default no-op), `StartAsync()`, `StopAsync()`, `MessageReceived` event
+### Transport (`Achates.Server`)
+- `WebSocketTransport` — accepts WebSocket connections, routes messages via `MessageReceived` event. `SendAsync()`, `SendTypingAsync()`, `StartAsync()`, `StopAsync()`.
 - `TransportMessage` — TransportId, PeerId, Text, Timestamp
-- Implementation: `WebSocketTransport` (in Server project)
 
 ### Gateway (`Achates.Server`)
 - `Gateway` — takes a list of `ChannelBinding` (transport + agent pairs) and an optional `ISessionStore`. Each `channelName:peerId` pair gets its own `AgentRuntime` instance configured from the channel's `AgentDefinition`. Routes inbound messages, accumulates text deltas, sends responses back. Persists sessions after each completed response. Sends typing indicators via a keepalive loop (4s interval). Handles `/new` command to reset sessions.
@@ -106,7 +102,7 @@ Providers <- Agent <- Server -> Transports
 - Blazor files live in `Components/` (App, Routes, Layout, Pages). Static assets in `wwwroot/css/` (Bootstrap 5, app.css).
 
 ### Mobile Transport (`Achates.Server.Mobile`)
-- `MobileTransport` — WebSocket handler for `/ws/v2` mobile connections. Operates independently of Gateway (not an `ITransport`). Manages RPC dispatch, agent event streaming, and session persistence. Tracks `ActiveConnection` for device command routing.
+- `MobileTransport` — WebSocket handler for `/ws/v2` mobile connections. Operates independently of Gateway. Manages RPC dispatch, agent event streaming, and session persistence. Tracks `ActiveConnection` for device command routing.
 - `MobileConnection` — per-connection state: RPC correlation, event sequencing, agent runtimes, `Capabilities` set (populated from `connect` params).
 - `MobileSessionStore` — multi-session persistence per agent+peer under `~/.achates/agents/{agentName}/sessions/mobile/{peerId}/`.
 - `MobileSession` — session model with Id, Title, Created, Updated, Messages.
@@ -169,7 +165,7 @@ agents:
       websocket: {}
 ```
 
-Loaded by `ConfigLoader.Load()`. Env var override: `ACHATES_CONFIG_PATH`. YAML uses underscore naming convention (C# PascalCase <-> YAML snake_case). `~` is expanded in file paths (e.g. `todo_file`). `${ENV_VAR}` expansion is **not yet supported** — use literal values or env vars directly. Channels are nested under agents, keyed by transport type (`websocket`). The channel name is derived as `{agentName}/{transportType}`.
+Loaded by `ConfigLoader.Load()` (in Server project). Env var override: `ACHATES_CONFIG_PATH`. YAML uses underscore naming convention (C# PascalCase <-> YAML snake_case). `~` is expanded in file paths (e.g. `todo_file`). `${ENV_VAR}` expansion is **not yet supported** — use literal values or env vars directly. Channels are nested under agents, keyed by transport type (`websocket`). The channel name is derived as `{agentName}/{transportType}`.
 
 ### Data paths
 

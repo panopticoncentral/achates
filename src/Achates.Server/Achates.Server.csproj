@@ -13,12 +13,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Achates.Agent\Achates.Agent.csproj" />
-    <ProjectReference Include="..\Achates.Transports\Achates.Transports.csproj" />
-    <ProjectReference Include="..\Achates.Configuration\Achates.Configuration.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Cronos" Version="0.11.1" />
+    <PackageReference Include="YamlDotNet" Version="16.*" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.4" />
     <PackageReference Include="Microsoft.Identity.Client" Version="4.83.0" />
     <PackageReference Include="SmartReader" Version="0.11.0" />
