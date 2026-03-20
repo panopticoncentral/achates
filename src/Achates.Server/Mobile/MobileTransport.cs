@@ -7,6 +7,7 @@ using Achates.Agent.Events;
 using Achates.Agent.Messages;
 using Achates.Agent.Tools;
 using Achates.Providers.Completions;
+using Achates.Providers.Completions.Content;
 using Achates.Providers.Completions.Events;
 using Achates.Server.Cron;
 using Achates.Server.Tools;
@@ -149,7 +150,7 @@ public sealed class MobileTransport(
             {
                 "connect" => HandleConnect(connection, request),
                 "ping" => HandlePing(request),
-                "agents.list" => HandleAgentsList(request),
+                "agents.list" => await HandleAgentsListAsync(request, ct),
                 "timeline.load" => await HandleTimelineLoadAsync(request, ct),
                 "timeline.break.add" => await HandleTimelineBreakAddAsync(request, ct),
                 "timeline.break.remove" => await HandleTimelineBreakRemoveAsync(request, ct),
@@ -200,17 +201,78 @@ public sealed class MobileTransport(
         return ResponseFrame.Success(request.Id, payload);
     }
 
-    private ResponseFrame HandleAgentsList(RequestFrame request)
+    private async Task<ResponseFrame> HandleAgentsListAsync(RequestFrame request, CancellationToken ct)
     {
-        var agentList = agents.Select(a => new
+        var agentList = new List<object>();
+
+        foreach (var (name, def) in agents)
         {
-            name = a.Key,
-            model = a.Value.Model.Id,
-            tools = a.Value.Tools.Select(t => t.Name).ToArray(),
-        }).ToList();
+            var (lastMessage, lastActivity) = await GetLastMessagePreviewAsync(name, ct);
+
+            agentList.Add(new
+            {
+                name,
+                description = def.Description ?? "",
+                model = def.Model.Id,
+                tools = def.Tools.Select(t => t.Name).ToArray(),
+                last_message = lastMessage,
+                last_activity = lastActivity,
+            });
+        }
 
         var payload = JsonSerializer.SerializeToElement(new { agents = agentList }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<(string? message, string? activity)> GetLastMessagePreviewAsync(
+        string agentName, CancellationToken ct)
+    {
+        var session = await sessionStore.GetLatestSessionAsync(agentName, ct);
+        if (session is null) return (null, null);
+
+        // Walk messages in reverse to find the last user or assistant message
+        for (var i = session.Messages.Count - 1; i >= 0; i--)
+        {
+            var msg = session.Messages[i];
+            string? text = null;
+
+            switch (msg)
+            {
+                case UserMessage { Hidden: false } user:
+                    text = user.Text;
+                    break;
+
+                case AssistantMessage assistant:
+                    text = string.Join(" ", assistant.Content
+                        .OfType<CompletionTextContent>()
+                        .Select(c => c.Text));
+                    break;
+
+                default:
+                    continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(text))
+                continue;
+
+            // Clean up: replace newlines with spaces, collapse whitespace
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+
+            // Truncate at word boundary
+            if (text.Length > 100)
+            {
+                var truncated = text[..100];
+                var lastSpace = truncated.LastIndexOf(' ');
+                text = (lastSpace > 50 ? truncated[..lastSpace] : truncated) + "...";
+            }
+
+            var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(msg.Timestamp)
+                .ToString("o");
+
+            return (text, timestamp);
+        }
+
+        return (null, null);
     }
 
     private static readonly TimeSpan SessionTimeout = TimeSpan.FromHours(4);
