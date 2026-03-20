@@ -106,6 +106,7 @@ public sealed class GatewayService(
                 Tools = tools,
                 CompletionOptions = BuildCompletionOptions(agentConfig.Completion, model),
                 MemoryPath = memoryPath,
+                Description = agentConfig.Description,
                 TodoPath = ExpandHome(toolsConfig?.Todo?.File),
                 CostLedger = costLedger,
                 CronStore = cronStore,
