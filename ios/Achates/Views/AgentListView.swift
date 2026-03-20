@@ -45,7 +45,7 @@ struct AgentListView: View {
             }
         }
         .navigationDestination(for: Agent.self) { agent in
-            SessionListView(agent: agent)
+            ChatView(agent: agent)
         }
         .onAppear {
             if appState.connectionStatus == .disconnected && appState.serverURL != nil {

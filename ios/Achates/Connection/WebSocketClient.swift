@@ -95,25 +95,30 @@ final class WebSocketClient {
     }
 
     func sendMessage(_ text: String) async {
-        guard let agent = appState.currentAgent,
-              let session = appState.currentSession else {
-            print("Cannot send message: no agent or session selected")
+        guard let agent = appState.currentAgent else {
+            print("Cannot send message: no agent selected")
             return
         }
         do {
-            _ = try await sendRequest(method: "chat.send", params: [
+            let payload = try await sendRequest(method: "chat.send", params: [
                 "text": .string(text),
                 "agent": .string(agent.id),
-                "session_id": .string(session.id),
             ])
+            if let sessionId = payload?["session_id"]?.stringValue {
+                let isNew = payload?["new_session"]?.boolValue ?? false
+                appState.handleChatSendResponse(sessionId: sessionId, isNewSession: isNew)
+            }
         } catch {
             print("Failed to send message: \(error)")
         }
     }
 
     func cancelStreaming() async {
+        guard let agent = appState.currentAgent else { return }
         do {
-            _ = try await sendRequest(method: "chat.cancel")
+            _ = try await sendRequest(method: "chat.cancel", params: [
+                "agent": .string(agent.id),
+            ])
         } catch {
             print("Failed to cancel: \(error)")
         }
@@ -233,10 +238,11 @@ final class WebSocketClient {
             appState.isStreaming = false
             appState.streamingMessageId = nil
 
-        case "session.renamed":
-            let title = payload["title"]?.stringValue ?? ""
-            let sessionId = payload["session_id"]?.stringValue
-            appState.renameSession(sessionId: sessionId, title: title)
+        case "cron.result":
+            let agent = payload["agent"]?.stringValue
+            if agent == nil || agent == appState.currentAgent?.id {
+                Task { await appState.loadTimeline() }
+            }
 
         default:
             print("Unknown event: \(evt.event)")

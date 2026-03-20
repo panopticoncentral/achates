@@ -95,13 +95,13 @@ Providers <- Agent <- Server
 ### Transport (`Achates.Server.Mobile`)
 - `MobileTransport` — WebSocket handler for `/ws` connections. Supports multiple concurrent clients. All clients share the same session namespace (sessions are per-agent, not per-client). Events are broadcast to all connected clients. Manages RPC dispatch, agent event streaming, and session persistence.
 - `MobileConnection` — per-connection state: RPC correlation, event sequencing, agent runtimes, `Capabilities` set (populated from `connect` params).
-- `MobileSessionStore` — session persistence per agent under `~/.achates/agents/{agentName}/sessions/{sessionId}.json`.
+- `MobileSessionStore` — session persistence per agent under `~/.achates/agents/{agentName}/sessions/{sessionId}.json`. Provides timeline operations: `LoadTimelineAsync` (paginated chronological loading), `GetLatestSessionAsync`, `MergeSessionsAsync` (combine adjacent sessions), `SplitSessionAsync` (split at message boundary).
 - `MobileSession` — session model with Id, Title, Created, Updated, Messages.
 - `DeviceCommandBridge` — routes tool requests (location, camera) to any connected client with the required capability. Used by `LocationTool` and `CameraTool`.
 - Frame protocol: `RequestFrame` (req), `ResponseFrame` (res), `EventFrame` (evt). JSON with snake_case naming.
-- RPC methods: `connect`, `ping`, `agents.list`, `sessions.list`, `sessions.get`, `sessions.delete`, `sessions.update`, `chat.send`, `chat.cancel`.
+- RPC methods: `connect`, `ping`, `agents.list`, `timeline.load`, `timeline.break.add`, `timeline.break.remove`, `timeline.clear`, `chat.send`, `chat.cancel`.
+- Timeline model: sessions are presented as a continuous timeline per agent (like iMessage). Session breaks appear as date/time dividers. Server auto-creates a new session after 4h of inactivity. Users can manually add breaks (split) or remove them (merge). `chat.send` no longer requires `session_id` — server auto-resolves to the latest session.
 - Device commands (server-to-client requests): `device.location`, `device.camera`.
-- Session auto-naming: after first exchange, fires background LLM call to generate a short title, sends `session.renamed` event.
 - Per-session tool injection: `CreateRuntime` adds MemoryTool, TodoTool, CostTool, CronTool per-session.
 
 ## Conventions

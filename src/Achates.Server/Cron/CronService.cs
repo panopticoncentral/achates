@@ -1,5 +1,6 @@
 using Achates.Agent;
 using Achates.Agent.Events;
+using Achates.Agent.Messages;
 using Achates.Agent.Tools;
 using Achates.Providers.Completions.Events;
 using Achates.Server.Mobile;
@@ -225,8 +226,11 @@ public sealed class CronService : IAsyncDisposable
             CompletionOptions = agentDef.CompletionOptions,
         });
 
-        var stream = agent.PromptAsync(
-            $"[Scheduled task: {job.Name}]\n\n{job.Message}");
+        var stream = agent.PromptAsync(new UserMessage
+        {
+            Text = $"[Scheduled task: {job.Name}]\n\n{job.Message}",
+            Hidden = true,
+        });
 
         var responseText = "";
 

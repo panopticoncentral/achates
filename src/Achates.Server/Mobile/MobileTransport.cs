@@ -7,7 +7,6 @@ using Achates.Agent.Events;
 using Achates.Agent.Messages;
 using Achates.Agent.Tools;
 using Achates.Providers.Completions;
-using Achates.Providers.Completions.Content;
 using Achates.Providers.Completions.Events;
 using Achates.Server.Cron;
 using Achates.Server.Tools;
@@ -151,11 +150,10 @@ public sealed class MobileTransport(
                 "connect" => HandleConnect(connection, request),
                 "ping" => HandlePing(request),
                 "agents.list" => HandleAgentsList(request),
-                "sessions.list" => await HandleSessionsListAsync(request, ct),
-                "sessions.new" => await HandleSessionsNewAsync(request, ct),
-                "sessions.get" or "sessions.switch" => await HandleSessionsGetAsync(request, ct),
-                "sessions.delete" => await HandleSessionsDeleteAsync(request, ct),
-                "sessions.update" or "sessions.rename" => await HandleSessionsUpdateAsync(request, ct),
+                "timeline.load" => await HandleTimelineLoadAsync(request, ct),
+                "timeline.break.add" => await HandleTimelineBreakAddAsync(request, ct),
+                "timeline.break.remove" => await HandleTimelineBreakRemoveAsync(request, ct),
+                "timeline.clear" => await HandleTimelineClearAsync(request, ct),
                 "chat.send" => await HandleChatSendAsync(connection, request, ct),
                 "chat.cancel" => HandleChatCancel(request),
                 _ => ResponseFrame.Failure(request.Id, "unknown_method", $"Unknown method: {request.Method}"),
@@ -215,7 +213,9 @@ public sealed class MobileTransport(
         return ResponseFrame.Success(request.Id, payload);
     }
 
-    private async Task<ResponseFrame> HandleSessionsListAsync(RequestFrame request, CancellationToken ct)
+    private static readonly TimeSpan SessionTimeout = TimeSpan.FromHours(4);
+
+    private async Task<ResponseFrame> HandleTimelineLoadAsync(RequestFrame request, CancellationToken ct)
     {
         var agentName = GetStringParam(request.Params, "agent");
         if (agentName is null)
@@ -224,79 +224,95 @@ public sealed class MobileTransport(
         if (!agents.ContainsKey(agentName))
             return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
 
-        var sessions = await sessionStore.ListAsync(agentName, ct);
-        var payload = JsonSerializer.SerializeToElement(new { sessions }, JsonOptions);
+        DateTimeOffset? before = null;
+        if (request.Params.TryGetProperty("before", out var beforeProp) && beforeProp.TryGetInt64(out var beforeMs))
+            before = DateTimeOffset.FromUnixTimeMilliseconds(beforeMs);
+
+        var limit = 50;
+        if (request.Params.TryGetProperty("limit", out var limitProp) && limitProp.TryGetInt32(out var limitVal))
+            limit = Math.Clamp(limitVal, 1, 100);
+
+        var segments = await sessionStore.LoadTimelineAsync(agentName, before, limit, ct);
+        var payload = JsonSerializer.SerializeToElement(new { segments }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
 
-    private async Task<ResponseFrame> HandleSessionsNewAsync(RequestFrame request, CancellationToken ct)
+    private async Task<ResponseFrame> HandleTimelineBreakAddAsync(RequestFrame request, CancellationToken ct)
+    {
+        var agentName = GetStringParam(request.Params, "agent");
+        var sessionId = GetStringParam(request.Params, "session_id");
+        if (agentName is null || sessionId is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'session_id' parameter.");
+
+        if (!request.Params.TryGetProperty("after_message_timestamp", out var tsProp) || !tsProp.TryGetInt64(out var afterTimestamp))
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing or invalid 'after_message_timestamp' parameter.");
+
+        var result = await sessionStore.SplitSessionAsync(agentName, sessionId, afterTimestamp, ct);
+        if (result is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Could not split session at the given timestamp.");
+
+        // Dispose the old runtime — context has changed
+        var runtimeKey = $"{agentName}:{sessionId}";
+        if (_runtimes.TryRemove(runtimeKey, out var runtime))
+            runtime.Abort();
+
+        var payload = JsonSerializer.SerializeToElement(new { new_segment_id = result.Value.NewSegment.Id }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleTimelineBreakRemoveAsync(RequestFrame request, CancellationToken ct)
+    {
+        var agentName = GetStringParam(request.Params, "agent");
+        var segmentId = GetStringParam(request.Params, "segment_id");
+        if (agentName is null || segmentId is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'segment_id' parameter.");
+
+        // Find the predecessor before merging so we can clean up its runtime
+        var segments = await sessionStore.LoadTimelineAsync(agentName, limit: int.MaxValue, ct: ct);
+        string? predecessorId = null;
+        for (var i = 1; i < segments.Count; i++)
+        {
+            if (segments[i].Id == segmentId)
+            {
+                predecessorId = segments[i - 1].Id;
+                break;
+            }
+        }
+
+        var merged = await sessionStore.MergeSessionsAsync(agentName, segmentId, ct);
+        if (merged is null)
+            return ResponseFrame.Failure(request.Id, "not_found", "Segment not found or has no predecessor to merge with.");
+
+        // Dispose runtimes for both the merged segment and its predecessor
+        if (predecessorId is not null && _runtimes.TryRemove($"{agentName}:{predecessorId}", out var predRuntime))
+            predRuntime.Abort();
+        if (_runtimes.TryRemove($"{agentName}:{segmentId}", out var segRuntime))
+            segRuntime.Abort();
+
+        var payload = JsonSerializer.SerializeToElement(new { merged_into = segmentId }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleTimelineClearAsync(RequestFrame request, CancellationToken ct)
     {
         var agentName = GetStringParam(request.Params, "agent");
         if (agentName is null)
             return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
 
-        if (!agents.TryGetValue(agentName, out var agentDef))
-            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
-
-        var sessionId = Guid.NewGuid().ToString("N")[..12];
-        var session = new MobileSession { Id = sessionId };
-        await sessionStore.SaveAsync(agentName, session, ct);
-
-        var runtimeKey = $"{agentName}:{sessionId}";
-        var runtime = CreateRuntime(agentDef, agentName);
-        _runtimes[runtimeKey] = runtime;
-
-        var payload = JsonSerializer.SerializeToElement(new
+        // Dispose all runtimes for this agent
+        var prefix = $"{agentName}:";
+        foreach (var key in _runtimes.Keys.Where(k => k.StartsWith(prefix)).ToList())
         {
-            id = sessionId,
-            title = (string?)null,
-            message_count = 0,
-            preview = "",
-        }, JsonOptions);
-        return ResponseFrame.Success(request.Id, payload);
-    }
+            if (_runtimes.TryRemove(key, out var runtime))
+                runtime.Abort();
+        }
 
-    private async Task<ResponseFrame> HandleSessionsGetAsync(RequestFrame request, CancellationToken ct)
-    {
-        var agentName = GetStringParam(request.Params, "agent");
-        var sessionId = GetStringParam(request.Params, "session_id");
-        if (agentName is null || sessionId is null)
-            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'session_id' parameter.");
+        // Delete all session files
+        var sessions = await sessionStore.ListAsync(agentName, ct);
+        foreach (var session in sessions)
+            await sessionStore.DeleteAsync(agentName, session.Id, ct);
 
-        var session = await sessionStore.LoadAsync(agentName, sessionId, ct);
-        if (session is null)
-            return ResponseFrame.Failure(request.Id, "not_found", $"Session '{sessionId}' not found.");
-
-        var payload = JsonSerializer.SerializeToElement(session, JsonOptions);
-        return ResponseFrame.Success(request.Id, payload);
-    }
-
-    private async Task<ResponseFrame> HandleSessionsDeleteAsync(RequestFrame request, CancellationToken ct)
-    {
-        var agentName = GetStringParam(request.Params, "agent");
-        var sessionId = GetStringParam(request.Params, "session_id");
-        if (agentName is null || sessionId is null)
-            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'session_id' parameter.");
-
-        var runtimeKey = $"{agentName}:{sessionId}";
-        if (_runtimes.TryRemove(runtimeKey, out var runtime))
-            runtime.Abort();
-
-        await sessionStore.DeleteAsync(agentName, sessionId, ct);
-        var payload = JsonSerializer.SerializeToElement(new { deleted = true }, JsonOptions);
-        return ResponseFrame.Success(request.Id, payload);
-    }
-
-    private async Task<ResponseFrame> HandleSessionsUpdateAsync(RequestFrame request, CancellationToken ct)
-    {
-        var agentName = GetStringParam(request.Params, "agent");
-        var sessionId = GetStringParam(request.Params, "session_id");
-        var title = GetStringParam(request.Params, "title");
-        if (agentName is null || sessionId is null || title is null)
-            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent', 'session_id', or 'title' parameter.");
-
-        await sessionStore.UpdateMetadataAsync(agentName, sessionId, title, ct);
-        var payload = JsonSerializer.SerializeToElement(new { updated = true }, JsonOptions);
+        var payload = JsonSerializer.SerializeToElement(new { cleared = true }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
 
@@ -304,24 +320,36 @@ public sealed class MobileTransport(
     {
         var agentName = GetStringParam(request.Params, "agent");
         var text = GetStringParam(request.Params, "text");
-        var sessionId = GetStringParam(request.Params, "session_id");
         if (agentName is null || text is null)
             return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'text' parameter.");
 
         if (!agents.TryGetValue(agentName, out var agentDef))
             return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
 
-        sessionId ??= Guid.NewGuid().ToString("N")[..12];
+        // Auto-resolve session: use latest, or create new if none exists or timed out
+        var newSession = false;
+        var latest = await sessionStore.GetLatestSessionAsync(agentName, ct);
+        string sessionId;
+
+        if (latest is null || DateTimeOffset.UtcNow - latest.Updated > SessionTimeout)
+        {
+            sessionId = Guid.NewGuid().ToString("N")[..12];
+            newSession = true;
+        }
+        else
+        {
+            sessionId = latest.Id;
+        }
+
         var runtimeKey = $"{agentName}:{sessionId}";
 
         // Get or create the runtime for this session
         if (!_runtimes.TryGetValue(runtimeKey, out var runtime))
         {
-            // Try to load existing session messages
-            var session = await sessionStore.LoadAsync(agentName, sessionId, ct);
-            runtime = session is not null && session.Messages.Count > 0
-                ? CreateRuntime(agentDef, agentName, session.Messages)
-                : CreateRuntime(agentDef, agentName);
+            if (!newSession && latest is not null && latest.Messages.Count > 0)
+                runtime = CreateRuntime(agentDef, agentName, latest.Messages);
+            else
+                runtime = CreateRuntime(agentDef, agentName);
             _runtimes[runtimeKey] = runtime;
         }
 
@@ -334,7 +362,11 @@ public sealed class MobileTransport(
         }
 
         // Send immediate response to the requesting client
-        var responsePayload = JsonSerializer.SerializeToElement(new { session_id = sessionId }, JsonOptions);
+        var responsePayload = JsonSerializer.SerializeToElement(new
+        {
+            session_id = sessionId,
+            new_session = newSession,
+        }, JsonOptions);
         var response = ResponseFrame.Success(request.Id, responsePayload);
         await connection.SendResponseAsync(response, ct);
 
@@ -347,17 +379,17 @@ public sealed class MobileTransport(
     private ResponseFrame HandleChatCancel(RequestFrame request)
     {
         var agentName = GetStringParam(request.Params, "agent");
-        var sessionId = GetStringParam(request.Params, "session_id");
         if (agentName is null)
             return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
 
-        var runtimeKey = sessionId is not null ? $"{agentName}:{sessionId}" : null;
-        AgentRuntime? runtime = null;
+        // Find any running runtime for this agent
+        var prefix = $"{agentName}:";
+        var runtime = _runtimes
+            .Where(kv => kv.Key.StartsWith(prefix) && kv.Value.IsRunning)
+            .Select(kv => kv.Value)
+            .FirstOrDefault();
 
-        if (runtimeKey is not null)
-            _runtimes.TryGetValue(runtimeKey, out runtime);
-
-        if (runtime is null || !runtime.IsRunning)
+        if (runtime is null)
         {
             var payload = JsonSerializer.SerializeToElement(new { cancelled = false }, JsonOptions);
             return ResponseFrame.Success(request.Id, payload);
@@ -470,9 +502,12 @@ public sealed class MobileTransport(
                         break;
 
                     case AgentEndEvent:
+                        // Preserve Created timestamp if session already exists on disk
+                        var existing = await sessionStore.LoadAsync(agentName, sessionId, ct);
                         var session = new MobileSession
                         {
                             Id = sessionId,
+                            Created = existing?.Created ?? DateTimeOffset.UtcNow,
                             Messages = [.. runtime.Messages],
                         };
                         await sessionStore.SaveAsync(agentName, session, ct);
@@ -482,11 +517,6 @@ public sealed class MobileTransport(
                             agent = agentName,
                             session_id = sessionId,
                         }, ct);
-
-                        if (session.Title is null && session.Messages.Count >= 2)
-                        {
-                            _ = Task.Run(() => AutoNameSessionAsync(agentName, session, ct), ct);
-                        }
                         break;
                 }
             }
@@ -536,65 +566,6 @@ public sealed class MobileTransport(
             Messages = messages,
         });
     }
-
-    private async Task AutoNameSessionAsync(string agentName, MobileSession session, CancellationToken ct)
-    {
-        try
-        {
-            if (!agents.TryGetValue(agentName, out var agentDef))
-                return;
-
-            var userText = session.Messages.OfType<UserMessage>().FirstOrDefault()?.Text;
-            var assistantText = session.Messages.OfType<AssistantMessage>().FirstOrDefault()
-                ?.Content.OfType<CompletionTextContent>().FirstOrDefault()?.Text;
-
-            if (userText is null)
-                return;
-
-            var snippet = $"User: {Truncate(userText, 200)}";
-            if (assistantText is not null)
-                snippet += $"\nAssistant: {Truncate(assistantText, 200)}";
-
-            var namingRuntime = new AgentRuntime(new AgentOptions
-            {
-                Model = agentDef.Model,
-                SystemPrompt = "Generate a short title (3-6 words) for the following conversation. "
-                    + "Return ONLY the title text, nothing else. No quotes, no punctuation at the end.",
-                Tools = [],
-                CompletionOptions = agentDef.CompletionOptions,
-            });
-
-            var title = "";
-            var stream = namingRuntime.PromptAsync(snippet);
-            await foreach (var evt in stream.WithCancellation(ct))
-            {
-                if (evt is MessageStreamEvent { Inner: CompletionTextDeltaEvent delta })
-                    title += delta.Delta;
-            }
-
-            title = title.Trim().Trim('"');
-            if (string.IsNullOrWhiteSpace(title))
-                return;
-
-            await sessionStore.UpdateMetadataAsync(agentName, session.Id, title, ct);
-
-            await BroadcastEventAsync("session.renamed", new
-            {
-                agent = agentName,
-                session_id = session.Id,
-                title,
-            }, ct);
-
-            _logger.LogDebug("Auto-named session {Agent}/{Session}: {Title}", agentName, session.Id, title);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to auto-name session {Agent}/{Session}", agentName, session.Id);
-        }
-    }
-
-    private static string Truncate(string text, int maxLength) =>
-        text.Length <= maxLength ? text : text[..maxLength] + "...";
 
     private static string? GetStringParam(JsonElement element, string name)
     {

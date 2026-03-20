@@ -10,4 +10,9 @@ public sealed record UserMessage : AgentMessage
     /// Optional additional content blocks (images, files, audio) sent alongside the text.
     /// </summary>
     public IReadOnlyList<CompletionUserContent>? Content { get; init; }
+
+    /// <summary>
+    /// When true, clients should not display this message (e.g. system-generated cron prompts).
+    /// </summary>
+    public bool Hidden { get; init; }
 }
