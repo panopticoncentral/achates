@@ -1,4 +1,5 @@
 import SwiftUI
+import MarkdownUI
 
 struct MessageBubble: View {
     let message: ChatMessage
@@ -42,9 +43,35 @@ struct MessageBubble: View {
     }
 
     private func textBubble(_ text: String) -> some View {
-        Text(text)
-            .font(.body)
-            .foregroundStyle(message.role == .user ? .white : .primary)
+        Markdown(text)
+            .markdownTextStyle {
+                if message.role == .user {
+                    ForegroundColor(.white)
+                }
+            }
+            .markdownBlockStyle(\.heading1) { configuration in
+                configuration.label.markdownTextStyle { FontSize(.em(1.15)); FontWeight(.semibold) }
+            }
+            .markdownBlockStyle(\.heading2) { configuration in
+                configuration.label.markdownTextStyle { FontSize(.em(1.1)); FontWeight(.semibold) }
+            }
+            .markdownBlockStyle(\.heading3) { configuration in
+                configuration.label.markdownTextStyle { FontSize(.em(1.05)); FontWeight(.semibold) }
+            }
+            .markdownBlockStyle(\.codeBlock) { configuration in
+                configuration.label
+                    .markdownTextStyle {
+                        FontFamilyVariant(.monospaced)
+                        FontSize(.em(0.9))
+                    }
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(message.role == .user
+                                  ? Color.white.opacity(0.15)
+                                  : Color(.systemGray6))
+                    )
+            }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(
