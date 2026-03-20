@@ -1,71 +1,55 @@
 # Configuration Reference
 
-<!-- NOTE: Keep this file in sync with AchatesConfig.cs, ConfigLoader.cs, and GatewayService.cs.
+<!-- NOTE: Keep this file in sync with AchatesConfig.cs, AgentLoader.cs, ConfigLoader.cs, and GatewayService.cs.
      When adding/removing/renaming config fields, update the matching section here. -->
 
-Achates is configured via `~/.achates/config.yaml`. Override the path with the `ACHATES_CONFIG_PATH` environment variable.
+Achates configuration is split into two parts:
+- **Global config** at `~/.achates/config.yaml` — provider and shared tool settings
+- **Agent definitions** at `~/.achates/agents/{name}/AGENT.md` — one file per agent
 
-YAML uses `snake_case` naming (mapped to C# `PascalCase` automatically). Unknown fields are silently ignored. `~` is expanded in file paths. If the config file doesn't exist, a default is created on first run.
+YAML uses `snake_case` naming (mapped to C# `PascalCase` automatically). Unknown fields are silently ignored. `~` is expanded in file paths. If the config file doesn't exist, a default is created on first run. If no agents are found, a default agent is scaffolded.
 
 ## Default config
 
 ```yaml
-provider: openrouter
-
-agents:
-  default:
-    model: anthropic/claude-sonnet-4
-    tools: [session, memory]
-    completion:
-      reasoning_effort: medium
-    channels:
-      websocket: {}
-
+provider:
+  name: openrouter
 ```
 
-## All settings
+## Default agent (`~/.achates/agents/default/AGENT.md`)
+
+```markdown
+# Default
+
+A helpful assistant.
+
+## Capabilities
+
+**Model:** anthropic/claude-sonnet-4
+
+**Tools:**
+  - session
+  - memory
+
+**Reasoning Effort:** medium
+
+## Prompt
+
+You are a helpful assistant.
+```
+
+## Global settings (`config.yaml`)
 
 ### Top-level
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `provider` | string | `openrouter` | Default LLM provider ID. Agents can override this. |
-| `agents` | map | _(required)_ | Named agent definitions. At least one required. |
+| `provider` | object | _(required)_ | LLM provider configuration (see below). |
 | `tools` | object | _(none)_ | Shared tool configuration (see below). |
-
-### `agents.<name>`
-
-Each agent is a named entry with its own configuration. Channels are nested under the agent.
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `description` | string | _(none)_ | Agent description, used in system prompt (e.g. "a personal assistant"). |
-| `model` | string | _(required)_ | Model ID within the provider. |
-| `provider` | string | _(top-level)_ | Override the provider for this agent. |
-| `tools` | string[] | _(none)_ | Tool names to enable. Available: `session`, `memory`, `todo`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cost`, `cron`, `imessage`, `health`, `chat`. |
-| `prompt` | string | _(none)_ | Inline custom system prompt text. Cannot be used with `prompt_file`. |
-| `prompt_file` | string | _(none)_ | Path to a file containing the system prompt. Supports `~` expansion. Cannot be used with `prompt`. |
-| `completion` | object | _(none)_ | Completion options (see below). |
-| `channels` | map | _(none)_ | Transport bindings for this agent, keyed by transport type. |
-| `allow_chat` | string[] | _(all)_ | Allowlist of agent names this agent can chat with. Omit to allow all. Only relevant when `chat` is in `tools`. |
-
-### `agents.<name>.completion`
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `reasoning_effort` | string | `medium` | Reasoning effort level. Only sent if the model supports it. |
-| `temperature` | number | _(none)_ | Sampling temperature. |
-| `max_tokens` | int | _(none)_ | Maximum output tokens per response. |
-
-### `agents.<name>.channels.<type>`
-
-Each channel is keyed by transport type (`websocket`). The channel name is derived as `{agentName}/{transportType}`.
-
-WebSocket channels have no required config — use `websocket: {}`.
 
 ### `tools`
 
-Shared tool configuration at the top level. Individual tools are enabled per-agent via the agent's `tools` list.
+Shared tool configuration at the top level. Individual tools are enabled per-agent via the agent's `tools` list in AGENT.md.
 
 #### `tools.todo`
 
@@ -110,10 +94,41 @@ Withings Health API for the `health` tool. OAuth 2.0 authorization code flow —
 | `client_secret` | string | _(none)_ | Withings app secret. Falls back to `WITHINGS_CLIENT_SECRET` env var. |
 | `redirect_uri` | string | `http://localhost:5000/withings/callback` | OAuth callback URL. |
 
+## Agent definitions (`AGENT.md`)
+
+Each agent is defined by a single `AGENT.md` file at `~/.achates/agents/{name}/AGENT.md`. The directory name becomes the agent name. The file is pure markdown with a conventional structure:
+
+### Structure
+
+| Section | Required | Description |
+|---------|----------|-------------|
+| `# Title` | yes | H1 heading. Display name for the agent. |
+| _(description)_ | no | Paragraph(s) between H1 and first H2. Used in system prompt and agent listing. |
+| `## Capabilities` | yes | Agent settings as `**Key:** value` lines (see below). |
+| `## Prompt` | no | Everything under this heading becomes the system prompt. |
+
+### Capabilities keys
+
+Each capability is a `**Key:** value` line. List values (tools, allowed chats) use indented sub-bullets on following lines. Scalar values go inline.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `Model` | string | _(required)_ | Model ID within the provider. |
+| `Provider` | string | _(global)_ | Override the provider for this agent. |
+| `Tools` | list | _(none)_ | Tool names to enable. Available: `session`, `memory`, `todo`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cost`, `cron`, `imessage`, `transcribe`, `health`, `chat`, `location`, `camera`. |
+| `Allowed Chats` | list | _(all)_ | Allowlist of agent names this agent can chat with. Omit to allow all. Only relevant when `chat` is in tools. |
+| `Reasoning Effort` | string | `medium` | Reasoning effort level. Only sent if the model supports it. |
+| `Temperature` | number | _(none)_ | Sampling temperature. |
+| `Max Tokens` | int | _(none)_ | Maximum output tokens per response. |
+
 ## Full example
 
+### `~/.achates/config.yaml`
+
 ```yaml
-provider: openrouter
+provider:
+  name: openrouter
+  api_key: sk-...
 
 tools:
   todo:
@@ -131,18 +146,41 @@ tools:
   withings:
     client_id: <withings-client-id>
     client_secret: <withings-client-secret>
+```
 
-agents:
-  paul:
-    description: Personal assistant
-    model: anthropic/claude-sonnet-4
-    prompt_file: ~/.achates/agents/paul/prompt.md
-    tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost, cron, imessage, health, chat]
-    allow_chat: [research]  # optional; omit to allow all agents
-    completion:
-      reasoning_effort: medium
-    channels:
-      websocket: {}
+### `~/.achates/agents/paul/AGENT.md`
+
+```markdown
+# Paul
+
+Personal assistant.
+
+## Capabilities
+
+**Model:** anthropic/claude-sonnet-4
+
+**Tools:**
+  - session
+  - memory
+  - todo
+  - mail
+  - calendar
+  - web_search
+  - web_fetch
+  - cost
+  - cron
+  - imessage
+  - health
+  - chat
+
+**Allowed Chats:**
+  - research
+
+**Reasoning Effort:** medium
+
+## Prompt
+
+You are Paul's personal assistant...
 ```
 
 ## Environment variables
@@ -159,11 +197,13 @@ agents:
 
 | Path | Purpose |
 |------|---------|
-| `~/.achates/config.yaml` | Configuration file. |
-| `~/.achates/sessions/{agentName}/{transportType}/{peerId}.json` | Persisted conversation history. |
-| `~/.achates/agents/{agentName}/memory.md` | Agent memory (shared across all peers). |
-| `~/.achates/agents/{agentName}/costs.jsonl` | Cost ledger (append-only, always recorded). |
-| `~/.achates/agents/{agentName}/cron.json` | Scheduled task definitions and state. |
+| `~/.achates/config.yaml` | Global configuration (provider + tools). |
+| `~/.achates/agents/{name}/AGENT.md` | Agent definition (markdown). |
+| `~/.achates/agents/{name}/sessions/{sessionId}.json` | Persisted conversation history. |
+| `~/.achates/memory.md` | Shared memory (universal user facts, all agents). |
+| `~/.achates/agents/{name}/memory.md` | Agent memory (agent-specific notes). |
+| `~/.achates/agents/{name}/costs.jsonl` | Cost ledger (append-only, always recorded). |
+| `~/.achates/agents/{name}/cron.json` | Scheduled task definitions and state. |
 | `~/.achates/graph-token-cache.bin` | Graph device code token cache. |
 | `~/.achates/withings-tokens.json` | Withings OAuth tokens (access + refresh). |
 

@@ -37,16 +37,24 @@ public sealed class GatewayService(
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (config.Agents is not { Count: > 0 })
-            throw new InvalidOperationException("No agents configured. Add at least one agent to config.yaml.");
-
         var achatesHome = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".achates");
 
+        var agentConfigs = AgentLoader.LoadAgents(achatesHome);
+        if (agentConfigs.Count == 0)
+        {
+            AgentLoader.CreateDefault(achatesHome);
+            agentConfigs = AgentLoader.LoadAgents(achatesHome);
+        }
+
+        if (agentConfigs.Count == 0)
+            throw new InvalidOperationException(
+                "No agents found. Create AGENT.md in ~/.achates/agents/{name}/");
+
         var agents = new Dictionary<string, AgentDefinition>();
 
-        foreach (var (name, agentConfig) in config.Agents)
+        foreach (var (name, agentConfig) in agentConfigs)
         {
             var model = await ResolveModelAsync(
                 agentConfig.Provider ?? config.Provider?.Name,
@@ -285,20 +293,7 @@ public sealed class GatewayService(
         };
     }
 
-    private static string? ResolvePrompt(AgentConfig agentConfig)
-    {
-        if (agentConfig.Prompt is not null && agentConfig.PromptFile is not null)
-            throw new InvalidOperationException("Agent cannot have both 'prompt' and 'prompt_file' set.");
-
-        if (agentConfig.PromptFile is not null)
-        {
-            var path = ExpandHome(agentConfig.PromptFile)
-                ?? throw new InvalidOperationException("prompt_file cannot be empty.");
-            return File.ReadAllText(path);
-        }
-
-        return agentConfig.Prompt;
-    }
+    private static string? ResolvePrompt(AgentConfig agentConfig) => agentConfig.Prompt;
 
     private static string? ExpandHome(string? path) =>
         path is not null && path.StartsWith('~')

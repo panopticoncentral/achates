@@ -6,12 +6,6 @@ var builder = WebApplication.CreateBuilder(args);
 // Load user config (~/.achates/config.yaml)
 var userConfig = ConfigLoader.Load();
 
-if (userConfig.Agents is not { Count: > 0 })
-{
-    Console.Error.WriteLine("Error: No agents configured. Add at least one agent to ~/.achates/config.yaml.");
-    return 1;
-}
-
 builder.Services.AddSingleton(userConfig);
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<GatewayService>();

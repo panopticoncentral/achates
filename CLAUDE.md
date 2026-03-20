@@ -15,11 +15,11 @@ Solution file is `Achates.slnx` (XML format, not legacy `.sln`).
 
 ## Running
 
-Server requires a config with at least one agent and channel. API key can be set in config (`api_key`) or via environment variable:
+Server requires at least one agent defined as an `AGENT.md` file. API key can be set in config (`api_key`) or via environment variable:
 ```bash
 dotnet run --project src/Achates.Server
 ```
-Config lives at `~/.achates/config.yaml`.
+Config lives at `~/.achates/config.yaml`. Agents live at `~/.achates/agents/{name}/AGENT.md`.
 
 ## Project Structure
 
@@ -40,7 +40,7 @@ Providers <- Agent <- Server
 
 ### Core Concepts
 
-- **Agent** — Named entity with identity (name, description), prompt, model, tools, and persistent memory. Defined in config, resolved at startup into `AgentDefinition`.
+- **Agent** — Named entity with identity (name, description), prompt, model, tools, and persistent memory. Defined in `~/.achates/agents/{name}/AGENT.md` (YAML frontmatter + markdown prompt), resolved at startup into `AgentDefinition`.
 
 ### Provider Layer (`Achates.Providers`)
 - `IModelProvider` — interface with `GetModelsAsync()` and `GetCompletions()` (streaming)
@@ -66,6 +66,7 @@ Providers <- Agent <- Server
 - Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
 
 ### Server (`Achates.Server`)
+- `AgentLoader` — discovers agents by scanning `~/.achates/agents/*/AGENT.md`. Parses pure markdown: H1 title, description text, `## Capabilities` (`**Key:** value` lines with optional sub-bullet lists → `AgentConfig` fields), `## Prompt` (system prompt). Creates a default agent if none found.
 - `AgentDefinition` — resolved agent with Model, SystemPrompt, Tools, CompletionOptions, MemoryPath, CostLedger, CronStore, GraphClient.
 - `MemoryTool` — layered persistent memory with two scopes. **Shared memory** at `~/.achates/memory.md` stores universal user facts (name, family, preferences) accessible to all agents. **Agent memory** at `~/.achates/agents/{agentName}/memory.md` stores agent-specific notes. `scope` parameter (`shared` or `agent`) controls which file to target; `read` without a scope returns both. Survives `/new` resets.
 - `MailTool` — reads Outlook email via Microsoft Graph API. Actions: list, read, search. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
@@ -114,7 +115,9 @@ Providers <- Agent <- Server
 - Raw string literals for multi-line JSON/text
 - No test framework established yet
 
-## Configuration (`~/.achates/config.yaml`)
+## Configuration
+
+### Global config (`~/.achates/config.yaml`)
 
 ```yaml
 provider:
@@ -142,25 +145,50 @@ tools:
     client_id: <withings-client-id>
     client_secret: <withings-client-secret>  # or set WITHINGS_CLIENT_SECRET env var
     redirect_uri: http://localhost:5000/withings/callback  # optional, this is the default
-
-agents:
-  paul:
-    description: Personal assistant
-    model: anthropic/claude-sonnet-4
-    prompt_file: ~/.achates/agents/paul/prompt.md  # or inline: prompt: "You are..."
-    tools: [session, memory, todo, mail, calendar, web_search, web_fetch, cost, cron, imessage, transcribe, health, chat]
-    allow_chat: [other_agent_name]  # optional; omit to allow all agents
-    completion:
-      reasoning_effort: medium
 ```
 
 Loaded by `ConfigLoader.Load()` (in Server project). Env var override: `ACHATES_CONFIG_PATH`. YAML uses underscore naming convention (C# PascalCase <-> YAML snake_case). `~` is expanded in file paths (e.g. `todo_file`). `${ENV_VAR}` expansion is **not yet supported** — use literal values or env vars directly.
 
+### Agent definitions (`~/.achates/agents/{name}/AGENT.md`)
+
+Each agent is a pure markdown file. Directory name = agent name. Discovered by `AgentLoader` at startup. Structure: H1 title, description paragraph(s), `## Capabilities` with bold-key bullet list, optional `## Prompt` section for the system prompt.
+
+```markdown
+# Paul
+
+Personal assistant.
+
+## Capabilities
+
+**Model:** anthropic/claude-sonnet-4
+
+**Tools:**
+  - session
+  - memory
+  - todo
+  - mail
+
+**Allowed Chats:**
+  - val
+  - claire
+
+**Reasoning Effort:** medium
+
+## Prompt
+
+You are a personal assistant...
+```
+
+Capabilities keys: `Model`, `Provider`, `Tools`, `Allowed Chats`, `Reasoning Effort`, `Temperature`, `Max Tokens`. List values use sub-bullets; scalar values go inline after the key.
+
+If no agents are found, a default agent is scaffolded at `~/.achates/agents/default/AGENT.md`.
+
 ### Data paths
 
 ```
-~/.achates/config.yaml                                        Configuration
-~/.achates/agents/{agentName}/sessions/{sessionId}.json                  Conversation history
+~/.achates/config.yaml                                         Configuration (provider + tools)
+~/.achates/agents/{agentName}/AGENT.md                         Agent definition (markdown)
+~/.achates/agents/{agentName}/sessions/{sessionId}.json        Conversation history
 ~/.achates/memory.md                                           Shared memory (universal user facts, all agents)
 ~/.achates/agents/{agentName}/memory.md                        Agent memory (agent-specific notes)
 ~/.achates/agents/{agentName}/costs.jsonl                      Cost ledger (append-only, always recorded)

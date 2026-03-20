@@ -57,17 +57,5 @@ public static class ConfigLoader
     private static AchatesConfig CreateDefault() => new()
     {
         Provider = new ProviderConfig { Name = "openrouter" },
-        Agents = new Dictionary<string, AgentConfig>
-        {
-            ["default"] = new()
-            {
-                Model = "anthropic/claude-sonnet-4",
-                Tools = ["session", "memory"],
-                Completion = new CompletionConfig
-                {
-                    ReasoningEffort = "medium",
-                },
-            },
-        },
     };
 }

@@ -4,7 +4,6 @@ public sealed class AchatesConfig
 {
     public ProviderConfig? Provider { get; set; }
     public ToolsConfig? Tools { get; set; }
-    public Dictionary<string, AgentConfig>? Agents { get; set; }
 }
 
 public sealed class AgentConfig
@@ -13,8 +12,6 @@ public sealed class AgentConfig
     public string? Model { get; set; }
     public string? Provider { get; set; }
     public List<string>? Tools { get; set; }
-    public string? Prompt { get; set; }
-    public string? PromptFile { get; set; }
     public CompletionConfig? Completion { get; set; }
 
     /// <summary>
@@ -22,6 +19,12 @@ public sealed class AgentConfig
     /// If null or empty when chat tool is enabled, all other agents are allowed.
     /// </summary>
     public List<string>? AllowChat { get; set; }
+
+    /// <summary>
+    /// System prompt from the ## Prompt section of AGENT.md.
+    /// Set by <see cref="AgentLoader"/>, not deserialized.
+    /// </summary>
+    public string? Prompt { get; set; }
 }
 
 public sealed class ToolsConfig
