@@ -1,5 +1,9 @@
 import UserNotifications
+#if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 @MainActor
 final class NotificationService {
@@ -22,7 +26,11 @@ final class NotificationService {
     }
 
     func registerForRemoteNotifications() {
+        #if os(iOS)
         UIApplication.shared.registerForRemoteNotifications()
+        #elseif os(macOS)
+        NSApplication.shared.registerForRemoteNotifications()
+        #endif
     }
 
     func handleDeviceToken(_ token: Data) -> String {

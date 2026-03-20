@@ -29,31 +29,58 @@ struct AgentListView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                #if os(macOS)
+                agentListMac
+                #else
                 List(appState.agents) { agent in
                     NavigationLink(value: agent) {
                         AgentRow(agent: agent)
                     }
                 }
+                #endif
             }
         }
         .navigationTitle("Agents")
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
+        #endif
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .automatic) {
                 NavigationLink(destination: SettingsView()) {
                     Image(systemName: "gear")
                 }
             }
         }
+        #if os(iOS)
         .navigationDestination(for: Agent.self) { agent in
             ChatView(agent: agent)
         }
+        #endif
         .onAppear {
             if appState.connectionStatus == .disconnected && appState.serverURL != nil {
                 appState.connectToServer()
             }
         }
     }
+
+    #if os(macOS)
+    @ViewBuilder
+    private var agentListMac: some View {
+        @Bindable var state = appState
+        let selection = Binding<Agent.ID?>(
+            get: { appState.currentAgent?.id },
+            set: { id in
+                if let agent = appState.agents.first(where: { $0.id == id }) {
+                    appState.currentAgent = agent
+                }
+            }
+        )
+        List(appState.agents, selection: selection) { agent in
+            AgentRow(agent: agent)
+                .tag(agent.id)
+        }
+    }
+    #endif
 }
 
 private struct AgentRow: View {

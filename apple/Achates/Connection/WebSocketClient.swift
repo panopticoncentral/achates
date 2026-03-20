@@ -129,10 +129,17 @@ final class WebSocketClient {
     private func performConnect() async {
         do {
             // Step 1: Handshake
+            #if os(macOS)
+            let clientId = "macos"
+            let capabilities: [JSONValue] = [.string("location")]
+            #else
+            let clientId = "ios"
+            let capabilities: [JSONValue] = [.string("location"), .string("camera")]
+            #endif
             _ = try await sendRequest(method: "connect", params: [
-                "client": .string("ios"),
+                "client": .string(clientId),
                 "version": .string("1.0"),
-                "capabilities": .array([.string("location"), .string("camera")])
+                "capabilities": .array(capabilities)
             ])
             reconnectAttemptsHolder.set(0)
             appState.connectionStatus = .connected

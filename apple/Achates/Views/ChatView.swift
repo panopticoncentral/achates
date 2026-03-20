@@ -64,9 +64,11 @@ struct ChatView: View {
             }
         }
         .navigationTitle(agent.name.capitalized)
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .automatic) {
                 HStack(spacing: 12) {
                     Menu {
                         Button(role: .destructive) {
@@ -133,7 +135,7 @@ private struct SessionBreakDivider: View {
 
     private var line: some View {
         Rectangle()
-            .fill(Color(.separator))
+            .fill(.separator)
             .frame(height: 0.5)
     }
 

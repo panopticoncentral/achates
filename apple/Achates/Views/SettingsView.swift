@@ -29,8 +29,10 @@ struct SettingsView: View {
                     TextField("Server URL", text: $urlString, prompt: Text("http://192.168.1.100:5000"))
                         .textContentType(.URL)
                         .autocorrectionDisabled()
+                        #if os(iOS)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
+                        #endif
                 }
 
                 Section {

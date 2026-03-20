@@ -37,15 +37,25 @@ final class LocationService: NSObject, Sendable {
     func requestLocation() async throws -> LocationResult {
         let status = manager.authorizationStatus
         if status == .notDetermined {
+            #if os(macOS)
+            manager.requestAlwaysAuthorization()
+            #else
             manager.requestWhenInUseAuthorization()
+            #endif
             // Wait briefly for authorization
             try await Task.sleep(for: .seconds(1))
         }
 
         let updatedStatus = manager.authorizationStatus
+        #if os(macOS)
+        guard updatedStatus == .authorized || updatedStatus == .authorizedAlways else {
+            throw LocationError.denied
+        }
+        #else
         guard updatedStatus == .authorizedWhenInUse || updatedStatus == .authorizedAlways else {
             throw LocationError.denied
         }
+        #endif
 
         return try await withCheckedThrowingContinuation { continuation in
             delegateHandler.setContinuation(continuation)

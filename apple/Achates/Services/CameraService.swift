@@ -1,5 +1,9 @@
 import AVFoundation
+#if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 struct PhotoResult: Sendable {
     let base64: String
@@ -17,6 +21,7 @@ enum CameraError: Error, LocalizedError {
     case captureDeviceUnavailable
     case captureFailed(String)
     case compressionFailed
+    case notAvailable
 
     var errorDescription: String? {
         switch self {
@@ -24,12 +29,22 @@ enum CameraError: Error, LocalizedError {
         case .captureDeviceUnavailable: return "Camera device unavailable"
         case .captureFailed(let msg): return msg
         case .compressionFailed: return "Failed to compress photo"
+        case .notAvailable: return "Camera capture is not available on this platform"
         }
     }
 }
 
 final class CameraService: Sendable {
     func capturePhoto(facing: CameraFacing) async throws -> PhotoResult {
+        #if os(iOS)
+        return try await capturePhotoiOS(facing: facing)
+        #else
+        throw CameraError.notAvailable
+        #endif
+    }
+
+    #if os(iOS)
+    private func capturePhotoiOS(facing: CameraFacing) async throws -> PhotoResult {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         if status == .notDetermined {
             let granted = await AVCaptureDevice.requestAccess(for: .video)
@@ -104,8 +119,10 @@ final class CameraService: Sendable {
 
         throw CameraError.compressionFailed
     }
+    #endif
 }
 
+#if os(iOS)
 private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Sendable {
     private let continuation: CheckedContinuation<Data, Error>
     private var didResume = false
@@ -131,3 +148,4 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
         continuation.resume(returning: data)
     }
 }
+#endif
