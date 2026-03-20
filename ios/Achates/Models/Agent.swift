@@ -5,6 +5,8 @@ struct Agent: Identifiable, Sendable, Equatable {
     let name: String
     let description: String
     let tools: [String]
+    let lastMessage: String?
+    let lastActivity: Date?
 
     var initials: String {
         let parts = name.split(separator: " ")
@@ -14,11 +16,26 @@ struct Agent: Identifiable, Sendable, Equatable {
         return String(name.prefix(2)).uppercased()
     }
 
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
     static func from(_ payload: [String: JSONValue]) -> Agent? {
         guard let name = payload["name"]?.stringValue else { return nil }
         let description = payload["description"]?.stringValue ?? ""
         let tools: [String] = payload["tools"]?.arrayValue?.compactMap(\.stringValue) ?? []
-        return Agent(id: name, name: name, description: description, tools: tools)
+        let lastMessage = payload["last_message"]?.stringValue
+
+        var lastActivity: Date?
+        if let activityStr = payload["last_activity"]?.stringValue {
+            lastActivity = isoFormatter.date(from: activityStr)
+                ?? ISO8601DateFormatter().date(from: activityStr)
+        }
+
+        return Agent(id: name, name: name, description: description, tools: tools,
+                     lastMessage: lastMessage, lastActivity: lastActivity)
     }
 
     static func fromList(_ payload: [String: JSONValue]) -> [Agent] {
