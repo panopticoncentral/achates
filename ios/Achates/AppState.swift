@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UserNotifications
 
 /// A display item in the unified timeline — either a chat message or a session break divider.
 enum TimelineItem: Identifiable, Equatable {
@@ -75,6 +76,42 @@ final class AppState {
         hasMoreHistory = true
 
         await loadTimeline()
+        markCurrentAgentAsRead()
+    }
+
+    func markCurrentAgentAsRead() {
+        guard let agent = currentAgent, client != nil else { return }
+
+        // Find the latest message timestamp in the timeline
+        let latestTimestamp: Int? = timeline.reversed().compactMap { item -> Int? in
+            if case .message(let msg) = item {
+                return Int(msg.timestamp.timeIntervalSince1970 * 1000)
+            }
+            return nil
+        }.first
+
+        guard let ts = latestTimestamp else { return }
+
+        // Optimistic local update
+        if let index = agents.firstIndex(where: { $0.id == agent.id }), agents[index].unreadCount > 0 {
+            agents[index].unreadCount = 0
+            updateAppBadge()
+        }
+
+        // Fire and forget to server
+        Task {
+            _ = try? await client?.sendRequest(method: "chat.read", params: [
+                "agent": .string(agent.id),
+                "timestamp": .int(ts),
+            ])
+        }
+    }
+
+    func updateAppBadge() {
+        let total = agents.reduce(0) { $0 + $1.unreadCount }
+        Task {
+            try? await UNUserNotificationCenter.current().setBadgeCount(total)
+        }
     }
 
     // MARK: - Timeline loading

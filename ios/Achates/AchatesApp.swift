@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct AchatesApp: App {
@@ -8,6 +9,10 @@ struct AchatesApp: App {
         WindowGroup {
             ContentView()
                 .environment(appState)
+                .task {
+                    _ = try? await UNUserNotificationCenter.current()
+                        .requestAuthorization(options: [.badge])
+                }
         }
     }
 }

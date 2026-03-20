@@ -157,6 +157,7 @@ public sealed class MobileTransport(
                 "timeline.clear" => await HandleTimelineClearAsync(request, ct),
                 "chat.send" => await HandleChatSendAsync(connection, request, ct),
                 "chat.cancel" => HandleChatCancel(request),
+                "chat.read" => await HandleChatReadAsync(request, ct),
                 _ => ResponseFrame.Failure(request.Id, "unknown_method", $"Unknown method: {request.Method}"),
             };
 
@@ -208,6 +209,7 @@ public sealed class MobileTransport(
         foreach (var (name, def) in agents)
         {
             var (lastMessage, lastActivity) = await GetLastMessagePreviewAsync(name, ct);
+            var unreadCount = await GetUnreadCountAsync(name, ct);
 
             agentList.Add(new
             {
@@ -217,6 +219,7 @@ public sealed class MobileTransport(
                 tools = def.Tools.Select(t => t.Name).ToArray(),
                 last_message = lastMessage,
                 last_activity = lastActivity,
+                unread_count = unreadCount,
             });
         }
 
@@ -273,6 +276,61 @@ public sealed class MobileTransport(
         }
 
         return (null, null);
+    }
+
+    private string GetAgentReadStatePath(string agentName) =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".achates", "agents", agentName, "read-state.json");
+
+    private async Task<long> LoadLastReadTimestampAsync(string agentName)
+    {
+        var path = GetAgentReadStatePath(agentName);
+        if (!File.Exists(path)) return 0;
+        try
+        {
+            var json = await File.ReadAllTextAsync(path);
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("last_read_timestamp", out var ts) && ts.TryGetInt64(out var value))
+                return value;
+        }
+        catch { /* corrupted or invalid — treat as never read */ }
+        return 0;
+    }
+
+    private async Task SaveLastReadTimestampAsync(string agentName, long timestamp)
+    {
+        var path = GetAgentReadStatePath(agentName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var tempPath = path + ".tmp";
+        var json = JsonSerializer.Serialize(new { last_read_timestamp = timestamp }, JsonOptions);
+        await File.WriteAllTextAsync(tempPath, json);
+        File.Move(tempPath, path, overwrite: true);
+    }
+
+    private async Task<int> GetUnreadCountAsync(string agentName, CancellationToken ct)
+    {
+        var lastRead = await LoadLastReadTimestampAsync(agentName);
+        var sessions = await sessionStore.LoadTimelineAsync(agentName, limit: int.MaxValue, ct: ct);
+        var count = 0;
+
+        // Sessions are returned oldest-first; iterate newest-first for early exit
+        for (var i = sessions.Count - 1; i >= 0; i--)
+        {
+            var session = sessions[i];
+            var messages = session.Messages;
+            if (messages.Count == 0) continue;
+
+            // If the newest message in this session is at or before lastRead, skip remaining
+            if (messages[^1].Timestamp <= lastRead) break;
+
+            for (var j = messages.Count - 1; j >= 0; j--)
+            {
+                if (messages[j].Timestamp <= lastRead) break;
+                if (messages[j] is AssistantMessage) count++;
+            }
+        }
+
+        return count;
     }
 
     private static readonly TimeSpan SessionTimeout = TimeSpan.FromHours(4);
@@ -460,6 +518,27 @@ public sealed class MobileTransport(
         runtime.Abort();
         var result = JsonSerializer.SerializeToElement(new { cancelled = true }, JsonOptions);
         return ResponseFrame.Success(request.Id, result);
+    }
+
+    private async Task<ResponseFrame> HandleChatReadAsync(RequestFrame request, CancellationToken ct)
+    {
+        var agentName = GetStringParam(request.Params, "agent");
+        if (agentName is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
+
+        if (!agents.ContainsKey(agentName))
+            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
+
+        if (!request.Params.TryGetProperty("timestamp", out var tsProp) || !tsProp.TryGetInt64(out var timestamp))
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing or invalid 'timestamp' parameter.");
+
+        // Only advance forward, never backward
+        var current = await LoadLastReadTimestampAsync(agentName);
+        if (timestamp > current)
+            await SaveLastReadTimestampAsync(agentName, timestamp);
+
+        var payload = JsonSerializer.SerializeToElement(new { ok = true }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
     }
 
     private async Task StreamAgentResponseAsync(

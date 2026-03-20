@@ -144,6 +144,7 @@ final class WebSocketClient {
                     guard let dict = val.objectValue else { return nil }
                     return Agent.from(dict)
                 }
+                appState.updateAppBadge()
             }
         } catch {
             print("Connect handshake failed: \(error)")
@@ -237,6 +238,7 @@ final class WebSocketClient {
         case "done":
             appState.isStreaming = false
             appState.streamingMessageId = nil
+            appState.markCurrentAgentAsRead()
 
         case "cron.result":
             let agent = payload["agent"]?.stringValue

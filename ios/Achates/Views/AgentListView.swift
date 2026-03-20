@@ -80,6 +80,14 @@ private struct AgentRow: View {
                             .font(.system(size: 14))
                             .foregroundStyle(.secondary)
                     }
+                    if agent.unreadCount > 0 {
+                        Text("\(agent.unreadCount)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Color.blue, in: Capsule())
+                    }
                 }
 
                 Text(previewText)

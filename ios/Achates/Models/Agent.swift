@@ -7,6 +7,7 @@ struct Agent: Identifiable, Sendable, Equatable {
     let tools: [String]
     let lastMessage: String?
     let lastActivity: Date?
+    var unreadCount: Int
 
     var initials: String {
         let parts = name.split(separator: " ")
@@ -28,6 +29,8 @@ struct Agent: Identifiable, Sendable, Equatable {
         let tools: [String] = payload["tools"]?.arrayValue?.compactMap(\.stringValue) ?? []
         let lastMessage = payload["last_message"]?.stringValue
 
+        let unreadCount = payload["unread_count"]?.intValue ?? 0
+
         var lastActivity: Date?
         if let activityStr = payload["last_activity"]?.stringValue {
             lastActivity = isoFormatter.date(from: activityStr)
@@ -35,7 +38,8 @@ struct Agent: Identifiable, Sendable, Equatable {
         }
 
         return Agent(id: name, name: name, description: description, tools: tools,
-                     lastMessage: lastMessage, lastActivity: lastActivity)
+                     lastMessage: lastMessage, lastActivity: lastActivity,
+                     unreadCount: unreadCount)
     }
 
     static func fromList(_ payload: [String: JSONValue]) -> [Agent] {

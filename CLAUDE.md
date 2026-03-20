@@ -100,7 +100,7 @@ Providers <- Agent <- Server
 - `MobileSession` — session model with Id, Title, Created, Updated, Messages.
 - `DeviceCommandBridge` — routes tool requests (location, camera) to any connected client with the required capability. Used by `LocationTool` and `CameraTool`.
 - Frame protocol: `RequestFrame` (req), `ResponseFrame` (res), `EventFrame` (evt). JSON with snake_case naming.
-- RPC methods: `connect`, `ping`, `agents.list`, `timeline.load`, `timeline.break.add`, `timeline.break.remove`, `timeline.clear`, `chat.send`, `chat.cancel`.
+- RPC methods: `connect`, `ping`, `agents.list`, `timeline.load`, `timeline.break.add`, `timeline.break.remove`, `timeline.clear`, `chat.send`, `chat.cancel`, `chat.read`.
 - Timeline model: sessions are presented as a continuous timeline per agent (like iMessage). Session breaks appear as date/time dividers. Server auto-creates a new session after 4h of inactivity. Users can manually add breaks (split) or remove them (merge). `chat.send` no longer requires `session_id` — server auto-resolves to the latest session.
 - Device commands (server-to-client requests): `device.location`, `device.camera`.
 - Per-session tool injection: `CreateRuntime` adds MemoryTool, TodoTool, CostTool, CronTool per-session.
@@ -193,6 +193,7 @@ If no agents are found, a default agent is scaffolded at `~/.achates/agents/defa
 ~/.achates/agents/{agentName}/memory.md                        Agent memory (agent-specific notes)
 ~/.achates/agents/{agentName}/costs.jsonl                      Cost ledger (append-only, always recorded)
 ~/.achates/agents/{agentName}/cron.json                        Scheduled task definitions and state
+~/.achates/agents/{agentName}/read-state.json                  Read tracking (last read timestamp)
 ~/.achates/graph-token-cache.bin                               Graph device code token cache
 ~/.achates/withings-tokens.json                                Withings OAuth tokens (access + refresh)
 ```
