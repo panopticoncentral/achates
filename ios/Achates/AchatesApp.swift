@@ -8,7 +8,6 @@ struct AchatesApp: App {
         WindowGroup {
             ContentView()
                 .environment(appState)
-                .preferredColorScheme(.dark)
         }
     }
 }
