@@ -21,6 +21,7 @@ public sealed class GatewayService(
     ILogger<GatewayService> logger)
     : IHostedLifecycleService, IAsyncDisposable
 {
+    private string? _achatesHome;
     private Dictionary<string, AgentDefinition> _agents = new();
     private CronService? _cronService;
     private WithingsClient? _withingsClient;
@@ -37,15 +38,15 @@ public sealed class GatewayService(
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var achatesHome = Path.Combine(
+        _achatesHome = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".achates");
 
-        var agentConfigs = AgentLoader.LoadAgents(achatesHome);
+        var agentConfigs = AgentLoader.LoadAgents(_achatesHome);
         if (agentConfigs.Count == 0)
         {
-            AgentLoader.CreateDefault(achatesHome);
-            agentConfigs = AgentLoader.LoadAgents(achatesHome);
+            AgentLoader.CreateDefault(_achatesHome);
+            agentConfigs = AgentLoader.LoadAgents(_achatesHome);
         }
 
         if (agentConfigs.Count == 0)
@@ -56,76 +57,10 @@ public sealed class GatewayService(
 
         foreach (var (name, agentConfig) in agentConfigs)
         {
-            var model = await ResolveModelAsync(
-                agentConfig.Provider ?? config.Provider?.Name,
-                agentConfig.Model,
-                cancellationToken);
-
-            var prompt = ResolvePrompt(agentConfig);
-
-            var toolsConfig = config.Tools;
-            var graphClients = CreateGraphClients(toolsConfig?.Graph);
-            var withingsClient = CreateWithingsClient(toolsConfig?.Withings);
-            if (withingsClient is not null)
-                _withingsClient = withingsClient;
-
-            // Resolve transcription model if any agent uses the transcribe tool
-            Model? transcribeModel = null;
-            if (agentConfig.Tools?.Contains("transcribe") == true)
-            {
-                var transcribeModelId = toolsConfig?.Transcribe?.Model ?? "google/gemini-2.5-flash";
-                transcribeModel = await ResolveModelAsync(
-                    agentConfig.Provider ?? config.Provider?.Name,
-                    transcribeModelId,
-                    cancellationToken);
-                logger.LogInformation("Transcribe model resolved: {Model}", transcribeModel.Id);
-            }
-
-            var tools = ResolveTools(agentConfig, toolsConfig, model, graphClients, withingsClient,
-                transcribeModel);
-            var hasTools = agentConfig.Tools ?? [];
-            var graphAccountNames = graphClients.Keys.ToList();
-            var systemPrompt = SystemPrompt.Build(agentConfig.Description, prompt, tools,
-                hasTodo: toolsConfig?.Todo?.File is not null,
-                hasNotes: hasTools.Contains("notes"),
-                notesFolderName: ResolveNotesFolder(toolsConfig),
-                hasMail: hasTools.Contains("mail"),
-                hasCalendar: hasTools.Contains("calendar"),
-                graphAccountNames: graphAccountNames,
-                hasWebSearch: hasTools.Contains("web_search"),
-                hasWebFetch: hasTools.Contains("web_fetch"),
-                hasCost: hasTools.Contains("cost"),
-                hasIMessage: hasTools.Contains("imessage"),
-                hasCron: hasTools.Contains("cron"),
-                hasHealth: hasTools.Contains("health"),
-                hasTranscribe: hasTools.Contains("transcribe"),
-                hasChat: hasTools.Contains("chat"),
-                chatAgentNames: agentConfig.AllowChat);
-            var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
-            var costLedgerPath = Path.Combine(achatesHome, "agents", name, "costs.jsonl");
-            var costLedger = new CostLedger(costLedgerPath);
-            var cronStorePath = Path.Combine(achatesHome, "agents", name, "cron.json");
-            var cronStore = hasTools.Contains("cron") ? new CronStore(cronStorePath) : null;
-
-            var agentDef = new AgentDefinition
-            {
-                Model = model,
-                SystemPrompt = systemPrompt,
-                Tools = tools,
-                CompletionOptions = BuildCompletionOptions(agentConfig.Completion, model),
-                MemoryPath = memoryPath,
-                Description = agentConfig.Description,
-                TodoPath = ExpandHome(toolsConfig?.Todo?.File),
-                CostLedger = costLedger,
-                CronStore = cronStore,
-                GraphClients = graphClients,
-            };
-
-            agents[name] = agentDef;
-            logger.LogInformation("Agent '{Name}' resolved with model {Model}", name, model.Id);
+            agents[name] = await ResolveAgentAsync(name, agentConfig, cancellationToken);
 
             // Eagerly authenticate Graph so device code prompt appears at startup
-            foreach (var (accountName, client) in graphClients)
+            foreach (var (accountName, client) in agents[name].GraphClients)
             {
                 try
                 {
@@ -145,8 +80,10 @@ public sealed class GatewayService(
         _agents = agents;
 
         // Create MobileTransport
-        _mobileSessionStore = new MobileSessionStore(achatesHome);
+        _mobileSessionStore = new MobileSessionStore(_achatesHome);
         _mobileTransport = new MobileTransport(agents, _mobileSessionStore, loggerFactory);
+        _mobileTransport.AgentReloadFunc = ReloadAgentAsync;
+        _mobileTransport.ModelsListFunc = GetAllModelsAsync;
         _deviceBridge.SetTransport(_mobileTransport);
 
         // Start cron service for agents that have scheduled tasks enabled
@@ -162,6 +99,110 @@ public sealed class GatewayService(
         }
 
         logger.LogInformation("Started with {AgentCount} agent(s)", agents.Count);
+    }
+
+    public async Task<IReadOnlyList<Achates.Providers.Models.Model>> GetAllModelsAsync(CancellationToken ct)
+    {
+        var providerId = config.Provider?.Name
+            ?? throw new InvalidOperationException("No provider specified.");
+
+        var provider = ModelProviders.Create(providerId)
+            ?? throw new InvalidOperationException($"Unknown provider: {providerId}");
+
+        var apiKey = config.Provider?.ApiKey
+            ?? Environment.GetEnvironmentVariable(provider.EnvironmentKey)
+            ?? throw new InvalidOperationException("API key not found.");
+
+        provider.Key = apiKey;
+        provider.HttpClient = httpClientFactory.CreateClient("achates");
+
+        return await provider.GetModelsAsync(ct);
+    }
+
+    public async Task<AgentDefinition> ReloadAgentAsync(string name, CancellationToken ct)
+    {
+        var agentFile = Path.Combine(_achatesHome!, "agents", name, "AGENT.md");
+        var content = await File.ReadAllTextAsync(agentFile, ct);
+        var agentConfig = AgentLoader.Parse(content)
+            ?? throw new InvalidOperationException($"Failed to parse AGENT.md for agent '{name}'.");
+
+        var agentDef = await ResolveAgentAsync(name, agentConfig, ct);
+        _agents[name] = agentDef;
+        _mobileTransport?.UpdateAgent(name, agentDef);
+        logger.LogInformation("Agent '{Name}' reloaded with model {Model}", name, agentDef.Model.Id);
+        return agentDef;
+    }
+
+    private async Task<AgentDefinition> ResolveAgentAsync(string name, AgentConfig agentConfig, CancellationToken ct)
+    {
+        var achatesHome = _achatesHome!;
+        var model = await ResolveModelAsync(
+            agentConfig.Provider ?? config.Provider?.Name,
+            agentConfig.Model,
+            ct);
+
+        var prompt = ResolvePrompt(agentConfig);
+
+        var toolsConfig = config.Tools;
+        var graphClients = CreateGraphClients(toolsConfig?.Graph);
+        var withingsClient = CreateWithingsClient(toolsConfig?.Withings);
+        if (withingsClient is not null)
+            _withingsClient = withingsClient;
+
+        // Resolve transcription model if any agent uses the transcribe tool
+        Model? transcribeModel = null;
+        if (agentConfig.Tools?.Contains("transcribe") == true)
+        {
+            var transcribeModelId = toolsConfig?.Transcribe?.Model ?? "google/gemini-2.5-flash";
+            transcribeModel = await ResolveModelAsync(
+                agentConfig.Provider ?? config.Provider?.Name,
+                transcribeModelId,
+                ct);
+            logger.LogInformation("Transcribe model resolved: {Model}", transcribeModel.Id);
+        }
+
+        var tools = ResolveTools(agentConfig, toolsConfig, model, graphClients, withingsClient,
+            transcribeModel);
+        var hasTools = agentConfig.Tools ?? [];
+        var graphAccountNames = graphClients.Keys.ToList();
+        var systemPrompt = SystemPrompt.Build(agentConfig.Description, prompt, tools,
+            hasTodo: toolsConfig?.Todo?.File is not null,
+            hasNotes: hasTools.Contains("notes"),
+            notesFolderName: ResolveNotesFolder(toolsConfig),
+            hasMail: hasTools.Contains("mail"),
+            hasCalendar: hasTools.Contains("calendar"),
+            graphAccountNames: graphAccountNames,
+            hasWebSearch: hasTools.Contains("web_search"),
+            hasWebFetch: hasTools.Contains("web_fetch"),
+            hasCost: hasTools.Contains("cost"),
+            hasIMessage: hasTools.Contains("imessage"),
+            hasCron: hasTools.Contains("cron"),
+            hasHealth: hasTools.Contains("health"),
+            hasTranscribe: hasTools.Contains("transcribe"),
+            hasChat: hasTools.Contains("chat"),
+            chatAgentNames: agentConfig.AllowChat);
+        var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
+        var costLedgerPath = Path.Combine(achatesHome, "agents", name, "costs.jsonl");
+        var costLedger = new CostLedger(costLedgerPath);
+        var cronStorePath = Path.Combine(achatesHome, "agents", name, "cron.json");
+        var cronStore = hasTools.Contains("cron") ? new CronStore(cronStorePath) : null;
+
+        var agentDef = new AgentDefinition
+        {
+            Model = model,
+            SystemPrompt = systemPrompt,
+            Tools = tools,
+            CompletionOptions = BuildCompletionOptions(agentConfig.Completion, model),
+            MemoryPath = memoryPath,
+            Description = agentConfig.Description,
+            TodoPath = ExpandHome(toolsConfig?.Todo?.File),
+            CostLedger = costLedger,
+            CronStore = cronStore,
+            GraphClients = graphClients,
+        };
+
+        logger.LogInformation("Agent '{Name}' resolved with model {Model}", name, model.Id);
+        return agentDef;
     }
 
     public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
