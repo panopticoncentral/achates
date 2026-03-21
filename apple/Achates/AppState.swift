@@ -15,6 +15,20 @@ enum TimelineItem: Identifiable, Equatable {
     }
 }
 
+enum AgentEditError: LocalizedError {
+    case notConnected
+    case invalidResponse
+    case reloadWarning(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .notConnected: return "Not connected to server."
+        case .invalidResponse: return "Invalid response from server."
+        case .reloadWarning(let msg): return msg
+        }
+    }
+}
+
 @Observable
 @MainActor
 final class AppState {
@@ -211,6 +225,48 @@ final class AppState {
             currentSessionId = nil
         } catch {
             self.error = "Failed to clear timeline: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Agent management
+
+    func loadAgentConfig(_ agent: Agent) async throws -> AgentEditModel {
+        guard let payload = try await client?.sendRequest(method: "agent.get", params: [
+            "agent": .string(agent.id),
+        ]) else {
+            throw AgentEditError.notConnected
+        }
+        guard let model = AgentEditModel.from(payload) else {
+            throw AgentEditError.invalidResponse
+        }
+        return model
+    }
+
+    func saveAgentConfig(_ agent: Agent, config: AgentEditModel) async throws {
+        guard let payload = try await client?.sendRequest(method: "agent.update",
+            params: config.toParams(agentId: agent.id)
+        ) else {
+            throw AgentEditError.notConnected
+        }
+        if let warning = payload["warning"]?.stringValue {
+            throw AgentEditError.reloadWarning(warning)
+        }
+        await refreshAgents()
+    }
+
+    func loadModels() async throws -> [ModelInfo] {
+        guard let payload = try await client?.sendRequest(method: "models.list") else {
+            throw AgentEditError.notConnected
+        }
+        return ModelInfo.fromList(payload)
+    }
+
+    func refreshAgents() async {
+        guard let client, let payload = try? await client.sendRequest(method: "agents.list") else { return }
+        agents = Agent.fromList(payload)
+        if let current = currentAgent,
+           let updated = agents.first(where: { $0.id == current.id }) {
+            currentAgent = updated
         }
     }
 
