@@ -11,6 +11,7 @@ using Achates.Providers.Completions.Content;
 using Achates.Providers.Completions.Events;
 using Achates.Server.Cron;
 using Achates.Server.Tools;
+using Achates.Server;
 
 namespace Achates.Server.Mobile;
 
@@ -20,7 +21,7 @@ namespace Achates.Server.Mobile;
 /// Manages the read loop, RPC dispatch, agent event streaming, and session persistence.
 /// </summary>
 public sealed class MobileTransport(
-    IReadOnlyDictionary<string, AgentDefinition> agents,
+    IReadOnlyDictionary<string, AgentDefinition> initialAgents,
     MobileSessionStore sessionStore,
     ILoggerFactory loggerFactory)
 {
@@ -30,10 +31,37 @@ public sealed class MobileTransport(
     };
 
     private readonly ILogger _logger = loggerFactory.CreateLogger<MobileTransport>();
+    private readonly ConcurrentDictionary<string, AgentDefinition> _agents = new(initialAgents);
     private readonly ConcurrentDictionary<string, MobileConnection> _connections = new();
     private readonly ConcurrentDictionary<string, AgentRuntime> _runtimes = new();
+    private IReadOnlyList<object>? _modelsCache;
 
     public CronService? CronService { get; set; }
+
+    /// <summary>
+    /// Delegate to reload an agent definition from disk. Set by GatewayService after construction.
+    /// </summary>
+    public Func<string, CancellationToken, Task<AgentDefinition>>? AgentReloadFunc { get; set; }
+
+    /// <summary>
+    /// Delegate to list all available models from the provider. Set by GatewayService after construction.
+    /// </summary>
+    public Func<CancellationToken, Task<IReadOnlyList<Achates.Providers.Models.Model>>>? ModelsListFunc { get; set; }
+
+    /// <summary>
+    /// Replace an agent definition and evict any cached runtimes for that agent.
+    /// </summary>
+    public void UpdateAgent(string name, AgentDefinition definition)
+    {
+        _agents[name] = definition;
+
+        var prefix = $"{name}:";
+        foreach (var key in _runtimes.Keys.Where(k => k.StartsWith(prefix)).ToList())
+        {
+            if (_runtimes.TryRemove(key, out var runtime))
+                runtime.Abort();
+        }
+    }
 
     /// <summary>
     /// All currently connected clients.
@@ -158,6 +186,9 @@ public sealed class MobileTransport(
                 "chat.send" => await HandleChatSendAsync(connection, request, ct),
                 "chat.cancel" => HandleChatCancel(request),
                 "chat.read" => await HandleChatReadAsync(request, ct),
+                "agent.get" => await HandleAgentGetAsync(request),
+                "agent.update" => await HandleAgentUpdateAsync(request, ct),
+                "models.list" => await HandleModelsListAsync(request, ct),
                 _ => ResponseFrame.Failure(request.Id, "unknown_method", $"Unknown method: {request.Method}"),
             };
 
@@ -206,7 +237,7 @@ public sealed class MobileTransport(
     {
         var agentList = new List<object>();
 
-        foreach (var (name, def) in agents)
+        foreach (var (name, def) in _agents)
         {
             var (lastMessage, lastActivity) = await GetLastMessagePreviewAsync(name, ct);
             var unreadCount = await GetUnreadCountAsync(name, ct);
@@ -341,7 +372,7 @@ public sealed class MobileTransport(
         if (agentName is null)
             return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
 
-        if (!agents.ContainsKey(agentName))
+        if (!_agents.ContainsKey(agentName))
             return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
 
         DateTimeOffset? before = null;
@@ -443,7 +474,7 @@ public sealed class MobileTransport(
         if (agentName is null || text is null)
             return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'text' parameter.");
 
-        if (!agents.TryGetValue(agentName, out var agentDef))
+        if (!_agents.TryGetValue(agentName, out var agentDef))
             return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
 
         // Auto-resolve session: use latest, or create new if none exists or timed out
@@ -526,7 +557,7 @@ public sealed class MobileTransport(
         if (agentName is null)
             return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
 
-        if (!agents.ContainsKey(agentName))
+        if (!_agents.ContainsKey(agentName))
             return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
 
         if (!request.Params.TryGetProperty("timestamp", out var tsProp) || !tsProp.TryGetInt64(out var timestamp))
@@ -538,6 +569,144 @@ public sealed class MobileTransport(
             await SaveLastReadTimestampAsync(agentName, timestamp);
 
         var payload = JsonSerializer.SerializeToElement(new { ok = true }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleAgentGetAsync(RequestFrame request)
+    {
+        var agentName = GetStringParam(request.Params, "agent");
+        if (agentName is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
+
+        if (!_agents.ContainsKey(agentName))
+            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
+
+        var agentFile = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".achates", "agents", agentName, "AGENT.md");
+
+        if (!File.Exists(agentFile))
+            return ResponseFrame.Failure(request.Id, "not_found", "AGENT.md file not found.");
+
+        var content = await File.ReadAllTextAsync(agentFile);
+        var config = AgentLoader.Parse(content);
+        if (config is null)
+            return ResponseFrame.Failure(request.Id, "parse_error", "Failed to parse AGENT.md.");
+
+        var agentModels = _agents
+            .Where(a => a.Key != agentName)
+            .Select(a => a.Value.Model.Id)
+            .Distinct()
+            .ToArray();
+
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            description = config.Description ?? "",
+            model = config.Model ?? "",
+            tools = config.Tools ?? [],
+            reasoning_effort = config.Completion?.ReasoningEffort,
+            temperature = config.Completion?.Temperature,
+            max_tokens = config.Completion?.MaxTokens,
+            allowed_chats = config.AllowChat ?? [],
+            prompt = config.Prompt ?? "",
+            agent_models = agentModels,
+        }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleAgentUpdateAsync(RequestFrame request, CancellationToken ct)
+    {
+        var agentName = GetStringParam(request.Params, "agent");
+        if (agentName is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
+
+        if (!_agents.ContainsKey(agentName))
+            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
+
+        var p = request.Params;
+        var config = new AgentConfig
+        {
+            Description = GetStringParam(p, "description"),
+            Model = GetStringParam(p, "model"),
+            Prompt = GetStringParam(p, "prompt"),
+        };
+
+        if (p.TryGetProperty("tools", out var toolsEl) && toolsEl.ValueKind == JsonValueKind.Array)
+            config.Tools = toolsEl.EnumerateArray()
+                .Select(t => t.GetString()!)
+                .Where(t => t is not null)
+                .ToList();
+
+        if (p.TryGetProperty("allowed_chats", out var chatsEl) && chatsEl.ValueKind == JsonValueKind.Array)
+            config.AllowChat = chatsEl.EnumerateArray()
+                .Select(c => c.GetString()!)
+                .Where(c => c is not null)
+                .ToList();
+
+        if (p.TryGetProperty("reasoning_effort", out var reProp) && reProp.ValueKind == JsonValueKind.String)
+        {
+            config.Completion ??= new CompletionConfig();
+            config.Completion.ReasoningEffort = reProp.GetString();
+        }
+
+        if (p.TryGetProperty("temperature", out var tempProp) && tempProp.ValueKind == JsonValueKind.Number)
+        {
+            config.Completion ??= new CompletionConfig();
+            config.Completion.Temperature = tempProp.GetDouble();
+        }
+
+        if (p.TryGetProperty("max_tokens", out var mtProp) && mtProp.ValueKind == JsonValueKind.Number)
+        {
+            config.Completion ??= new CompletionConfig();
+            config.Completion.MaxTokens = mtProp.GetInt32();
+        }
+
+        var displayName = char.ToUpper(agentName[0]) + agentName[1..];
+        var markdown = AgentLoader.Serialize(displayName, config);
+
+        var agentFile = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".achates", "agents", agentName, "AGENT.md");
+
+        var tempPath = agentFile + ".tmp";
+        await File.WriteAllTextAsync(tempPath, markdown, ct);
+        File.Move(tempPath, agentFile, overwrite: true);
+
+        string? warning = null;
+        if (AgentReloadFunc is not null)
+        {
+            try
+            {
+                await AgentReloadFunc(agentName, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Agent '{Name}' saved but reload failed", agentName);
+                warning = $"Saved, but reload failed: {ex.Message}";
+            }
+        }
+
+        var payload = JsonSerializer.SerializeToElement(new { ok = true, warning }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleModelsListAsync(RequestFrame request, CancellationToken ct)
+    {
+        if (_modelsCache is null)
+        {
+            if (ModelsListFunc is null)
+                return ResponseFrame.Failure(request.Id, "not_available", "Model listing not available.");
+
+            var models = await ModelsListFunc(ct);
+            _modelsCache = models.Select(m => (object)new
+            {
+                id = m.Id,
+                name = m.Name,
+                context_window = m.ContextWindow,
+            }).ToList();
+        }
+
+        var payload = JsonSerializer.SerializeToElement(new { models = _modelsCache }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
 
@@ -600,7 +769,7 @@ public sealed class MobileTransport(
                         break;
 
                     case MessageEndEvent { Message: AssistantMessage assistantMsg }:
-                        if (agents.TryGetValue(agentName, out var agentDef) && agentDef.CostLedger is { } costLedger)
+                        if (_agents.TryGetValue(agentName, out var agentDef) && agentDef.CostLedger is { } costLedger)
                         {
                             _ = costLedger.AppendAsync(new CostEntry
                             {
