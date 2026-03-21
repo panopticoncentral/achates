@@ -44,6 +44,72 @@ public static class AgentLoader
         return agents;
     }
 
+    public static string Serialize(string name, AgentConfig config)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"# {name}");
+        sb.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(config.Description))
+        {
+            sb.AppendLine(config.Description);
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("## Capabilities");
+        sb.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(config.Model))
+            sb.AppendLine($"**Model:** {config.Model}");
+
+        if (!string.IsNullOrWhiteSpace(config.Provider))
+            sb.AppendLine($"**Provider:** {config.Provider}");
+
+        if (config.Tools is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("**Tools:**");
+            foreach (var tool in config.Tools)
+                sb.AppendLine($"  - {tool}");
+        }
+
+        if (config.AllowChat is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("**Allowed Chats:**");
+            foreach (var chat in config.AllowChat)
+                sb.AppendLine($"  - {chat}");
+        }
+
+        if (config.Completion?.ReasoningEffort is { } re)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"**Reasoning Effort:** {re}");
+        }
+
+        if (config.Completion?.Temperature is { } temp)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"**Temperature:** {temp}");
+        }
+
+        if (config.Completion?.MaxTokens is { } mt)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"**Max Tokens:** {mt}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(config.Prompt))
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Prompt");
+            sb.AppendLine();
+            sb.AppendLine(config.Prompt);
+        }
+
+        return sb.ToString();
+    }
+
     public static void CreateDefault(string achatesHome)
     {
         var agentDir = Path.Combine(achatesHome, "agents", "default");
