@@ -7,6 +7,7 @@ import UIKit
 struct Agent: Identifiable, Sendable, Equatable {
     let id: String
     let name: String
+    let displayName: String
     let description: String
     let tools: [String]
     let lastMessage: String?
@@ -27,11 +28,11 @@ struct Agent: Identifiable, Sendable, Equatable {
     #endif
 
     var initials: String {
-        let parts = name.split(separator: " ")
+        let parts = displayName.split(separator: " ")
         if parts.count >= 2 {
             return String(parts[0].prefix(1) + parts[1].prefix(1)).uppercased()
         }
-        return String(name.prefix(2)).uppercased()
+        return String(displayName.prefix(2)).uppercased()
     }
 
     private static let isoFormatter: ISO8601DateFormatter = {
@@ -42,6 +43,7 @@ struct Agent: Identifiable, Sendable, Equatable {
 
     static func from(_ payload: [String: JSONValue]) -> Agent? {
         guard let name = payload["name"]?.stringValue else { return nil }
+        let displayName = payload["display_name"]?.stringValue ?? name.prefix(1).uppercased() + name.dropFirst()
         let description = payload["description"]?.stringValue ?? ""
         let tools: [String] = payload["tools"]?.arrayValue?.compactMap(\.stringValue) ?? []
         let lastMessage = payload["last_message"]?.stringValue
@@ -59,7 +61,7 @@ struct Agent: Identifiable, Sendable, Equatable {
             avatarData = Data(base64Encoded: b64)
         }
 
-        return Agent(id: name, name: name, description: description, tools: tools,
+        return Agent(id: name, name: name, displayName: displayName, description: description, tools: tools,
                      lastMessage: lastMessage, lastActivity: lastActivity,
                      unreadCount: unreadCount, avatarData: avatarData)
     }

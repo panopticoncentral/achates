@@ -7,7 +7,7 @@ struct AgentListView: View {
 
     private var filteredAgents: [Agent] {
         if searchText.isEmpty { return appState.agents }
-        return appState.agents.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        return appState.agents.filter { $0.displayName.localizedCaseInsensitiveContains(searchText) }
     }
 
     var body: some View {
@@ -155,7 +155,7 @@ private struct AgentRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(agent.name.capitalized)
+                    Text(agent.displayName)
                         .font(.system(size: 16, weight: .semibold))
                         .lineLimit(1)
                     Spacer(minLength: 4)

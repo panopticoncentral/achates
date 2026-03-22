@@ -11,7 +11,7 @@ struct AllowedChatsEditView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(allAgents) { agent in
-                    Toggle(agent.name.capitalized, isOn: chatBinding(agent.id))
+                    Toggle(agent.displayName, isOn: chatBinding(agent.id))
                 }
             }
 

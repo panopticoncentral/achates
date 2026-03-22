@@ -79,7 +79,7 @@ struct ChatView: View {
                     HStack(spacing: 8) {
                         AgentAvatar(agent: agent, size: 32)
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(agent.name.capitalized)
+                            Text(agent.displayName)
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(.primary)
                             Text(connectionLabel)
@@ -92,7 +92,7 @@ struct ChatView: View {
             }
             #else
             ToolbarItem(placement: .automatic) {
-                Text(agent.name.capitalized)
+                Text(agent.displayName)
                     .font(.headline)
             }
             #endif

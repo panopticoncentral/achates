@@ -82,7 +82,7 @@ struct AvatarEditSheet: View {
                     localImageData = existing
                 }
                 localRemove = removeAvatar
-                promptText = "A profile avatar for an AI assistant named \(agent.name.capitalized). Clean, modern, circular icon style."
+                promptText = "A profile avatar for an AI assistant named \(agent.displayName). Clean, modern, circular icon style."
             }
         }
         #if os(iOS)

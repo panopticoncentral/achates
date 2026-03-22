@@ -242,9 +242,27 @@ final class AppState {
         return model
     }
 
-    func saveAgentConfig(_ agent: Agent, config: AgentEditModel) async throws {
+    func saveAgentConfig(_ agent: Agent, config: AgentEditModel, original: AgentEditModel) async throws {
+        var currentAgentId = agent.id
+
+        // Handle rename first if display name changed
+        if config.displayName != original.displayName && !config.displayName.isEmpty {
+            guard let renamePayload = try await client?.sendRequest(method: "agent.rename", params: [
+                "agent": .string(agent.id),
+                "name": .string(config.displayName),
+            ]) else {
+                throw AgentEditError.notConnected
+            }
+            // Update agent ID for subsequent update call
+            if let newId = renamePayload["id"]?.stringValue {
+                currentAgentId = newId
+            }
+            await refreshAgents()
+        }
+
+        // Save other config changes
         guard let payload = try await client?.sendRequest(method: "agent.update",
-            params: config.toParams(agentId: agent.id)
+            params: config.toParams(agentId: currentAgentId)
         ) else {
             throw AgentEditError.notConnected
         }
@@ -280,6 +298,14 @@ final class AppState {
             throw AgentEditError.notConnected
         }
         return ModelInfo.fromList(payload)
+    }
+
+    func handleAgentRenamed(oldId: String?, newId: String?) async {
+        let wasCurrentAgent = currentAgent?.id == oldId
+        await refreshAgents()
+        if wasCurrentAgent, let newId, let updated = agents.first(where: { $0.id == newId }) {
+            currentAgent = updated
+        }
     }
 
     func refreshAgents() async {

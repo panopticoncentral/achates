@@ -253,6 +253,11 @@ final class WebSocketClient {
                 Task { await appState.loadTimeline() }
             }
 
+        case "agent.renamed":
+            let oldId = payload["old_id"]?.stringValue
+            let newId = payload["new_id"]?.stringValue
+            Task { await appState.handleAgentRenamed(oldId: oldId, newId: newId) }
+
         default:
             print("Unknown event: \(evt.event)")
         }

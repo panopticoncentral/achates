@@ -1,6 +1,7 @@
 import Foundation
 
 struct AgentEditModel: Equatable {
+    var displayName: String
     var description: String
     var model: String
     var tools: [String]
@@ -17,6 +18,7 @@ struct AgentEditModel: Equatable {
     static func from(_ payload: [String: JSONValue]) -> AgentEditModel? {
         guard let model = payload["model"]?.stringValue else { return nil }
         return AgentEditModel(
+            displayName: payload["display_name"]?.stringValue ?? "",
             description: payload["description"]?.stringValue ?? "",
             model: model,
             tools: payload["tools"]?.arrayValue?.compactMap(\.stringValue) ?? [],

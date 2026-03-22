@@ -27,7 +27,7 @@ struct AgentEditView: View {
                 formContent
             }
         }
-        .navigationTitle(agent.name.capitalized)
+        .navigationTitle(config?.displayName ?? agent.displayName)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -83,6 +83,14 @@ struct AgentEditView: View {
                     Spacer()
                 }
                 .listRowBackground(Color.clear)
+
+                HStack {
+                    Text("Name")
+                    Spacer()
+                    TextField("Name", text: binding(\.displayName))
+                        .multilineTextAlignment(.trailing)
+                        .foregroundStyle(.secondary)
+                }
 
                 HStack {
                     Text("Description")
@@ -322,7 +330,7 @@ struct AgentEditView: View {
         guard let config else { return }
         isSaving = true
         do {
-            try await appState.saveAgentConfig(agent, config: config)
+            try await appState.saveAgentConfig(agent, config: config, original: original!)
             original = config
             dismiss()
         } catch {
