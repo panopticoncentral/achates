@@ -159,7 +159,7 @@ final class WebSocketClient {
         }
     }
 
-    private nonisolated func receiveLoop(task: URLSessionWebSocketTask) async {
+    private func receiveLoop(task: URLSessionWebSocketTask) async {
         while shouldReconnectHolder.get() {
             do {
                 let message = try await task.receive()
@@ -201,7 +201,7 @@ final class WebSocketClient {
             if let seq = evt.seq {
                 lastSeqHolder.set(seq)
             }
-            await handleEvent(evt)
+            handleEvent(evt)
 
         case .request(let req):
             await handleServerRequest(req)
