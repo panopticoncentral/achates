@@ -10,6 +10,9 @@ struct AgentEditModel: Equatable {
     var allowedChats: [String]
     var prompt: String
     var agentModels: [String]
+    var hasAvatar: Bool
+    var newAvatarData: Data?
+    var removeAvatar: Bool = false
 
     static func from(_ payload: [String: JSONValue]) -> AgentEditModel? {
         guard let model = payload["model"]?.stringValue else { return nil }
@@ -22,7 +25,8 @@ struct AgentEditModel: Equatable {
             maxTokens: payload["max_tokens"]?.intValue,
             allowedChats: payload["allowed_chats"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             prompt: payload["prompt"]?.stringValue ?? "",
-            agentModels: payload["agent_models"]?.arrayValue?.compactMap(\.stringValue) ?? []
+            agentModels: payload["agent_models"]?.arrayValue?.compactMap(\.stringValue) ?? [],
+            hasAvatar: payload["has_avatar"]?.boolValue ?? false
         )
     }
 
@@ -43,6 +47,12 @@ struct AgentEditModel: Equatable {
         }
         if let mt = maxTokens {
             params["max_tokens"] = .int(mt)
+        }
+        if let data = newAvatarData {
+            params["avatar"] = .string(data.base64EncodedString())
+        }
+        if removeAvatar {
+            params["avatar_remove"] = .bool(true)
         }
         return params
     }

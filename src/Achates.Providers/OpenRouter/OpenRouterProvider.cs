@@ -50,6 +50,63 @@ internal sealed class OpenRouterProvider : IModelProvider
         return models;
     }
 
+    public async Task<byte[]?> GenerateImageAsync(string modelId, string prompt,
+        CancellationToken cancellationToken = default)
+    {
+        var client = new OpenRouterClient(HttpClient, Key);
+
+        var request = new OpenRouterChatCompletionRequest
+        {
+            Model = modelId,
+            Messages =
+            [
+                new OpenRouterChatMessage
+                {
+                    Role = "user",
+                    Content = JsonSerializer.SerializeToElement(prompt),
+                },
+            ],
+            Modalities = ["image"],
+        };
+
+        var response = await client.CreateOpenRouterChatCompletionAsync(request, cancellationToken)
+            .ConfigureAwait(false);
+
+        var message = response?.Choices.FirstOrDefault()?.Message;
+        if (message is null)
+            return null;
+
+        // Try the dedicated images field first
+        if (message.Images is { Count: > 0 })
+        {
+            var url = message.Images[0].ImageUrl?.Url;
+            if (url is { Length: > 0 })
+            {
+                var (_, data) = ParseDataUrl(url);
+                return Convert.FromBase64String(data);
+            }
+        }
+
+        // Fall back to content array (some models return images as content parts)
+        if (message.Content is { ValueKind: JsonValueKind.Array } contentArray)
+        {
+            foreach (var part in contentArray.EnumerateArray())
+            {
+                if (part.TryGetProperty("type", out var typeProp) &&
+                    typeProp.GetString() is "image_url" &&
+                    part.TryGetProperty("image_url", out var imgObj) &&
+                    imgObj.TryGetProperty("url", out var urlProp) &&
+                    urlProp.GetString() is { Length: > 0 } dataUrl)
+                {
+                    var (_, data) = ParseDataUrl(dataUrl);
+                    return Convert.FromBase64String(data);
+                }
+            }
+        }
+
+        return null;
+    }
+
     // ---- Streaming ----
 
     private sealed class BlockTracker

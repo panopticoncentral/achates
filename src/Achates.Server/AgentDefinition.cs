@@ -22,4 +22,5 @@ public sealed record AgentDefinition
     public CostLedger? CostLedger { get; init; }
     public CronStore? CronStore { get; init; }
     public IReadOnlyDictionary<string, GraphClient> GraphClients { get; init; } = new Dictionary<string, GraphClient>();
+    public byte[]? AvatarData { get; init; }
 }

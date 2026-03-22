@@ -43,7 +43,7 @@ Providers <- Agent <- Server
 - **Agent** — Named entity with identity (name, description), prompt, model, tools, and persistent memory. Defined in `~/.achates/agents/{name}/AGENT.md` (YAML frontmatter + markdown prompt), resolved at startup into `AgentDefinition`.
 
 ### Provider Layer (`Achates.Providers`)
-- `IModelProvider` — interface with `GetModelsAsync()` and `GetCompletions()` (streaming)
+- `IModelProvider` — interface with `GetModelsAsync()`, `GetCompletions()` (streaming), and `GenerateImageAsync()` (single image from prompt)
 - `ModelProviders.Create(id)` — factory for provider instances
 - Only implementation: `OpenRouterProvider` (SSE streaming, `api_key` in config or `OPENROUTER_API_KEY` env var)
 - Content types: `CompletionContent` base, subtypes for text, image, audio, thinking, tool calls, files
@@ -67,7 +67,7 @@ Providers <- Agent <- Server
 
 ### Server (`Achates.Server`)
 - `AgentLoader` — discovers agents by scanning `~/.achates/agents/*/AGENT.md`. Parses pure markdown: H1 title, description text, `## Capabilities` (`**Key:** value` lines with optional sub-bullet lists → `AgentConfig` fields), `## Prompt` (system prompt). Creates a default agent if none found.
-- `AgentDefinition` — resolved agent with Model, SystemPrompt, Tools, CompletionOptions, MemoryPath, CostLedger, CronStore, GraphClient.
+- `AgentDefinition` — resolved agent with Model, SystemPrompt, Tools, CompletionOptions, MemoryPath, CostLedger, CronStore, GraphClient, AvatarData. Avatar is loaded from `avatar.jpg` (or `.png`) in the agent directory; sent as base64 in `agents.list` responses.
 - `MemoryTool` — layered persistent memory with two scopes. **Shared memory** at `~/.achates/memory.md` stores universal user facts (name, family, preferences) accessible to all agents. **Agent memory** at `~/.achates/agents/{agentName}/memory.md` stores agent-specific notes. `scope` parameter (`shared` or `agent`) controls which file to target; `read` without a scope returns both. Survives `/new` resets.
 - `MailTool` — reads Outlook email via Microsoft Graph API. Actions: list, read, search. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
 - `CalendarTool` — reads Outlook calendar via Microsoft Graph API. Actions: upcoming, read, availability. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
@@ -100,7 +100,7 @@ Providers <- Agent <- Server
 - `MobileSession` — session model with Id, Title, Created, Updated, Messages.
 - `DeviceCommandBridge` — routes tool requests (location, camera) to any connected client with the required capability. Used by `LocationTool` and `CameraTool`.
 - Frame protocol: `RequestFrame` (req), `ResponseFrame` (res), `EventFrame` (evt). JSON with snake_case naming.
-- RPC methods: `connect`, `ping`, `agents.list`, `timeline.load`, `timeline.break.add`, `timeline.break.remove`, `timeline.clear`, `chat.send`, `chat.cancel`, `chat.read`.
+- RPC methods: `connect`, `ping`, `agents.list`, `timeline.load`, `timeline.break.add`, `timeline.break.remove`, `timeline.clear`, `chat.send`, `chat.cancel`, `chat.read`, `agent.get`, `agent.update`, `agent.generate_avatar`, `models.list`.
 - Timeline model: sessions are presented as a continuous timeline per agent (like iMessage). Session breaks appear as date/time dividers. Server auto-creates a new session after 4h of inactivity. Users can manually add breaks (split) or remove them (merge). `chat.send` no longer requires `session_id` — server auto-resolves to the latest session.
 - Device commands (server-to-client requests): `device.location`, `device.camera`.
 - Per-session tool injection: `CreateRuntime` adds MemoryTool, TodoTool, CostTool, CronTool per-session.
@@ -141,6 +141,8 @@ tools:
       user_email: user@example.com     # required for client credentials
   transcribe:
     model: google/gemini-2.5-flash  # audio-capable model for transcription
+  avatar:
+    model: google/gemini-2.5-flash-image  # image-capable model for avatar generation (default)
   withings:
     client_id: <withings-client-id>
     client_secret: <withings-client-secret>  # or set WITHINGS_CLIENT_SECRET env var
@@ -193,6 +195,7 @@ If no agents are found, a default agent is scaffolded at `~/.achates/agents/defa
 ~/.achates/agents/{agentName}/memory.md                        Agent memory (agent-specific notes)
 ~/.achates/agents/{agentName}/costs.jsonl                      Cost ledger (append-only, always recorded)
 ~/.achates/agents/{agentName}/cron.json                        Scheduled task definitions and state
+~/.achates/agents/{agentName}/avatar.jpg                       Agent profile picture (optional, JPEG)
 ~/.achates/agents/{agentName}/read-state.json                  Read tracking (last read timestamp)
 ~/.achates/graph-token-cache.bin                               Graph device code token cache
 ~/.achates/withings-tokens.json                                Withings OAuth tokens (access + refresh)

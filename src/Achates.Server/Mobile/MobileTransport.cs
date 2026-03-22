@@ -49,6 +49,11 @@ public sealed class MobileTransport(
     public Func<CancellationToken, Task<IReadOnlyList<Achates.Providers.Models.Model>>>? ModelsListFunc { get; set; }
 
     /// <summary>
+    /// Delegate to generate an avatar image from a prompt. Set by GatewayService after construction.
+    /// </summary>
+    public Func<string, CancellationToken, Task<byte[]?>>? GenerateAvatarFunc { get; set; }
+
+    /// <summary>
     /// Replace an agent definition and evict any cached runtimes for that agent.
     /// </summary>
     public void UpdateAgent(string name, AgentDefinition definition)
@@ -151,7 +156,10 @@ public sealed class MobileTransport(
             switch (frame)
             {
                 case RequestFrame request:
-                    await DispatchRequestAsync(connection, request, ct);
+                    if (IsLongRunning(request.Method))
+                        _ = DispatchLongRunningAsync(connection, request);
+                    else
+                        await DispatchRequestAsync(connection, request, ct);
                     break;
 
                 case ResponseFrame response:
@@ -188,6 +196,7 @@ public sealed class MobileTransport(
                 "chat.read" => await HandleChatReadAsync(request, ct),
                 "agent.get" => await HandleAgentGetAsync(request),
                 "agent.update" => await HandleAgentUpdateAsync(request, ct),
+                "agent.generate_avatar" => await HandleAgentGenerateAvatarAsync(request, ct),
                 "models.list" => await HandleModelsListAsync(request, ct),
                 _ => ResponseFrame.Failure(request.Id, "unknown_method", $"Unknown method: {request.Method}"),
             };
@@ -195,11 +204,68 @@ public sealed class MobileTransport(
             if (response is not null)
                 await connection.SendResponseAsync(response, ct);
         }
+        catch (Exception) when (connection.Socket.State != WebSocketState.Open)
+        {
+            _logger.LogDebug("Response for {Method} could not be sent (connection {Id} closed)",
+                request.Method, connection.ConnectionId);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error dispatching {Method} from connection {Id}", request.Method, connection.ConnectionId);
-            var errorResponse = ResponseFrame.Failure(request.Id, "internal_error", ex.Message);
-            await connection.SendResponseAsync(errorResponse, ct);
+            try
+            {
+                var errorResponse = ResponseFrame.Failure(request.Id, "internal_error", ex.Message);
+                await connection.SendResponseAsync(errorResponse, ct);
+            }
+            catch { /* connection may be dead */ }
+        }
+    }
+
+    private static bool IsLongRunning(string method) => method is "agent.generate_avatar";
+
+    /// <summary>
+    /// Resize and compress an image to JPEG for avatar use.
+    /// </summary>
+    private static byte[] CompressAvatar(byte[] imageBytes, int maxSize, int quality)
+    {
+        using var original = SkiaSharp.SKBitmap.Decode(imageBytes);
+        if (original is null)
+            return imageBytes;
+
+        var scale = Math.Min((float)maxSize / original.Width, (float)maxSize / original.Height);
+        if (scale >= 1f)
+        {
+            // Already small enough, just re-encode as JPEG
+            using var img = SkiaSharp.SKImage.FromBitmap(original);
+            return img.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, quality).ToArray();
+        }
+
+        var newWidth = (int)(original.Width * scale);
+        var newHeight = (int)(original.Height * scale);
+        using var resized = original.Resize(new SkiaSharp.SKImageInfo(newWidth, newHeight), SkiaSharp.SKSamplingOptions.Default);
+        using var image = SkiaSharp.SKImage.FromBitmap(resized ?? original);
+        return image.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, quality).ToArray();
+    }
+
+    /// <summary>
+    /// Dispatches a long-running request independently of the read loop.
+    /// Uses its own cancellation and handles send failures gracefully
+    /// (the connection may have died while the work was in progress).
+    /// </summary>
+    private async Task DispatchLongRunningAsync(MobileConnection connection, RequestFrame request)
+    {
+        try
+        {
+            await DispatchRequestAsync(connection, request, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or WebSocketException)
+        {
+            _logger.LogDebug("Long-running {Method} response could not be sent (connection gone)",
+                request.Method);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Long-running {Method} failed", request.Method);
         }
     }
 
@@ -251,6 +317,7 @@ public sealed class MobileTransport(
                 last_message = lastMessage,
                 last_activity = lastActivity,
                 unread_count = unreadCount,
+                avatar = def.AvatarData is not null ? Convert.ToBase64String(def.AvatarData) : null,
             });
         }
 
@@ -610,6 +677,7 @@ public sealed class MobileTransport(
             allowed_chats = config.AllowChat ?? [],
             prompt = config.Prompt ?? "",
             agent_models = agentModels,
+            has_avatar = _agents[agentName].AvatarData is not null,
         }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
@@ -672,6 +740,23 @@ public sealed class MobileTransport(
         await File.WriteAllTextAsync(tempPath, markdown, ct);
         File.Move(tempPath, agentFile, overwrite: true);
 
+        // Handle avatar upload or removal
+        var agentDir = Path.GetDirectoryName(agentFile)!;
+        if (p.TryGetProperty("avatar", out var avatarProp) && avatarProp.ValueKind == JsonValueKind.String)
+        {
+            var avatarBytes = Convert.FromBase64String(avatarProp.GetString()!);
+            await File.WriteAllBytesAsync(Path.Combine(agentDir, "avatar.jpg"), avatarBytes, ct);
+            var pngPath = Path.Combine(agentDir, "avatar.png");
+            if (File.Exists(pngPath)) File.Delete(pngPath);
+        }
+        else if (p.TryGetProperty("avatar_remove", out var removeProp) && removeProp.ValueKind == JsonValueKind.True)
+        {
+            var jpgPath = Path.Combine(agentDir, "avatar.jpg");
+            var pngPath = Path.Combine(agentDir, "avatar.png");
+            if (File.Exists(jpgPath)) File.Delete(jpgPath);
+            if (File.Exists(pngPath)) File.Delete(pngPath);
+        }
+
         string? warning = null;
         if (AgentReloadFunc is not null)
         {
@@ -688,6 +773,45 @@ public sealed class MobileTransport(
 
         var payload = JsonSerializer.SerializeToElement(new { ok = true, warning }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleAgentGenerateAvatarAsync(RequestFrame request, CancellationToken ct)
+    {
+        if (GenerateAvatarFunc is null)
+            return ResponseFrame.Failure(request.Id, "not_available", "Avatar generation not available.");
+
+        var agentName = GetStringParam(request.Params, "agent");
+        if (agentName is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
+
+        if (!_agents.TryGetValue(agentName, out var def))
+            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
+
+        var prompt = GetStringParam(request.Params, "prompt");
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            var displayName = char.ToUpper(agentName[0]) + agentName[1..];
+            var desc = def.Description ?? "a helpful assistant";
+            prompt = $"A profile avatar for an AI assistant named {displayName}. {desc}. Clean, modern, circular icon style.";
+        }
+
+        try
+        {
+            var imageBytes = await GenerateAvatarFunc(prompt, ct);
+            if (imageBytes is null)
+                return ResponseFrame.Failure(request.Id, "generation_failed", "No image was returned.");
+
+            imageBytes = CompressAvatar(imageBytes, 512, 80);
+
+            var payload = JsonSerializer.SerializeToElement(
+                new { image = Convert.ToBase64String(imageBytes) }, JsonOptions);
+            return ResponseFrame.Success(request.Id, payload);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Avatar generation failed");
+            return ResponseFrame.Failure(request.Id, "generation_failed", ex.Message);
+        }
     }
 
     private async Task<ResponseFrame> HandleModelsListAsync(RequestFrame request, CancellationToken ct)

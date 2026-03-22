@@ -39,4 +39,10 @@ public interface IModelProvider
     /// Stream a completion, returning an event stream that emits events as content is generated.
     /// </summary>
     CompletionEventStream GetCompletions(Model model, CompletionContext completionContext, CompletionOptions? options = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Generates an image from a text prompt. Returns raw image bytes, or null if unsupported.
+    /// </summary>
+    Task<byte[]?> GenerateImageAsync(string modelId, string prompt, CancellationToken cancellationToken = default) =>
+        Task.FromResult<byte[]?>(null);
 }

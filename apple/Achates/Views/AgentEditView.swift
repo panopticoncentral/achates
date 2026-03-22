@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct AgentEditView: View {
     @Environment(AppState.self) private var appState
@@ -11,6 +12,10 @@ struct AgentEditView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var showError = false
+    @State private var photoItem: PhotosPickerItem?
+    @State private var isGenerating = false
+    @State private var showGeneratePrompt = false
+    @State private var generatePrompt = ""
 
     private var hasChanges: Bool {
         guard let config, let original else { return false }
@@ -52,6 +57,15 @@ struct AgentEditView: View {
         } message: {
             Text(errorMessage ?? "Unknown error")
         }
+        .alert("Generate Avatar", isPresented: $showGeneratePrompt) {
+            TextField("Describe the avatar", text: $generatePrompt, axis: .vertical)
+            Button("Generate") {
+                Task { await generateAvatar() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Describe the avatar you'd like to generate.")
+        }
         .task { await load() }
     }
 
@@ -59,6 +73,48 @@ struct AgentEditView: View {
     private var formContent: some View {
         Form {
             Section("Identity") {
+                HStack {
+                    Spacer()
+                    PhotosPicker(selection: $photoItem, matching: .images) {
+                        avatarPreview
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                }
+                .listRowBackground(Color.clear)
+                .onChange(of: photoItem) { _, item in
+                    Task {
+                        guard let item else { return }
+                        if let data = try? await item.loadTransferable(type: Data.self) {
+                            config?.newAvatarData = resizeAvatar(data)
+                            config?.removeAvatar = false
+                        }
+                    }
+                }
+
+                if config?.hasAvatar == true || config?.newAvatarData != nil {
+                    Button("Remove Photo", role: .destructive) {
+                        config?.newAvatarData = nil
+                        config?.removeAvatar = true
+                        photoItem = nil
+                    }
+                }
+
+                Button {
+                    generatePrompt = "A profile avatar for an AI assistant named \(agent.name.capitalized). \(config?.description ?? "A helpful assistant"). Clean, modern, circular icon style."
+                    showGeneratePrompt = true
+                } label: {
+                    HStack {
+                        if isGenerating {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "sparkles")
+                        }
+                        Text("Generate with AI")
+                    }
+                }
+                .disabled(isGenerating)
+
                 HStack {
                     Text("Description")
                     Spacer()
@@ -206,6 +262,74 @@ struct AgentEditView: View {
         )
     }
 
+    @ViewBuilder
+    private var avatarPreview: some View {
+        let size: CGFloat = 80
+        if let data = config?.newAvatarData {
+            #if os(macOS)
+            if let img = NSImage(data: data) {
+                Image(nsImage: img)
+                    .resizable().scaledToFill()
+                    .frame(width: size, height: size).clipShape(Circle())
+            }
+            #else
+            if let img = UIImage(data: data) {
+                Image(uiImage: img)
+                    .resizable().scaledToFill()
+                    .frame(width: size, height: size).clipShape(Circle())
+            }
+            #endif
+        } else if config?.hasAvatar == true, !config!.removeAvatar {
+            AgentAvatar(agent: agent, size: size)
+        } else {
+            ZStack {
+                Circle()
+                    .fill(.blue.gradient)
+                    .frame(width: size, height: size)
+                Text(agent.initials)
+                    .font(.system(size: size * 0.4, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .overlay(alignment: .bottom) {
+                Text("Edit")
+                    .font(.caption2)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(.black.opacity(0.5), in: Capsule())
+                    .offset(y: -4)
+            }
+        }
+    }
+
+    private func resizeAvatar(_ data: Data) -> Data? {
+        #if os(macOS)
+        guard let image = NSImage(data: data) else { return nil }
+        let maxSize: CGFloat = 256
+        let size = image.size
+        let scale = min(maxSize / size.width, maxSize / size.height, 1.0)
+        let newSize = NSSize(width: size.width * scale, height: size.height * scale)
+        let newImage = NSImage(size: newSize)
+        newImage.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: newSize))
+        newImage.unlockFocus()
+        guard let tiff = newImage.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff) else { return nil }
+        return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.8])
+        #else
+        guard let image = UIImage(data: data) else { return nil }
+        let maxSize: CGFloat = 256
+        let size = image.size
+        let scale = min(maxSize / size.width, maxSize / size.height, 1.0)
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        let resized = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+        return resized.jpegData(compressionQuality: 0.8)
+        #endif
+    }
+
     private func shortModelName(_ id: String) -> String {
         if let slash = id.lastIndex(of: "/") {
             return String(id[id.index(after: slash)...])
@@ -237,5 +361,18 @@ struct AgentEditView: View {
             showError = true
         }
         isSaving = false
+    }
+
+    private func generateAvatar() async {
+        isGenerating = true
+        do {
+            let data = try await appState.generateAvatar(agent, prompt: generatePrompt)
+            config?.newAvatarData = data
+            config?.removeAvatar = false
+        } catch {
+            errorMessage = error.localizedDescription
+            showError = true
+        }
+        isGenerating = false
     }
 }

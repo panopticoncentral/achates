@@ -33,8 +33,14 @@ public sealed class ToolsConfig
     public NotesConfig? Notes { get; set; }
     public WebSearchConfig? WebSearch { get; set; }
     public TranscribeConfig? Transcribe { get; set; }
+    public AvatarConfig? Avatar { get; set; }
     public Dictionary<string, GraphConfig>? Graph { get; set; }
     public WithingsConfig? Withings { get; set; }
+}
+
+public sealed class AvatarConfig
+{
+    public string? Model { get; set; }
 }
 
 public sealed class TranscribeConfig

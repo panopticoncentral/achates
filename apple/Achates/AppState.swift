@@ -254,6 +254,20 @@ final class AppState {
         await refreshAgents()
     }
 
+    func generateAvatar(_ agent: Agent, prompt: String) async throws -> Data {
+        guard let payload = try await client?.sendRequest(method: "agent.generate_avatar",
+            params: ["agent": .string(agent.id), "prompt": .string(prompt)],
+            timeout: .seconds(120)
+        ) else {
+            throw AgentEditError.notConnected
+        }
+        guard let b64 = payload["image"]?.stringValue,
+              let data = Data(base64Encoded: b64) else {
+            throw AgentEditError.reloadWarning("No image data returned")
+        }
+        return data
+    }
+
     func loadModels() async throws -> [ModelInfo] {
         guard let payload = try await client?.sendRequest(method: "models.list") else {
             throw AgentEditError.notConnected

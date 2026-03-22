@@ -83,19 +83,44 @@ struct AgentListView: View {
     #endif
 }
 
+struct AgentAvatar: View {
+    let agent: Agent
+    var size: CGFloat = 60
+
+    var body: some View {
+        if let avatarImage = agent.avatarImage {
+            #if os(macOS)
+            Image(nsImage: avatarImage)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+            #else
+            Image(uiImage: avatarImage)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+            #endif
+        } else {
+            ZStack {
+                Circle()
+                    .fill(.blue.gradient)
+                    .frame(width: size, height: size)
+                Text(agent.initials)
+                    .font(.system(size: size * 0.4, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+        }
+    }
+}
+
 private struct AgentRow: View {
     let agent: Agent
 
     var body: some View {
         HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(.blue.gradient)
-                    .frame(width: 60, height: 60)
-                Text(agent.initials)
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
+            AgentAvatar(agent: agent)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {

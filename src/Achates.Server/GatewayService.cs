@@ -84,6 +84,7 @@ public sealed class GatewayService(
         _mobileTransport = new MobileTransport(agents, _mobileSessionStore, loggerFactory);
         _mobileTransport.AgentReloadFunc = ReloadAgentAsync;
         _mobileTransport.ModelsListFunc = GetAllModelsAsync;
+        _mobileTransport.GenerateAvatarFunc = GenerateAvatarAsync;
         _deviceBridge.SetTransport(_mobileTransport);
 
         // Start cron service for agents that have scheduled tasks enabled
@@ -117,6 +118,25 @@ public sealed class GatewayService(
         provider.HttpClient = httpClientFactory.CreateClient("achates");
 
         return await provider.GetModelsAsync(ct);
+    }
+
+    public async Task<byte[]?> GenerateAvatarAsync(string prompt, CancellationToken ct)
+    {
+        var providerId = config.Provider?.Name
+            ?? throw new InvalidOperationException("No provider specified.");
+
+        var provider = ModelProviders.Create(providerId)
+            ?? throw new InvalidOperationException($"Unknown provider: {providerId}");
+
+        var apiKey = config.Provider?.ApiKey
+            ?? Environment.GetEnvironmentVariable(provider.EnvironmentKey)
+            ?? throw new InvalidOperationException("API key not found.");
+
+        provider.Key = apiKey;
+        provider.HttpClient = httpClientFactory.CreateClient("achates");
+
+        var modelId = config.Tools?.Avatar?.Model ?? "google/gemini-2.5-flash-image";
+        return await provider.GenerateImageAsync(modelId, prompt, ct);
     }
 
     public async Task<AgentDefinition> ReloadAgentAsync(string name, CancellationToken ct)
@@ -187,6 +207,12 @@ public sealed class GatewayService(
         var cronStorePath = Path.Combine(achatesHome, "agents", name, "cron.json");
         var cronStore = hasTools.Contains("cron") ? new CronStore(cronStorePath) : null;
 
+        var agentDir = Path.Combine(achatesHome, "agents", name);
+        var avatarPath = Path.Combine(agentDir, "avatar.jpg");
+        if (!File.Exists(avatarPath))
+            avatarPath = Path.Combine(agentDir, "avatar.png");
+        var avatarData = File.Exists(avatarPath) ? await File.ReadAllBytesAsync(avatarPath, ct) : null;
+
         var agentDef = new AgentDefinition
         {
             Model = model,
@@ -199,6 +225,7 @@ public sealed class GatewayService(
             CostLedger = costLedger,
             CronStore = cronStore,
             GraphClients = graphClients,
+            AvatarData = avatarData,
         };
 
         logger.LogInformation("Agent '{Name}' resolved with model {Model}", name, model.Id);

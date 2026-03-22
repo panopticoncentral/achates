@@ -61,7 +61,7 @@ final class WebSocketClient {
         appState.connectionStatus = .disconnected
     }
 
-    func sendRequest(method: String, params: [String: JSONValue]? = nil) async throws -> [String: JSONValue]? {
+    func sendRequest(method: String, params: [String: JSONValue]? = nil, timeout: Duration = .seconds(30)) async throws -> [String: JSONValue]? {
         guard let task = webSocketHolder.get() else {
             throw FrameError.notConnected
         }
@@ -86,7 +86,7 @@ final class WebSocketClient {
 
             Task { [weak self] in
                 guard let self else { return }
-                try? await Task.sleep(for: .seconds(30))
+                try? await Task.sleep(for: timeout)
                 if let cont = self.pendingRequests.remove(frameId) {
                     cont.resume(throwing: FrameError.timeout)
                 }

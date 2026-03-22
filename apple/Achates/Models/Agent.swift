@@ -1,4 +1,8 @@
-import Foundation
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 struct Agent: Identifiable, Sendable, Equatable {
     let id: String
@@ -8,6 +12,19 @@ struct Agent: Identifiable, Sendable, Equatable {
     let lastMessage: String?
     let lastActivity: Date?
     var unreadCount: Int
+    let avatarData: Data?
+
+    #if os(macOS)
+    var avatarImage: NSImage? {
+        guard let avatarData else { return nil }
+        return NSImage(data: avatarData)
+    }
+    #else
+    var avatarImage: UIImage? {
+        guard let avatarData else { return nil }
+        return UIImage(data: avatarData)
+    }
+    #endif
 
     var initials: String {
         let parts = name.split(separator: " ")
@@ -37,9 +54,14 @@ struct Agent: Identifiable, Sendable, Equatable {
                 ?? ISO8601DateFormatter().date(from: activityStr)
         }
 
+        var avatarData: Data?
+        if let b64 = payload["avatar"]?.stringValue {
+            avatarData = Data(base64Encoded: b64)
+        }
+
         return Agent(id: name, name: name, description: description, tools: tools,
                      lastMessage: lastMessage, lastActivity: lastActivity,
-                     unreadCount: unreadCount)
+                     unreadCount: unreadCount, avatarData: avatarData)
     }
 
     static func fromList(_ payload: [String: JSONValue]) -> [Agent] {
