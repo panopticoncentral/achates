@@ -123,6 +123,14 @@ public sealed class GatewayService(
 
     public async Task<byte[]?> GenerateAvatarAsync(string prompt, byte[]? referenceImage, CancellationToken ct)
     {
+        var modelId = config.Tools?.Avatar?.Model ?? "google/gemini-2.5-flash-image";
+        var images = referenceImage is not null ? new[] { referenceImage } : null;
+        return await GenerateImageAsync(modelId, prompt, images, ct);
+    }
+
+    public async Task<byte[]?> GenerateImageAsync(string modelId, string prompt,
+        IReadOnlyList<byte[]>? referenceImages, CancellationToken ct)
+    {
         var providerId = config.Provider?.Name
             ?? throw new InvalidOperationException("No provider specified.");
 
@@ -136,8 +144,7 @@ public sealed class GatewayService(
         provider.Key = apiKey;
         provider.HttpClient = httpClientFactory.CreateClient("achates");
 
-        var modelId = config.Tools?.Avatar?.Model ?? "google/gemini-2.5-flash-image";
-        return await provider.GenerateImageAsync(modelId, prompt, referenceImage, ct);
+        return await provider.GenerateImageAsync(modelId, prompt, referenceImages, ct);
     }
 
     public async Task RenameAgentAsync(string oldName, string newName, string displayName, CancellationToken ct)
@@ -268,8 +275,9 @@ public sealed class GatewayService(
             logger.LogInformation("Transcribe model resolved: {Model}", transcribeModel.Id);
         }
 
+        var agentDir = Path.Combine(achatesHome, "agents", name);
         var tools = ResolveTools(agentConfig, toolsConfig, model, graphClients, withingsClient,
-            transcribeModel);
+            name, agentDir, transcribeModel);
         var hasTools = agentConfig.Tools ?? [];
         var graphAccountNames = graphClients.Keys.ToList();
         var systemPrompt = SystemPrompt.Build(agentConfig.Description, prompt, tools,
@@ -294,7 +302,6 @@ public sealed class GatewayService(
         var cronStorePath = Path.Combine(achatesHome, "agents", name, "cron.json");
         var cronStore = hasTools.Contains("cron") ? new CronStore(cronStorePath) : null;
 
-        var agentDir = Path.Combine(achatesHome, "agents", name);
         var avatarPath = Path.Combine(agentDir, "avatar.jpg");
         if (!File.Exists(avatarPath))
             avatarPath = Path.Combine(agentDir, "avatar.png");
@@ -335,7 +342,7 @@ public sealed class GatewayService(
 
     private IReadOnlyList<AgentTool> ResolveTools(AgentConfig agentConfig, ToolsConfig? toolsConfig,
         Model model, IReadOnlyDictionary<string, GraphClient> graphClients, WithingsClient? withingsClient,
-        Model? transcribeModel = null)
+        string agentName, string agentDir, Model? transcribeModel = null)
     {
         if (!model.Parameters.HasFlag(ModelParameters.Tools))
             return [];
@@ -400,6 +407,12 @@ public sealed class GatewayService(
                     break;
                 case "camera":
                     tools.Add(new CameraTool(_deviceBridge));
+                    break;
+                case "image":
+                    tools.Add(new ImageTool(GenerateImageAsync));
+                    break;
+                case "profile":
+                    tools.Add(new ProfileTool(agentDir, ct => ReloadAgentAsync(agentName, ct)));
                     break;
                 default:
                     throw new InvalidOperationException($"Unknown tool '{toolName}'.");

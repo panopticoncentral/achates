@@ -9,6 +9,7 @@ using Achates.Agent.Tools;
 using Achates.Providers.Completions;
 using Achates.Providers.Completions.Content;
 using Achates.Providers.Completions.Events;
+using Achates.Providers.Models;
 using Achates.Server.Cron;
 using Achates.Server.Tools;
 using Achates.Server;
@@ -906,11 +907,24 @@ public sealed class MobileTransport(
                 id = m.Id,
                 name = m.Name,
                 context_window = m.ContextWindow,
+                input = FormatModalities(m.Input),
+                output = FormatModalities(m.Output),
             }).ToList();
         }
 
         var payload = JsonSerializer.SerializeToElement(new { models = _modelsCache }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private static string[] FormatModalities(ModelModalities m)
+    {
+        var list = new List<string> { "text" };
+        if (m.HasFlag(ModelModalities.Image)) list.Add("image");
+        if (m.HasFlag(ModelModalities.File)) list.Add("file");
+        if (m.HasFlag(ModelModalities.Audio)) list.Add("audio");
+        if (m.HasFlag(ModelModalities.Video)) list.Add("video");
+        if (m.HasFlag(ModelModalities.Embeddings)) list.Add("embeddings");
+        return [.. list];
     }
 
     private async Task StreamAgentResponseAsync(

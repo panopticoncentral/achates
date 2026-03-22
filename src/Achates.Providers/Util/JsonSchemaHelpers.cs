@@ -70,6 +70,21 @@ public static class JsonSchemaHelpers
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
+    public static JsonElement ArraySchema(JsonElement items, string? description = null)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new Utf8JsonWriter(stream);
+        writer.WriteStartObject();
+        writer.WriteString("type", "array");
+        if (description is not null)
+            writer.WriteString("description", description);
+        writer.WritePropertyName("items");
+        items.WriteTo(writer);
+        writer.WriteEndObject();
+        writer.Flush();
+        return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
+    }
+
     public static JsonElement ObjectSchema(
         Dictionary<string, JsonElement> properties,
         IReadOnlyList<string>? required = null,

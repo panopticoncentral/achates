@@ -41,9 +41,9 @@ public interface IModelProvider
     CompletionEventStream GetCompletions(Model model, CompletionContext completionContext, CompletionOptions? options = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Generates an image from a text prompt, optionally using a reference image for refinement.
+    /// Generates an image from a text prompt, optionally using reference images for refinement.
     /// Returns raw image bytes, or null if unsupported.
     /// </summary>
-    Task<byte[]?> GenerateImageAsync(string modelId, string prompt, byte[]? referenceImage = null, CancellationToken cancellationToken = default) =>
+    Task<byte[]?> GenerateImageAsync(string modelId, string prompt, IReadOnlyList<byte[]>? referenceImages = null, CancellationToken cancellationToken = default) =>
         Task.FromResult<byte[]?>(null);
 }

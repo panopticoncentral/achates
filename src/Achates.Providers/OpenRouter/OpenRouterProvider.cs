@@ -51,18 +51,16 @@ internal sealed class OpenRouterProvider : IModelProvider
     }
 
     public async Task<byte[]?> GenerateImageAsync(string modelId, string prompt,
-        byte[]? referenceImage = null, CancellationToken cancellationToken = default)
+        IReadOnlyList<byte[]>? referenceImages = null, CancellationToken cancellationToken = default)
     {
         var client = new OpenRouterClient(HttpClient, Key);
 
         JsonElement content;
-        if (referenceImage is not null)
+        if (referenceImages is { Count: > 0 })
         {
-            var parts = new object[]
-            {
-                new { type = "text", text = prompt },
-                new { type = "image_url", image_url = new { url = $"data:image/jpeg;base64,{Convert.ToBase64String(referenceImage)}" } },
-            };
+            var parts = new List<object> { new { type = "text", text = prompt } };
+            foreach (var img in referenceImages)
+                parts.Add(new { type = "image_url", image_url = new { url = $"data:image/jpeg;base64,{Convert.ToBase64String(img)}" } });
             content = JsonSerializer.SerializeToElement(parts);
         }
         else
