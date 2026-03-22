@@ -2,6 +2,12 @@ import SwiftUI
 
 struct AgentListView: View {
     @Environment(AppState.self) private var appState
+    @State private var searchText = ""
+
+    private var filteredAgents: [Agent] {
+        if searchText.isEmpty { return appState.agents }
+        return appState.agents.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
 
     var body: some View {
         Group {
@@ -32,15 +38,18 @@ struct AgentListView: View {
                 #if os(macOS)
                 agentListMac
                 #else
-                List(appState.agents) { agent in
+                List(filteredAgents) { agent in
                     NavigationLink(value: agent) {
                         AgentRow(agent: agent)
                     }
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                 }
+                .listStyle(.plain)
+                .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search")
                 #endif
             }
         }
-        .navigationTitle("Agents")
+        .navigationTitle("Chats")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
         #endif
@@ -119,36 +128,38 @@ private struct AgentRow: View {
     let agent: Agent
 
     var body: some View {
-        HStack(spacing: 14) {
-            AgentAvatar(agent: agent)
+        HStack(spacing: 12) {
+            AgentAvatar(agent: agent, size: 56)
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline) {
                     Text(agent.name.capitalized)
-                        .font(.system(size: 17, weight: .bold))
-                    Spacer()
+                        .font(.system(size: 16, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
                     if let date = agent.lastActivity {
                         Text(formatTimestamp(date))
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-                    }
-                    if agent.unreadCount > 0 {
-                        Text("\(agent.unreadCount)")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(Color.blue, in: Capsule())
+                            .font(.system(size: 13))
+                            .foregroundStyle(agent.unreadCount > 0 ? .blue : .secondary)
                     }
                 }
 
-                Text(previewText)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(previewText)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    if agent.unreadCount > 0 {
+                        Spacer(minLength: 0)
+                        Circle()
+                            .fill(.blue)
+                            .frame(width: 12, height: 12)
+                    }
+                }
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
     }
 
     private var previewText: String {
@@ -172,7 +183,7 @@ private struct AgentRow: View {
         } else if let weekAgo = calendar.date(byAdding: .day, value: -6, to: calendar.startOfDay(for: Date())),
                   date >= weekAgo {
             let formatter = DateFormatter()
-            formatter.dateFormat = "EEEE"
+            formatter.dateFormat = "EEE"
             return formatter.string(from: date)
         } else {
             let formatter = DateFormatter()

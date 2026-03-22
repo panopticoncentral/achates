@@ -1,16 +1,36 @@
 import SwiftUI
 import MarkdownUI
 
+enum BubblePosition {
+    case alone, first, middle, last
+
+    var topPadding: CGFloat {
+        switch self {
+        case .alone, .first: return 8
+        case .middle, .last: return 2
+        }
+    }
+}
+
 struct MessageBubble: View {
     let message: ChatMessage
+    var position: BubblePosition = .alone
+    var agent: Agent? = nil
 
     var body: some View {
-        HStack(alignment: .top) {
-            if message.role == .user {
-                Spacer(minLength: 60)
+        HStack(alignment: .bottom, spacing: 6) {
+            if message.role == .assistant {
+                // Small avatar on last message of a group, invisible spacer otherwise
+                if showAvatar, let agent {
+                    AgentAvatar(agent: agent, size: 28)
+                } else {
+                    Color.clear.frame(width: 28, height: 28)
+                }
+            } else {
+                Spacer(minLength: 48)
             }
 
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
                 ForEach(message.blocks) { block in
                     blockView(block)
                 }
@@ -19,13 +39,18 @@ struct MessageBubble: View {
                     ProgressView()
                         .controlSize(.small)
                         .frame(height: 20)
+                        .padding(.leading, 4)
                 }
             }
 
             if message.role == .assistant {
-                Spacer(minLength: 60)
+                Spacer(minLength: 48)
             }
         }
+    }
+
+    private var showAvatar: Bool {
+        position == .last || position == .alone
     }
 
     @ViewBuilder
@@ -72,12 +97,52 @@ struct MessageBubble: View {
                                   : Color(.systemGray6))
                     )
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(message.role == .user ? Color.blue : Color(.systemGray5))
-            )
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(bubbleShape.fill(bubbleColor))
             .textSelection(.enabled)
+    }
+
+    private var bubbleColor: Color {
+        message.role == .user ? .blue : Color(.systemGray5)
+    }
+
+    /// Messenger-style rounded rect with variable corner radii for grouped bubbles.
+    private var bubbleShape: some Shape {
+        let isUser = message.role == .user
+        let large: CGFloat = 18
+        let small: CGFloat = 4
+
+        let topLeading: CGFloat
+        let topTrailing: CGFloat
+        let bottomLeading: CGFloat
+        let bottomTrailing: CGFloat
+
+        switch position {
+        case .alone:
+            topLeading = large; topTrailing = large
+            bottomLeading = large; bottomTrailing = large
+        case .first:
+            topLeading = large; topTrailing = large
+            bottomLeading = isUser ? large : small
+            bottomTrailing = isUser ? small : large
+        case .middle:
+            topLeading = isUser ? large : small
+            topTrailing = isUser ? small : large
+            bottomLeading = isUser ? large : small
+            bottomTrailing = isUser ? small : large
+        case .last:
+            topLeading = isUser ? large : small
+            topTrailing = isUser ? small : large
+            bottomLeading = large; bottomTrailing = large
+        }
+
+        return UnevenRoundedRectangle(
+            topLeadingRadius: topLeading,
+            bottomLeadingRadius: bottomLeading,
+            bottomTrailingRadius: bottomTrailing,
+            topTrailingRadius: topTrailing,
+            style: .continuous
+        )
     }
 }

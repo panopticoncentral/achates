@@ -8,7 +8,7 @@
         <div class="col-md-4">
             <div class="card">
                 <div class="card-body text-center">
-                    <h2 class="card-title">@agentNames.Count</h2>
+                    <h2 class="card-title">@agentDetails.Count</h2>
                     <p class="card-text text-muted">Agents</p>
                 </div>
             </div>
@@ -23,21 +23,38 @@
         </div>
     </div>
 
-    <h4 class="mb-3">Agents</h4>
-    <div class="row g-3 mb-4">
+    <div class="agent-list">
         @foreach (var agent in agentDetails)
         {
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">@agent.Name</h5>
-                        <p class="card-text text-muted mb-2" style="font-size: 0.85rem;">@agent.Model</p>
-                        <div>
-                            @foreach (var tool in agent.Tools)
-                            {
-                                <span class="badge bg-secondary me-1">@tool</span>
-                            }
-                        </div>
+            <div class="agent-row">
+                <div class="agent-avatar">
+                    @if (agent.AvatarDataUri is not null)
+                    {
+                        <img src="@agent.AvatarDataUri" alt="@agent.Name" />
+                    }
+                    else
+                    {
+                        <span>@agent.Initials</span>
+                    }
+                </div>
+                <div class="agent-info">
+                    <div class="agent-name-row">
+                        <span class="agent-name">@agent.Name</span>
+                        @if (agent.LastActive is not null)
+                        {
+                            <span class="agent-time">@FormatTime(agent.LastActive.Value)</span>
+                        }
+                    </div>
+                    @if (!string.IsNullOrEmpty(agent.Description))
+                    {
+                        <div class="agent-description">@agent.Description</div>
+                    }
+                    <div class="agent-meta">
+                        <span class="agent-model">@agent.ModelShort</span>
+                        @if (agent.Tools.Count > 0)
+                        {
+                            <span class="agent-tool-count">@agent.Tools.Count tools</span>
+                        }
                     </div>
                 </div>
             </div>
@@ -47,28 +64,66 @@
 
 @code {
     private List<SessionInfo> sessionFiles = [];
-    private List<string> agentNames = [];
     private List<AgentDetail> agentDetails = [];
 
     protected override void OnInitialized()
     {
         sessionFiles = Admin.GetSessionFiles();
-        agentNames = Admin.GetAgentNames().ToList();
+
+        var lastActiveByAgent = sessionFiles
+            .GroupBy(s => s.AgentName)
+            .ToDictionary(g => g.Key, g => g.Max(s => s.LastModified));
 
         agentDetails = Admin.GetAgents()
             .Select(a => new AgentDetail
             {
                 Name = a.Key,
+                Description = a.Value.Description,
                 Model = a.Value.Model.Id,
                 Tools = a.Value.Tools.Select(t => t.Name).ToList(),
+                AvatarDataUri = a.Value.AvatarData is { Length: > 0 } data
+                    ? $"data:image/jpeg;base64,{Convert.ToBase64String(data)}"
+                    : null,
+                LastActive = lastActiveByAgent.GetValueOrDefault(a.Key),
             })
+            .OrderByDescending(a => a.LastActive)
             .ToList();
+    }
+
+    private static string FormatTime(DateTime utc)
+    {
+        var local = utc.ToLocalTime();
+        var now = DateTime.Now;
+        if (local.Date == now.Date)
+            return local.ToString("h:mm tt");
+        if (local.Date == now.Date.AddDays(-1))
+            return "Yesterday";
+        if ((now - local).TotalDays < 7)
+            return local.ToString("ddd");
+        return local.ToString("MMM d");
     }
 
     private sealed class AgentDetail
     {
         public string Name { get; init; } = "";
+        public string? Description { get; init; }
         public string Model { get; init; } = "";
         public List<string> Tools { get; init; } = [];
+        public string? AvatarDataUri { get; init; }
+        public DateTime? LastActive { get; init; }
+
+        public string Initials => string.IsNullOrEmpty(Name) ? "?" :
+            string.Concat(Name.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Take(2).Select(w => char.ToUpper(w[0])));
+
+        public string ModelShort
+        {
+            get
+            {
+                var id = Model;
+                var slash = id.LastIndexOf('/');
+                return slash >= 0 ? id[(slash + 1)..] : id;
+            }
+        }
     }
 }

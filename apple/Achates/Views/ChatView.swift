@@ -10,7 +10,7 @@ struct ChatView: View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 12) {
+                    LazyVStack(spacing: 2) {
                         if appState.hasMoreHistory {
                             Button("Load earlier messages") {
                                 Task { await appState.loadMoreHistory() }
@@ -18,13 +18,17 @@ struct ChatView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(.top, 8)
+                            .padding(.bottom, 4)
                         }
 
-                        ForEach(appState.timeline) { item in
+                        let items = appState.timeline
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                             switch item {
                             case .message(let message):
-                                MessageBubble(message: message)
+                                let position = bubblePosition(for: index, in: items)
+                                MessageBubble(message: message, position: position, agent: agent)
                                     .id(item.id)
+                                    .padding(.top, position.topPadding)
                                     .contextMenu {
                                         Button("Start new conversation here") {
                                             Task { await appState.addBreak(afterMessage: message) }
@@ -36,10 +40,11 @@ struct ChatView: View {
                                     Task { await appState.removeBreak(segmentId: segmentId) }
                                 }
                                 .id(item.id)
+                                .padding(.vertical, 4)
                             }
                         }
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 8)
                     .padding(.vertical, 8)
                 }
                 .onChange(of: appState.timeline.last?.id) { _, _ in
@@ -56,38 +61,57 @@ struct ChatView: View {
                 }
             }
 
-            Divider()
-
             ComposerView(speechService: speechService) { text in
                 Task { await appState.sendMessage(text) }
             } onCancel: {
                 Task { await appState.cancelStreaming() }
             }
         }
-        .navigationTitle(agent.name.capitalized)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
+            #if os(iOS)
+            ToolbarItem(placement: .principal) {
+                Button {
+                    showAgentEditor = true
+                } label: {
+                    HStack(spacing: 8) {
+                        AgentAvatar(agent: agent, size: 32)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(agent.name.capitalized)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.primary)
+                            Text(connectionLabel)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            #else
             ToolbarItem(placement: .automatic) {
-                HStack(spacing: 12) {
-                    Menu {
-                        Button {
-                            showAgentEditor = true
-                        } label: {
-                            Label("Edit Agent", systemImage: "pencil")
-                        }
+                Text(agent.name.capitalized)
+                    .font(.headline)
+            }
+            #endif
 
-                        Button(role: .destructive) {
-                            Task { await appState.clearTimeline() }
-                        } label: {
-                            Label("Clear All", systemImage: "trash")
-                        }
+            ToolbarItem(placement: .automatic) {
+                Menu {
+                    Button {
+                        showAgentEditor = true
                     } label: {
-                        Image(systemName: "ellipsis.circle")
+                        Label("Edit Agent", systemImage: "pencil")
                     }
 
-                    connectionStatusIndicator
+                    Button(role: .destructive) {
+                        Task { await appState.clearTimeline() }
+                    } label: {
+                        Label("Clear All", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
             }
         }
@@ -108,21 +132,35 @@ struct ChatView: View {
         return msg.textContent
     }
 
-    @ViewBuilder
-    private var connectionStatusIndicator: some View {
+    private var connectionLabel: String {
         switch appState.connectionStatus {
-        case .connected:
-            Circle()
-                .fill(.green)
-                .frame(width: 8, height: 8)
-        case .connecting, .reconnecting:
-            ProgressView()
-                .controlSize(.mini)
-        case .disconnected:
-            Circle()
-                .fill(.red)
-                .frame(width: 8, height: 8)
+        case .connected: return "Active now"
+        case .connecting, .reconnecting: return "Connecting..."
+        case .disconnected: return "Offline"
         }
+    }
+
+    /// Compute bubble grouping position for consecutive same-role messages.
+    private func bubblePosition(for index: Int, in items: [TimelineItem]) -> BubblePosition {
+        let current: MessageRole
+        if case .message(let msg) = items[index] { current = msg.role } else { return .alone }
+
+        let prevRole: MessageRole? = {
+            guard index > 0, case .message(let msg) = items[index - 1] else { return nil }
+            return msg.role
+        }()
+        let nextRole: MessageRole? = {
+            guard index + 1 < items.count, case .message(let msg) = items[index + 1] else { return nil }
+            return msg.role
+        }()
+
+        let sameAsPrev = prevRole == current
+        let sameAsNext = nextRole == current
+
+        if sameAsPrev && sameAsNext { return .middle }
+        if sameAsPrev { return .last }
+        if sameAsNext { return .first }
+        return .alone
     }
 }
 
