@@ -8,6 +8,11 @@ public sealed class AchatesConfig
 
 public sealed class AgentConfig
 {
+    /// <summary>
+    /// Display name from the H1 title of AGENT.md. Set by <see cref="AgentLoader"/>.
+    /// </summary>
+    public string? Title { get; set; }
+
     public string? Description { get; set; }
     public string? Model { get; set; }
     public string? Provider { get; set; }

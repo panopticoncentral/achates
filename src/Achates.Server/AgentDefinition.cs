@@ -17,6 +17,7 @@ public sealed record AgentDefinition
     public required IReadOnlyList<AgentTool> Tools { get; init; }
     public required CompletionOptions? CompletionOptions { get; init; }
     public required string MemoryPath { get; init; }
+    public string? DisplayName { get; init; }
     public string? Description { get; init; }
     public string? TodoPath { get; init; }
     public CostLedger? CostLedger { get; init; }

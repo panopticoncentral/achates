@@ -171,6 +171,10 @@ public static class AgentLoader
 
         var config = new AgentConfig();
 
+        // Title from the H1 heading
+        if (sections.TryGetValue("_title", out var title))
+            config.Title = title;
+
         // Description is the body text under the H1 (before any H2)
         if (sections.TryGetValue("", out var description))
             config.Description = description.Trim();
@@ -201,7 +205,8 @@ public static class AgentLoader
         {
             if (line.StartsWith("# ") && currentKey is null)
             {
-                // H1 — start collecting description
+                // H1 — capture title and start collecting description
+                sections["_title"] = line[2..].Trim();
                 currentKey = "";
                 continue;
             }

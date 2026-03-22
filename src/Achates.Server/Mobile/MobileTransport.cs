@@ -340,6 +340,7 @@ public sealed class MobileTransport(
             agentList.Add(new
             {
                 name,
+                display_name = def.DisplayName ?? name,
                 description = def.Description ?? "",
                 model = def.Model.Id,
                 tools = def.Tools.Select(t => t.Name).ToArray(),
@@ -697,6 +698,7 @@ public sealed class MobileTransport(
 
         var payload = JsonSerializer.SerializeToElement(new
         {
+            display_name = config.Title ?? agentName,
             description = config.Description ?? "",
             model = config.Model ?? "",
             tools = config.Tools ?? [],
