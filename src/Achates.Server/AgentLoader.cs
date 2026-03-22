@@ -140,6 +140,29 @@ public static class AgentLoader
             """.Replace("            ", ""));
     }
 
+    public static string? NormalizeId(string displayName)
+    {
+        var sb = new System.Text.StringBuilder(displayName.Length);
+        foreach (var c in displayName.ToLowerInvariant())
+        {
+            if (c is >= 'a' and <= 'z' or >= '0' and <= '9')
+                sb.Append(c);
+            else if (c is ' ' or '-')
+                sb.Append('-');
+        }
+
+        var result = sb.ToString();
+        while (result.Contains("--"))
+            result = result.Replace("--", "-");
+
+        result = result.Trim('-');
+
+        if (result.Length > 64)
+            result = result[..64].TrimEnd('-');
+
+        return result.Length == 0 ? null : result;
+    }
+
     internal static AgentConfig? Parse(string content)
     {
         var sections = ParseSections(content);
