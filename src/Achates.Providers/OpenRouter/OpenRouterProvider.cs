@@ -51,9 +51,24 @@ internal sealed class OpenRouterProvider : IModelProvider
     }
 
     public async Task<byte[]?> GenerateImageAsync(string modelId, string prompt,
-        CancellationToken cancellationToken = default)
+        byte[]? referenceImage = null, CancellationToken cancellationToken = default)
     {
         var client = new OpenRouterClient(HttpClient, Key);
+
+        JsonElement content;
+        if (referenceImage is not null)
+        {
+            var parts = new object[]
+            {
+                new { type = "text", text = prompt },
+                new { type = "image_url", image_url = new { url = $"data:image/jpeg;base64,{Convert.ToBase64String(referenceImage)}" } },
+            };
+            content = JsonSerializer.SerializeToElement(parts);
+        }
+        else
+        {
+            content = JsonSerializer.SerializeToElement(prompt);
+        }
 
         var request = new OpenRouterChatCompletionRequest
         {
@@ -63,7 +78,7 @@ internal sealed class OpenRouterProvider : IModelProvider
                 new OpenRouterChatMessage
                 {
                     Role = "user",
-                    Content = JsonSerializer.SerializeToElement(prompt),
+                    Content = content,
                 },
             ],
             Modalities = ["image"],

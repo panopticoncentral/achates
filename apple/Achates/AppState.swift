@@ -254,9 +254,16 @@ final class AppState {
         await refreshAgents()
     }
 
-    func generateAvatar(_ agent: Agent, prompt: String) async throws -> Data {
+    func generateAvatar(_ agent: Agent, prompt: String, referenceImage: Data? = nil) async throws -> Data {
+        var params: [String: JSONValue] = [
+            "agent": .string(agent.id),
+            "prompt": .string(prompt),
+        ]
+        if let imageData = referenceImage {
+            params["image"] = .string(imageData.base64EncodedString())
+        }
         guard let payload = try await client?.sendRequest(method: "agent.generate_avatar",
-            params: ["agent": .string(agent.id), "prompt": .string(prompt)],
+            params: params,
             timeout: .seconds(120)
         ) else {
             throw AgentEditError.notConnected

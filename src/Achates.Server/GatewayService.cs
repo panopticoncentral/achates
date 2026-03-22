@@ -120,7 +120,7 @@ public sealed class GatewayService(
         return await provider.GetModelsAsync(ct);
     }
 
-    public async Task<byte[]?> GenerateAvatarAsync(string prompt, CancellationToken ct)
+    public async Task<byte[]?> GenerateAvatarAsync(string prompt, byte[]? referenceImage, CancellationToken ct)
     {
         var providerId = config.Provider?.Name
             ?? throw new InvalidOperationException("No provider specified.");
@@ -136,7 +136,7 @@ public sealed class GatewayService(
         provider.HttpClient = httpClientFactory.CreateClient("achates");
 
         var modelId = config.Tools?.Avatar?.Model ?? "google/gemini-2.5-flash-image";
-        return await provider.GenerateImageAsync(modelId, prompt, ct);
+        return await provider.GenerateImageAsync(modelId, prompt, referenceImage, ct);
     }
 
     public async Task<AgentDefinition> ReloadAgentAsync(string name, CancellationToken ct)

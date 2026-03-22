@@ -51,7 +51,7 @@ public sealed class MobileTransport(
     /// <summary>
     /// Delegate to generate an avatar image from a prompt. Set by GatewayService after construction.
     /// </summary>
-    public Func<string, CancellationToken, Task<byte[]?>>? GenerateAvatarFunc { get; set; }
+    public Func<string, byte[]?, CancellationToken, Task<byte[]?>>? GenerateAvatarFunc { get; set; }
 
     /// <summary>
     /// Replace an agent definition and evict any cached runtimes for that agent.
@@ -795,9 +795,12 @@ public sealed class MobileTransport(
             prompt = $"A profile avatar for an AI assistant named {displayName}. {desc}. Clean, modern, circular icon style.";
         }
 
+        var imageBase64 = GetStringParam(request.Params, "image");
+        byte[]? referenceImage = imageBase64 is not null ? Convert.FromBase64String(imageBase64) : null;
+
         try
         {
-            var imageBytes = await GenerateAvatarFunc(prompt, ct);
+            var imageBytes = await GenerateAvatarFunc(prompt, referenceImage, ct);
             if (imageBytes is null)
                 return ResponseFrame.Failure(request.Id, "generation_failed", "No image was returned.");
 
