@@ -54,6 +54,11 @@ public sealed class MobileTransport(
     public Func<string, byte[]?, CancellationToken, Task<byte[]?>>? GenerateAvatarFunc { get; set; }
 
     /// <summary>
+    /// Delegate to rename an agent (old name, new name, display name). Set by GatewayService after construction.
+    /// </summary>
+    public Func<string, string, string, CancellationToken, Task>? AgentRenameFunc { get; set; }
+
+    /// <summary>
     /// Replace an agent definition and evict any cached runtimes for that agent.
     /// </summary>
     public void UpdateAgent(string name, AgentDefinition definition)

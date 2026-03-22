@@ -83,6 +83,7 @@ public sealed class GatewayService(
         _mobileSessionStore = new MobileSessionStore(_achatesHome);
         _mobileTransport = new MobileTransport(agents, _mobileSessionStore, loggerFactory);
         _mobileTransport.AgentReloadFunc = ReloadAgentAsync;
+        _mobileTransport.AgentRenameFunc = RenameAgentAsync;
         _mobileTransport.ModelsListFunc = GetAllModelsAsync;
         _mobileTransport.GenerateAvatarFunc = GenerateAvatarAsync;
         _deviceBridge.SetTransport(_mobileTransport);
@@ -137,6 +138,92 @@ public sealed class GatewayService(
 
         var modelId = config.Tools?.Avatar?.Model ?? "google/gemini-2.5-flash-image";
         return await provider.GenerateImageAsync(modelId, prompt, referenceImage, ct);
+    }
+
+    public async Task RenameAgentAsync(string oldName, string newName, string displayName, CancellationToken ct)
+    {
+        var achatesHome = _achatesHome!;
+        var agentsDir = Path.Combine(achatesHome, "agents");
+        var oldDir = Path.Combine(agentsDir, oldName);
+        var newDir = Path.Combine(agentsDir, newName);
+
+        // 1. Abort active runtimes before touching disk
+        _mobileTransport?.EvictRuntimes(oldName);
+
+        // 2. Rename directory (skip if just a display name change)
+        if (oldName != newName)
+            Directory.Move(oldDir, newDir);
+
+        // 3. Update H1 title in AGENT.md
+        var agentFile = Path.Combine(newDir, "AGENT.md");
+        var content = await File.ReadAllTextAsync(agentFile, ct);
+        var lines = content.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].StartsWith("# "))
+            {
+                lines[i] = $"# {displayName}";
+                break;
+            }
+        }
+        await File.WriteAllTextAsync(agentFile, string.Join('\n', lines), ct);
+
+        // 4. Update allowed_chats in other agents
+        var updatedAgents = new List<string>();
+        if (oldName != newName)
+        {
+            foreach (var dir in Directory.GetDirectories(agentsDir))
+            {
+                var name = Path.GetFileName(dir);
+                if (name == newName) continue;
+
+                var otherFile = Path.Combine(dir, "AGENT.md");
+                if (!File.Exists(otherFile)) continue;
+
+                var otherContent = await File.ReadAllTextAsync(otherFile, ct);
+                var otherConfig = AgentLoader.Parse(otherContent);
+                if (otherConfig?.AllowChat is null || !otherConfig.AllowChat.Contains(oldName))
+                    continue;
+
+                otherConfig.AllowChat = otherConfig.AllowChat
+                    .Select(c => c == oldName ? newName : c)
+                    .ToList();
+
+                // Preserve display name from H1
+                var otherLines = otherContent.Split('\n');
+                var otherDisplayName = otherLines.FirstOrDefault(l => l.StartsWith("# "))?[2..].Trim()
+                    ?? char.ToUpper(name[0]) + name[1..];
+
+                var markdown = AgentLoader.Serialize(otherDisplayName, otherConfig);
+                await File.WriteAllTextAsync(otherFile, markdown, ct);
+                updatedAgents.Add(name);
+            }
+        }
+
+        // 5. Re-key in-memory state
+        var newDef = await ResolveAgentAsync(newName,
+            AgentLoader.Parse(await File.ReadAllTextAsync(agentFile, ct))!, ct);
+
+        if (oldName != newName)
+        {
+            _agents.Remove(oldName);
+        }
+        _agents[newName] = newDef;
+
+        _mobileTransport?.RenameAgent(oldName, newName, newDef);
+
+        if (_cronService is not null && newDef.CronStore is not null)
+            _cronService.RenameAgent(oldName, newName, newDef);
+
+        // 6. Reload any agents whose allowed_chats changed
+        foreach (var name in updatedAgents)
+        {
+            try { await ReloadAgentAsync(name, ct); }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to reload agent '{Name}' after rename", name);
+            }
+        }
     }
 
     public async Task<AgentDefinition> ReloadAgentAsync(string name, CancellationToken ct)
