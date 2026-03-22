@@ -14,7 +14,7 @@ namespace Achates.Server.Cron;
 /// </summary>
 public sealed class CronService : IAsyncDisposable
 {
-    private readonly IReadOnlyDictionary<string, (CronStore Store, AgentDefinition Agent)> _agents;
+    private readonly Dictionary<string, (CronStore Store, AgentDefinition Agent)> _agents;
     private readonly MobileTransport _transport;
     private readonly MobileSessionStore _sessionStore;
     private readonly ILogger<CronService> _logger;
@@ -26,7 +26,7 @@ public sealed class CronService : IAsyncDisposable
     private static readonly TimeSpan MinSleep = TimeSpan.FromSeconds(2);
 
     public CronService(
-        IReadOnlyDictionary<string, (CronStore Store, AgentDefinition Agent)> agents,
+        Dictionary<string, (CronStore Store, AgentDefinition Agent)> agents,
         MobileTransport transport,
         MobileSessionStore sessionStore,
         ILogger<CronService> logger)
@@ -52,6 +52,17 @@ public sealed class CronService : IAsyncDisposable
         // Release only if the semaphore is at 0 (avoid stacking)
         if (_poke.CurrentCount == 0)
             _poke.Release();
+    }
+
+    /// <summary>
+    /// Re-key an agent entry after rename. Uses the CronStore from the new definition
+    /// (which was re-resolved with the new directory path).
+    /// </summary>
+    public void RenameAgent(string oldName, string newName, AgentDefinition newDefinition)
+    {
+        _agents.Remove(oldName);
+        if (newDefinition.CronStore is { } store)
+            _agents[newName] = (store, newDefinition);
     }
 
     /// <summary>
