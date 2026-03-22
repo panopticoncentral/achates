@@ -5,8 +5,9 @@ struct ToolsEditView: View {
 
     private static let allTools = [
         "calendar", "camera", "chat", "cost", "cron", "health",
-        "imessage", "location", "mail", "memory", "notes", "session",
-        "todo", "transcribe", "web_fetch", "web_search",
+        "image", "imessage", "location", "mail", "memory", "notes",
+        "profile", "session", "todo", "transcribe", "web_fetch",
+        "web_search",
     ]
 
     var body: some View {
