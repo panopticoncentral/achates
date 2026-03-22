@@ -4,6 +4,7 @@ struct ChatView: View {
     @Environment(AppState.self) private var appState
     let agent: Agent
     @State private var speechService = SpeechService()
+    @State private var showAgentEditor = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -71,6 +72,12 @@ struct ChatView: View {
             ToolbarItem(placement: .automatic) {
                 HStack(spacing: 12) {
                     Menu {
+                        Button {
+                            showAgentEditor = true
+                        } label: {
+                            Label("Edit Agent", systemImage: "pencil")
+                        }
+
                         Button(role: .destructive) {
                             Task { await appState.clearTimeline() }
                         } label: {
@@ -86,6 +93,11 @@ struct ChatView: View {
         }
         .task {
             await appState.selectAgent(agent)
+        }
+        .sheet(isPresented: $showAgentEditor) {
+            NavigationStack {
+                AgentEditView(agent: agent)
+            }
         }
     }
 

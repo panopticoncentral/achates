@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		8BCA40722F6DF49E0003022C /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 8B8BF1012F6900A0005E11BC /* MarkdownUI */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		8B8BF0E02F6864A6005E11BC /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -55,6 +59,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8BCA40722F6DF49E0003022C /* MarkdownUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -191,10 +196,10 @@
 			);
 			mainGroup = 8B8BF0C72F6864A5005E11BC;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			packageReferences = (
 				8B8BF1002F6900A0005E11BC /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 			);
+			preferredProjectObjectVersion = 77;
 			productRefGroup = 8B8BF0D12F6864A5005E11BC /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
