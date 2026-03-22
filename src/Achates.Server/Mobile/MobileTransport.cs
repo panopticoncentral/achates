@@ -224,6 +224,7 @@ public sealed class MobileTransport(
                 "chat.read" => await HandleChatReadAsync(request, ct),
                 "agent.get" => await HandleAgentGetAsync(request),
                 "agent.update" => await HandleAgentUpdateAsync(request, ct),
+                "agent.rename" => await HandleAgentRenameAsync(request, ct),
                 "agent.generate_avatar" => await HandleAgentGenerateAvatarAsync(request, ct),
                 "models.list" => await HandleModelsListAsync(request, ct),
                 _ => ResponseFrame.Failure(request.Id, "unknown_method", $"Unknown method: {request.Method}"),
@@ -800,6 +801,51 @@ public sealed class MobileTransport(
         }
 
         var payload = JsonSerializer.SerializeToElement(new { ok = true, warning }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleAgentRenameAsync(RequestFrame request, CancellationToken ct)
+    {
+        if (AgentRenameFunc is null)
+            return ResponseFrame.Failure(request.Id, "not_available", "Agent rename not available.");
+
+        var agentName = GetStringParam(request.Params, "agent");
+        if (agentName is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
+
+        var displayName = GetStringParam(request.Params, "name");
+        if (string.IsNullOrWhiteSpace(displayName))
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'name' parameter.");
+
+        if (!_agents.ContainsKey(agentName))
+            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
+
+        var newId = AgentLoader.NormalizeId(displayName);
+        if (newId is null)
+            return ResponseFrame.Failure(request.Id, "invalid_name", "Name produces an invalid or empty ID.");
+
+        if (newId != agentName && _agents.ContainsKey(newId))
+            return ResponseFrame.Failure(request.Id, "conflict", $"An agent with ID '{newId}' already exists.");
+
+        try
+        {
+            await AgentRenameFunc(agentName, newId, displayName, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to rename agent '{Old}' to '{New}'", agentName, newId);
+            return ResponseFrame.Failure(request.Id, "error", $"Rename failed: {ex.Message}");
+        }
+
+        // Broadcast event
+        await BroadcastEventAsync("agent.renamed", new
+        {
+            old_id = agentName,
+            new_id = newId,
+            display_name = displayName,
+        }, ct);
+
+        var payload = JsonSerializer.SerializeToElement(new { ok = true, id = newId, name = displayName }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
 
