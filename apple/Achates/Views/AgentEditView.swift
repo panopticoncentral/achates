@@ -12,6 +12,7 @@ struct AgentEditView: View {
     @State private var errorMessage: String?
     @State private var showError = false
     @State private var showAvatarSheet = false
+    @State private var availableTools: [String] = []
 
     private var hasChanges: Bool {
         guard let config, let original else { return false }
@@ -156,7 +157,7 @@ struct AgentEditView: View {
 
             Section("Tools") {
                 NavigationLink {
-                    ToolsEditView(tools: binding(\.tools))
+                    ToolsEditView(tools: binding(\.tools), availableTools: availableTools)
                 } label: {
                     HStack {
                         Text("Tools")
@@ -316,9 +317,11 @@ struct AgentEditView: View {
 
     private func load() async {
         do {
-            let loaded = try await appState.loadAgentConfig(agent)
-            config = loaded
-            original = loaded
+            async let loadedConfig = appState.loadAgentConfig(agent)
+            async let loadedTools = appState.loadAvailableTools()
+            config = try await loadedConfig
+            original = config
+            availableTools = (try? await loadedTools) ?? []
             isLoading = false
         } catch {
             errorMessage = error.localizedDescription

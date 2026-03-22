@@ -227,6 +227,7 @@ public sealed class MobileTransport(
                 "agent.update" => await HandleAgentUpdateAsync(request, ct),
                 "agent.rename" => await HandleAgentRenameAsync(request, ct),
                 "agent.generate_avatar" => await HandleAgentGenerateAvatarAsync(request, ct),
+                "tools.list" => HandleToolsList(request),
                 "models.list" => await HandleModelsListAsync(request, ct),
                 _ => ResponseFrame.Failure(request.Id, "unknown_method", $"Unknown method: {request.Method}"),
             };
@@ -892,6 +893,13 @@ public sealed class MobileTransport(
             _logger.LogWarning(ex, "Avatar generation failed");
             return ResponseFrame.Failure(request.Id, "generation_failed", ex.Message);
         }
+    }
+
+    private static ResponseFrame HandleToolsList(RequestFrame request)
+    {
+        var payload = JsonSerializer.SerializeToElement(
+            new { tools = GatewayService.AllToolNames }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
     }
 
     private async Task<ResponseFrame> HandleModelsListAsync(RequestFrame request, CancellationToken ct)

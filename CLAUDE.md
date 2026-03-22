@@ -102,7 +102,7 @@ Providers <- Agent <- Server
 - `MobileSession` — session model with Id, Title, Created, Updated, Messages.
 - `DeviceCommandBridge` — routes tool requests (location, camera) to any connected client with the required capability. Used by `LocationTool` and `CameraTool`.
 - Frame protocol: `RequestFrame` (req), `ResponseFrame` (res), `EventFrame` (evt). JSON with snake_case naming.
-- RPC methods: `connect`, `ping`, `agents.list`, `timeline.load`, `timeline.break.add`, `timeline.break.remove`, `timeline.clear`, `chat.send`, `chat.cancel`, `chat.read`, `agent.get`, `agent.update`, `agent.rename`, `agent.generate_avatar`, `models.list`.
+- RPC methods: `connect`, `ping`, `agents.list`, `timeline.load`, `timeline.break.add`, `timeline.break.remove`, `timeline.clear`, `chat.send`, `chat.cancel`, `chat.read`, `agent.get`, `agent.update`, `agent.rename`, `agent.generate_avatar`, `tools.list`, `models.list`.
 - Timeline model: sessions are presented as a continuous timeline per agent (like iMessage). Session breaks appear as date/time dividers. Server auto-creates a new session after 4h of inactivity. Users can manually add breaks (split) or remove them (merge). `chat.send` no longer requires `session_id` — server auto-resolves to the latest session.
 - Device commands (server-to-client requests): `device.location`, `device.camera`.
 - Per-session tool injection: `CreateRuntime` adds MemoryTool, TodoTool, CostTool, CronTool per-session.

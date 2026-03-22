@@ -29,6 +29,17 @@ public sealed class GatewayService(
     private MobileSessionStore? _mobileSessionStore;
     private readonly DeviceCommandBridge _deviceBridge = new();
 
+    /// <summary>
+    /// All known tool names that can be assigned to agents.
+    /// </summary>
+    public static readonly IReadOnlyList<string> AllToolNames =
+    [
+        "calendar", "camera", "chat", "cost", "cron", "health",
+        "image", "imessage", "location", "mail", "memory", "notes",
+        "profile", "session", "todo", "transcribe", "web_fetch",
+        "web_search",
+    ];
+
     public IReadOnlyDictionary<string, AgentDefinition> Agents => _agents;
     public MobileTransport? MobileTransport => _mobileTransport;
     public MobileSessionStore? MobileSessionStore => _mobileSessionStore;

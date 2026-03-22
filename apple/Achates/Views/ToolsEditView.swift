@@ -2,17 +2,11 @@ import SwiftUI
 
 struct ToolsEditView: View {
     @Binding var tools: [String]
-
-    private static let allTools = [
-        "calendar", "camera", "chat", "cost", "cron", "health",
-        "image", "imessage", "location", "mail", "memory", "notes",
-        "profile", "session", "todo", "transcribe", "web_fetch",
-        "web_search",
-    ]
+    let availableTools: [String]
 
     var body: some View {
         List {
-            ForEach(Self.allTools, id: \.self) { tool in
+            ForEach(availableTools, id: \.self) { tool in
                 Toggle(tool, isOn: toolBinding(tool))
             }
         }

@@ -300,6 +300,14 @@ final class AppState {
         return ModelInfo.fromList(payload)
     }
 
+    func loadAvailableTools() async throws -> [String] {
+        guard let payload = try await client?.sendRequest(method: "tools.list") else {
+            throw AgentEditError.notConnected
+        }
+        guard case .array(let items) = payload["tools"] else { return [] }
+        return items.compactMap { if case .string(let s) = $0 { return s } else { return nil } }
+    }
+
     func handleAgentRenamed(oldId: String?, newId: String?) async {
         let wasCurrentAgent = currentAgent?.id == oldId
         await refreshAgents()
