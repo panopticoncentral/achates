@@ -69,6 +69,29 @@ public sealed class MobileTransport(
     }
 
     /// <summary>
+    /// Abort and remove all cached runtimes for the given agent.
+    /// </summary>
+    public void EvictRuntimes(string agentName)
+    {
+        var prefix = $"{agentName}:";
+        foreach (var key in _runtimes.Keys.Where(k => k.StartsWith(prefix)).ToList())
+        {
+            if (_runtimes.TryRemove(key, out var runtime))
+                runtime.Abort();
+        }
+    }
+
+    /// <summary>
+    /// Re-key an agent after rename: remove old key, insert new.
+    /// Call EvictRuntimes first if runtimes need to be aborted before disk operations.
+    /// </summary>
+    public void RenameAgent(string oldName, string newName, AgentDefinition definition)
+    {
+        _agents.TryRemove(oldName, out _);
+        _agents[newName] = definition;
+    }
+
+    /// <summary>
     /// All currently connected clients.
     /// </summary>
     public ICollection<MobileConnection> Connections => _connections.Values;
