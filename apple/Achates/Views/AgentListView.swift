@@ -3,6 +3,7 @@ import SwiftUI
 struct AgentListView: View {
     @Environment(AppState.self) private var appState
     @State private var searchText = ""
+    @State private var agentToEdit: Agent?
 
     private var filteredAgents: [Agent] {
         if searchText.isEmpty { return appState.agents }
@@ -42,6 +43,22 @@ struct AgentListView: View {
                     NavigationLink(value: agent) {
                         AgentRow(agent: agent)
                     }
+                    .contextMenu {
+                        Button {
+                            agentToEdit = agent
+                        } label: {
+                            Label("Edit Agent", systemImage: "pencil")
+                        }
+
+                        Button(role: .destructive) {
+                            Task {
+                                await appState.selectAgent(agent)
+                                await appState.clearTimeline()
+                            }
+                        } label: {
+                            Label("Clear All", systemImage: "trash")
+                        }
+                    }
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                 }
                 .listStyle(.plain)
@@ -68,6 +85,11 @@ struct AgentListView: View {
         .onAppear {
             if appState.connectionStatus == .disconnected && appState.serverURL != nil {
                 appState.connectToServer()
+            }
+        }
+        .sheet(item: $agentToEdit) { agent in
+            NavigationStack {
+                AgentEditView(agent: agent)
             }
         }
     }
