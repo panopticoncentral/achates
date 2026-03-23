@@ -20,5 +20,12 @@ struct AchatesApp: App {
         #if os(macOS)
         .defaultSize(width: 1000, height: 700)
         #endif
+
+        #if os(macOS)
+        Settings {
+            SettingsView()
+                .environment(appState)
+        }
+        #endif
     }
 }

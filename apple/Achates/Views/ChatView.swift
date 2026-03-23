@@ -91,9 +91,23 @@ struct ChatView: View {
                 .buttonStyle(.plain)
             }
             #else
-            ToolbarItem(placement: .automatic) {
-                Text(agent.displayName)
-                    .font(.headline)
+            ToolbarItem(placement: .principal) {
+                Button {
+                    showAgentEditor = true
+                } label: {
+                    HStack(spacing: 8) {
+                        AgentAvatar(agent: agent, size: 24)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(agent.displayName)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.primary)
+                            Text(connectionLabel)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
             }
             #endif
 
@@ -122,6 +136,9 @@ struct ChatView: View {
             NavigationStack {
                 AgentEditView(agent: agent)
             }
+            #if os(macOS)
+            .frame(minWidth: 500, minHeight: 600)
+            #endif
         }
     }
 
@@ -175,9 +192,19 @@ private struct SessionBreakDivider: View {
             Text(formatted)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                #if os(macOS)
+                .contextMenu {
+                    Button(role: .destructive) {
+                        onRemove()
+                    } label: {
+                        Label("Remove Break", systemImage: "xmark")
+                    }
+                }
+                #else
                 .onLongPressGesture {
                     onRemove()
                 }
+                #endif
             line
         }
         .padding(.vertical, 8)

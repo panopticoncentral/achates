@@ -188,6 +188,8 @@ struct AgentEditView: View {
         }
         #if os(iOS)
         .scrollDismissesKeyboard(.interactively)
+        #else
+        .formStyle(.grouped)
         #endif
     }
 

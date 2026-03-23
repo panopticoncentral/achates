@@ -38,6 +38,15 @@ struct ComposerView: View {
                             .fill(Color(.systemGray6))
                     )
                     .focused($isFocused)
+                    #if os(macOS)
+                    .onKeyPress(keys: [.return], phases: .down) { keyPress in
+                        if keyPress.modifiers.contains(.command) {
+                            send()
+                            return .handled
+                        }
+                        return .ignored
+                    }
+                    #endif
 
                 if appState.isStreaming {
                     Button(action: onCancel) {
@@ -45,6 +54,7 @@ struct ComposerView: View {
                             .font(.system(size: 32))
                             .foregroundStyle(.red)
                     }
+                    .buttonStyle(.plain)
                 } else if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Button(action: toggleRecording) {
                         Image(systemName: speechService.isRecording ? "mic.fill" : "mic")
@@ -56,12 +66,14 @@ struct ComposerView: View {
                                     .fill(speechService.isRecording ? Color.red.opacity(0.15) : Color(.systemGray6))
                             )
                     }
+                    .buttonStyle(.plain)
                 } else {
                     Button(action: send) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.system(size: 32))
                             .foregroundStyle(.blue)
                     }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 12)

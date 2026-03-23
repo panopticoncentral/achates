@@ -72,9 +72,15 @@ struct AgentListView: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .automatic) {
+                #if os(macOS)
+                SettingsLink {
+                    Image(systemName: "gear")
+                }
+                #else
                 NavigationLink(destination: SettingsView()) {
                     Image(systemName: "gear")
                 }
+                #endif
             }
         }
         #if os(iOS)
@@ -91,6 +97,9 @@ struct AgentListView: View {
             NavigationStack {
                 AgentEditView(agent: agent)
             }
+            #if os(macOS)
+            .frame(minWidth: 500, minHeight: 600)
+            #endif
         }
     }
 
@@ -106,10 +115,27 @@ struct AgentListView: View {
                 }
             }
         )
-        List(appState.agents, selection: selection) { agent in
+        List(filteredAgents, selection: selection) { agent in
             AgentRow(agent: agent)
                 .tag(agent.id)
+                .contextMenu {
+                    Button {
+                        agentToEdit = agent
+                    } label: {
+                        Label("Edit Agent", systemImage: "pencil")
+                    }
+
+                    Button(role: .destructive) {
+                        Task {
+                            await appState.selectAgent(agent)
+                            await appState.clearTimeline()
+                        }
+                    } label: {
+                        Label("Clear All", systemImage: "trash")
+                    }
+                }
         }
+        .searchable(text: $searchText, prompt: "Search")
     }
     #endif
 }

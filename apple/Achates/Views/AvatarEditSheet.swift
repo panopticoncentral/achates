@@ -88,6 +88,8 @@ struct AvatarEditSheet: View {
         #if os(iOS)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        #else
+        .frame(minWidth: 400, idealWidth: 450, minHeight: 500)
         #endif
     }
 
