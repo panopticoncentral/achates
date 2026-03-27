@@ -483,7 +483,8 @@ public sealed class MobileTransport(
             limit = Math.Clamp(limitVal, 1, 100);
 
         var segments = await sessionStore.LoadTimelineAsync(agentName, before, limit, ct);
-        var payload = JsonSerializer.SerializeToElement(new { segments }, JsonOptions);
+        var lightweight = segments.Select(StripHeavyContent).ToList();
+        var payload = JsonSerializer.SerializeToElement(new { segments = lightweight }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
 
@@ -922,6 +923,39 @@ public sealed class MobileTransport(
 
         var payload = JsonSerializer.SerializeToElement(new { models = _modelsCache }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
+    }
+
+    /// <summary>
+    /// Returns a lightweight copy of a session with large binary content (images, audio, files)
+    /// stripped from tool results to keep timeline payloads small.
+    /// </summary>
+    private static MobileSession StripHeavyContent(MobileSession session)
+    {
+        var messages = session.Messages.Select<AgentMessage, AgentMessage>(m => m switch
+        {
+            ToolResultMessage tr => tr with
+            {
+                Content = tr.Content
+                    .Where(c => c is not (CompletionImageContent or CompletionAudioInputContent or CompletionFileContent))
+                    .ToList(),
+            },
+            AssistantMessage am => am with
+            {
+                Content = am.Content
+                    .Where(c => c is not (CompletionImageContent or CompletionAudioContent or CompletionFileContent))
+                    .ToList(),
+            },
+            _ => m,
+        }).ToList();
+
+        return new MobileSession
+        {
+            Id = session.Id,
+            Title = session.Title,
+            Created = session.Created,
+            Updated = session.Updated,
+            Messages = messages,
+        };
     }
 
     private static string[] FormatModalities(ModelModalities m)

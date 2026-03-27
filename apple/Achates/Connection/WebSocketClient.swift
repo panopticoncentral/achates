@@ -42,6 +42,7 @@ final class WebSocketClient {
 
         let session = URLSession(configuration: .default)
         let task = session.webSocketTask(with: components.url!)
+        task.maximumMessageSize = 16 * 1024 * 1024 // 16 MB
         webSocketHolder.set(task)
         task.resume()
 
