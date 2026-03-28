@@ -420,7 +420,7 @@ public sealed class GatewayService(
                     tools.Add(new CameraTool(_deviceBridge));
                     break;
                 case "image":
-                    tools.Add(new ImageTool(GenerateImageAsync));
+                    tools.Add(new ImageTool(agentDir, GenerateImageAsync));
                     break;
                 case "profile":
                     tools.Add(new ProfileTool(agentDir, ct => ReloadAgentAsync(agentName, ct)));

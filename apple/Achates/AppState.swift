@@ -390,6 +390,15 @@ final class AppState {
         }
     }
 
+    func appendImage(data: Data, mimeType: String) {
+        guard let id = streamingMessageId,
+              let index = lastMessageIndex(id: id) else { return }
+        if case .message(var msg) = timeline[index] {
+            msg.appendImage(data: data, mimeType: mimeType)
+            timeline[index] = .message(msg)
+        }
+    }
+
     func addToolCall(toolId: String, name: String) {
         guard let id = streamingMessageId,
               let index = lastMessageIndex(id: id) else { return }

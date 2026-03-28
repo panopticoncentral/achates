@@ -1006,6 +1006,16 @@ public sealed class MobileTransport(
                         }, ct);
                         break;
 
+                    case MessageStreamEvent { Inner: CompletionImageEvent imageEvt }:
+                        await BroadcastEventAsync("image.block", new
+                        {
+                            agent = agentName,
+                            session_id = sessionId,
+                            data = imageEvt.Image.Data,
+                            mime_type = imageEvt.Image.MimeType,
+                        }, ct);
+                        break;
+
                     case ToolStartEvent toolStart:
                         await BroadcastEventAsync("tool.start", new
                         {
@@ -1017,6 +1027,18 @@ public sealed class MobileTransport(
                         break;
 
                     case ToolEndEvent toolEnd:
+                        // Emit image.block events for any images in the tool result
+                        foreach (var img in toolEnd.Result.Content.OfType<CompletionImageContent>())
+                        {
+                            await BroadcastEventAsync("image.block", new
+                            {
+                                agent = agentName,
+                                session_id = sessionId,
+                                data = img.Data,
+                                mime_type = img.MimeType,
+                            }, ct);
+                        }
+
                         await BroadcastEventAsync("tool.end", new
                         {
                             agent = agentName,

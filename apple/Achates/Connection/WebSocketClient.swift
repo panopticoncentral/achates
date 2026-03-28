@@ -229,6 +229,13 @@ final class WebSocketClient {
             let thinkingId = payload["id"]?.stringValue ?? "default"
             appState.collapseThinking(thinkingId: thinkingId)
 
+        case "image.block":
+            if let b64 = payload["data"]?.stringValue,
+               let data = Data(base64Encoded: b64) {
+                let mimeType = payload["mime_type"]?.stringValue ?? "image/jpeg"
+                appState.appendImage(data: data, mimeType: mimeType)
+            }
+
         case "tool.start":
             let toolId = payload["id"]?.stringValue ?? UUID().uuidString
             let name = payload["name"]?.stringValue ?? "unknown"

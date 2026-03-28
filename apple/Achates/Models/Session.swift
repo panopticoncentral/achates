@@ -81,6 +81,12 @@ struct TimelineSegment: Identifiable, Sendable, Equatable {
                         let toolId = itemDict["id"]?.stringValue ?? UUID().uuidString
                         let name = itemDict["name"]?.stringValue ?? "unknown"
                         blocks.append(.toolCall(id: toolId, name: name, status: .completed, result: nil))
+                    case "image":
+                        if let b64 = itemDict["data"]?.stringValue,
+                           let data = Data(base64Encoded: b64) {
+                            let mimeType = itemDict["mime_type"]?.stringValue ?? "image/jpeg"
+                            blocks.append(.image(id: UUID().uuidString, data: data, mimeType: mimeType))
+                        }
                     default:
                         break
                     }

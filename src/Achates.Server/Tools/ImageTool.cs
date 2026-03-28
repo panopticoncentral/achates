@@ -6,9 +6,10 @@ using static Achates.Providers.Util.JsonSchemaHelpers;
 namespace Achates.Server.Tools;
 
 /// <summary>
-/// Generates images using an image-capable model.
+/// Generates images using an image-capable model. Saves to the agent's images directory.
 /// </summary>
 internal sealed class ImageTool(
+    string agentDir,
     Func<string, string, IReadOnlyList<byte[]>?, CancellationToken, Task<byte[]?>> generateFunc) : AgentTool
 {
     private static readonly JsonElement _schema = ObjectSchema(
@@ -67,9 +68,19 @@ internal sealed class ImageTool(
         if (imageBytes is null)
             return TextResult("The model did not return an image.");
 
+        var imagesDir = Path.Combine(agentDir, "images");
+        Directory.CreateDirectory(imagesDir);
+        var fileName = $"{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..8]}.jpg";
+        var filePath = Path.Combine(imagesDir, fileName);
+        await File.WriteAllBytesAsync(filePath, imageBytes, cancellationToken);
+
         return new AgentToolResult
         {
-            Content = [new CompletionImageContent { Data = Convert.ToBase64String(imageBytes), MimeType = "image/jpeg" }],
+            Content =
+            [
+                new CompletionTextContent { Text = $"Image saved to: {filePath}" },
+                new CompletionImageContent { Data = Convert.ToBase64String(imageBytes), MimeType = "image/jpeg" },
+            ],
         };
     }
 

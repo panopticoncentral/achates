@@ -9,12 +9,14 @@ enum ContentBlock: Identifiable, Sendable, Equatable {
     case text(String)
     case thinking(id: String, text: String, collapsed: Bool)
     case toolCall(id: String, name: String, status: ToolCallStatus, result: String?)
+    case image(id: String, data: Data, mimeType: String)
 
     var id: String {
         switch self {
         case .text(let t): return "text-\(t.hashValue)"
         case .thinking(let id, _, _): return "thinking-\(id)"
         case .toolCall(let id, _, _, _): return "tool-\(id)"
+        case .image(let id, _, _): return "image-\(id)"
         }
     }
 }
@@ -82,6 +84,10 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
                 blocks[index] = .thinking(id: id, text: text, collapsed: true)
             }
         }
+    }
+
+    mutating func appendImage(data: Data, mimeType: String) {
+        blocks.append(.image(id: UUID().uuidString, data: data, mimeType: mimeType))
     }
 
     mutating func addToolCall(toolId: String, name: String) {

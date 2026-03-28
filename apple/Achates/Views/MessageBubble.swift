@@ -64,7 +64,31 @@ struct MessageBubble: View {
 
         case .toolCall(let id, let name, let status, let result):
             ToolCallView(toolId: id, name: name, status: status, result: result)
+
+        case .image(_, let data, _):
+            imageBubble(data)
         }
+    }
+
+    @ViewBuilder
+    private func imageBubble(_ data: Data) -> some View {
+        #if os(iOS)
+        if let uiImage = UIImage(data: data) {
+            Image(uiImage: uiImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: 260)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        #else
+        if let nsImage = NSImage(data: data) {
+            Image(nsImage: nsImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: 260)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        #endif
     }
 
     private func textBubble(_ text: String) -> some View {

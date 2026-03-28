@@ -681,7 +681,7 @@ internal sealed class OpenRouterProvider : IModelProvider
 
                     break;
                 case CompletionToolResultMessage toolResult:
-                    result.Add(ConvertToolResult(toolResult));
+                    result.Add(ConvertToolResult(toolResult, model));
                     break;
             }
         }
@@ -843,8 +843,48 @@ internal sealed class OpenRouterProvider : IModelProvider
         };
     }
 
-    private static OpenRouterChatMessage ConvertToolResult(CompletionToolResultMessage completionToolResult)
+    private static OpenRouterChatMessage ConvertToolResult(CompletionToolResultMessage completionToolResult, Model model)
     {
+        var hasImages = completionToolResult.Content.OfType<CompletionImageContent>().Any();
+
+        if (hasImages && model.Input.HasFlag(ModelModalities.Image))
+        {
+            var parts = new List<OpenRouterChatContentPart>();
+            foreach (var block in completionToolResult.Content)
+            {
+                switch (block)
+                {
+                    case CompletionTextContent tc:
+                        parts.Add(new OpenRouterChatContentPart
+                        {
+                            Type = "text",
+                            Text = UnicodeSanitizer.SanitizeSurrogates(tc.Text),
+                        });
+                        break;
+                    case CompletionImageContent img:
+                        parts.Add(new OpenRouterChatContentPart
+                        {
+                            Type = "image_url",
+                            ImageUrl = new OpenRouterChatImageUrl
+                            {
+                                Url = $"data:{img.MimeType};base64,{img.Data}",
+                            },
+                        });
+                        break;
+                }
+            }
+
+            if (parts.Count == 0)
+                parts.Add(new OpenRouterChatContentPart { Type = "text", Text = "(empty)" });
+
+            return new OpenRouterChatMessage
+            {
+                Role = "tool",
+                Content = JsonSerializer.SerializeToElement(parts, OpenRouterJsonContext.Default.IReadOnlyListOpenRouterChatContentPart),
+                ToolCallId = completionToolResult.ToolCallId,
+            };
+        }
+
         var text = string.Join("\n",
             completionToolResult.Content.OfType<CompletionTextContent>().Select(c => c.Text));
 
