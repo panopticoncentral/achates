@@ -337,6 +337,7 @@ internal static class AgentLoop
             ToolName = toolCall.Name,
             Content = result.Content,
             IsError = isError,
+            ImageUrl = result.ImageUrl,
             Details = result.Details,
         };
 

@@ -52,6 +52,20 @@ app.MapGet("/withings/callback", async (HttpContext context, GatewayService gate
         """);
 });
 
+// --- Agent images ---
+app.MapGet("/agents/{agentName}/images/{fileName}", (string agentName, string fileName) =>
+{
+    // Sanitize path components to prevent directory traversal
+    if (agentName.Contains("..") || fileName.Contains(".."))
+        return Results.BadRequest();
+
+    var filePath = Path.Combine(ConfigLoader.DefaultConfigDir, "agents", agentName, "images", fileName);
+    if (!File.Exists(filePath))
+        return Results.NotFound();
+
+    return Results.File(filePath, "image/jpeg");
+});
+
 // --- WebSocket ---
 app.Map("/ws", async (HttpContext context, GatewayService gatewayService) =>
 {

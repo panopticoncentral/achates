@@ -8,15 +8,15 @@ struct TimelineSegment: Identifiable, Sendable, Equatable {
     let updated: Date
     var messages: [ChatMessage]
 
-    static func fromTimeline(_ payload: [String: JSONValue], agentId: String) -> [TimelineSegment] {
+    static func fromTimeline(_ payload: [String: JSONValue], agentId: String, serverURL: URL?) -> [TimelineSegment] {
         guard let segmentArray = payload["segments"]?.arrayValue else { return [] }
         return segmentArray.compactMap { value -> TimelineSegment? in
             guard let dict = value.objectValue else { return nil }
-            return TimelineSegment.from(dict, agentId: agentId)
+            return TimelineSegment.from(dict, agentId: agentId, serverURL: serverURL)
         }
     }
 
-    static func from(_ dict: [String: JSONValue], agentId: String) -> TimelineSegment? {
+    static func from(_ dict: [String: JSONValue], agentId: String, serverURL: URL?) -> TimelineSegment? {
         guard let id = dict["id"]?.stringValue else { return nil }
 
         let created = parseDate(dict["created"]) ?? Date()
@@ -24,7 +24,7 @@ struct TimelineSegment: Identifiable, Sendable, Equatable {
 
         let messages: [ChatMessage]
         if let messagesArray = dict["messages"]?.arrayValue {
-            messages = messagesArray.compactMap { parseMessage($0) }
+            messages = messagesArray.compactMap { parseMessage($0, serverURL: serverURL) }
         } else {
             messages = []
         }
@@ -45,7 +45,7 @@ struct TimelineSegment: Identifiable, Sendable, Equatable {
         return formatter.date(from: str) ?? ISO8601DateFormatter().date(from: str)
     }
 
-    private static func parseMessage(_ value: JSONValue) -> ChatMessage? {
+    private static func parseMessage(_ value: JSONValue, serverURL: URL?) -> ChatMessage? {
         guard let dict = value.objectValue,
               let typeStr = dict["role"]?.stringValue else { return nil }
 
@@ -82,10 +82,8 @@ struct TimelineSegment: Identifiable, Sendable, Equatable {
                         let name = itemDict["name"]?.stringValue ?? "unknown"
                         blocks.append(.toolCall(id: toolId, name: name, status: .completed, result: nil))
                     case "image":
-                        if let b64 = itemDict["data"]?.stringValue,
-                           let data = Data(base64Encoded: b64) {
-                            let mimeType = itemDict["mime_type"]?.stringValue ?? "image/jpeg"
-                            blocks.append(.image(id: UUID().uuidString, data: data, mimeType: mimeType))
+                        if let block = parseImageBlock(itemDict, serverURL: serverURL) {
+                            blocks.append(block)
                         }
                     default:
                         break
@@ -94,7 +92,32 @@ struct TimelineSegment: Identifiable, Sendable, Equatable {
             }
             return ChatMessage(id: id, role: .assistant, blocks: blocks, timestamp: timestamp)
         case "tool_result":
-            // Tool results are displayed inline with the assistant message, skip as standalone
+            // Extract image from tool result if present
+            if let imageUrl = dict["image_url"]?.stringValue,
+               let serverURL,
+               let fullURL = URL(string: imageUrl, relativeTo: serverURL) {
+                return ChatMessage(
+                    id: id,
+                    role: .assistant,
+                    blocks: [.remoteImage(id: UUID().uuidString, url: fullURL)],
+                    timestamp: timestamp
+                )
+            }
+            // Also check content array for image blocks
+            if let content = dict["content"]?.arrayValue {
+                for item in content {
+                    guard let itemDict = item.objectValue,
+                          let itemType = itemDict["type"]?.stringValue,
+                          itemType == "image",
+                          let block = parseImageBlock(itemDict, serverURL: serverURL) else { continue }
+                    return ChatMessage(
+                        id: id,
+                        role: .assistant,
+                        blocks: [block],
+                        timestamp: timestamp
+                    )
+                }
+            }
             return nil
         case "summary":
             let text = dict["summary"]?.stringValue ?? ""
@@ -102,5 +125,23 @@ struct TimelineSegment: Identifiable, Sendable, Equatable {
         default:
             return nil
         }
+    }
+
+    /// Parse an image content block, preferring URL-based loading over inline base64.
+    private static func parseImageBlock(_ dict: [String: JSONValue], serverURL: URL?) -> ContentBlock? {
+        // Prefer URL-based image (lightweight, fetched on demand)
+        if let urlPath = dict["url"]?.stringValue,
+           let serverURL,
+           let fullURL = URL(string: urlPath, relativeTo: serverURL) {
+            return .remoteImage(id: UUID().uuidString, url: fullURL)
+        }
+        // Fall back to inline base64 data
+        if let b64 = dict["data"]?.stringValue,
+           !b64.isEmpty,
+           let data = Data(base64Encoded: b64) {
+            let mimeType = dict["mime_type"]?.stringValue ?? "image/jpeg"
+            return .image(id: UUID().uuidString, data: data, mimeType: mimeType)
+        }
+        return nil
     }
 }

@@ -46,7 +46,7 @@ Providers <- Agent <- Server
 - `IModelProvider` — interface with `GetModelsAsync()`, `GetCompletions()` (streaming), and `GenerateImageAsync()` (single image from prompt)
 - `ModelProviders.Create(id)` — factory for provider instances
 - Only implementation: `OpenRouterProvider` (SSE streaming, `api_key` in config or `OPENROUTER_API_KEY` env var)
-- Content types: `CompletionContent` base, subtypes for text, image, audio, thinking, tool calls, files
+- Content types: `CompletionContent` base, subtypes for text, image, audio, thinking, tool calls, files. `CompletionImageContent` has optional `Url` for lightweight references (empty `Data` + URL, used in timeline payloads).
 - `CompletionUserContent` — input-only base. `CompletionAudioContent` is output-only (extends `CompletionContent`), `CompletionAudioInputContent` is input-only (extends `CompletionUserContent`). This asymmetry is intentional.
 - Event streaming via `CompletionEventStream` using `System.Threading.Channels`
 
@@ -60,7 +60,7 @@ Providers <- Agent <- Server
 
 ### Tool System (`AgentTool` subclasses)
 - `AgentTool` is the preferred pattern (class-based). Subclass and implement `Name`, `Description`, `Parameters` (JSON Schema as `JsonElement`), `ExecuteAsync()`.
-- Returns `AgentToolResult` with `Content` (list of `CompletionContent`) and optional `Details` (for UI display).
+- Returns `AgentToolResult` with `Content` (list of `CompletionContent`), optional `ImageUrl` (relative URL for generated images), and optional `Details` (transient UI metadata, `[JsonIgnore]`'d from session persistence).
 - Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`, `CronTool`, `IMessageTool`, `HealthTool`, `ChatTool`, `TranscribeTool`, `LocationTool`, `CameraTool`, `ImageTool`, `ProfileTool`.
 - Tools can be shared (same instance for all sessions) or per-session. `MobileTransport.CreateRuntime` builds per-session tool lists (e.g. `MemoryTool` uses per-agent memory path).
 - Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `ArraySchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
@@ -80,7 +80,7 @@ Providers <- Agent <- Server
 - `ChatTool` — inter-agent communication. Actions: agents (list available agents with descriptions and tools), chat (start a ping-pong conversation with another agent). Per-session; requires `chat` in agent's tools list. Creates isolated `AgentRuntime` instances for both agents (target gets all its tools except chat to prevent cascade). Supports up to 5 back-and-forth turns; either agent can end early with `<<DONE>>`. `allow_chat` in agent config restricts which agents can be contacted (null/empty = all). Costs recorded to each agent's ledger with channel `chat`. `AgentInfo` registry built at startup provides agent discovery metadata.
 - `LocationTool` — gets the user's current GPS location via the mobile device. Requires `DeviceCommandBridge` and an active mobile connection with `location` capability. Invokes `device.location` with 15s timeout. Singleton; requires `location` in agent's tools list.
 - `CameraTool` — captures a photo from the user's mobile device camera. Parameters: facing (back/front). Returns `CompletionImageContent` with base64 JPEG. Requires `DeviceCommandBridge` and an active mobile connection with `camera` capability. Singleton; requires `camera` in agent's tools list.
-- `ImageTool` — generates images using an image-capable model. Parameters: model (required, model ID), prompt (required, generation instructions including style/dimensions), images (optional array of base64 reference images). Saves generated JPEG to `~/.achates/agents/{agentName}/images/{timestamp}-{id}.jpg` and returns the file path as text. Per-agent (needs `agentDir`); requires `image` in agent's tools list. Uses `IModelProvider.GenerateImageAsync` via delegate from `GatewayService`. Bots discover image-capable models via `models.list` RPC (filter for `"image"` in output modalities).
+- `ImageTool` — generates images using an image-capable model. Actions: `models` (list image-capable models with IDs, descriptions, costs), `generate` (create an image). Generate params: model (required), prompt (required), images (optional base64 references). Saves JPEG to `~/.achates/agents/{agentName}/images/{timestamp}-{id}.jpg`. Returns only text to the model (file path); image data is passed via `Details` (`ImageDetails` record) for live UI delivery and `ImageUrl` for session persistence. Images served via `GET /agents/{name}/images/{file}` endpoint. Per-agent; requires `image` in agent's tools list.
 - `ProfileTool` — allows the agent to read and update its own profile. Actions: get (returns current description, prompt, and avatar), update (changes description, prompt, and/or avatar — only provide fields to change). Avatar is compressed to 512x512 JPEG. Writes changes to AGENT.md and triggers agent reload. Per-agent; requires `profile` in agent's tools list.
 - `HealthTool` — queries health data from Withings API. Actions: weight (body composition), blood_pressure, sleep, activity, authorize. Singleton; requires `withings` config with client_id and client_secret. OAuth 2.0 authorization code flow with browser redirect to `/withings/callback`.
 - `WithingsClient` (`src/Achates.Server/Withings/`) — Withings Health API client. OAuth 2.0 authorization code flow: user visits auth URL, Withings redirects to `/withings/callback`, tokens persisted at `~/.achates/withings-tokens.json`. Access tokens auto-refresh. All API calls are POST with form-encoded params; responses are `{ "status": 0, "body": { ... } }`.
@@ -91,6 +91,7 @@ Providers <- Agent <- Server
 - `GatewayService` — ASP.NET Core `IHostedLifecycleService`. Resolves agents from config at startup, creates `MobileTransport` and `CronService`.
 - WebSocket endpoint: `/ws` (query params: `peer`)
 - Health check: `GET /health`
+- Agent images: `GET /agents/{name}/images/{file}` (serves generated images from disk)
 - Admin console: Blazor Interactive Server UI at `/admin`. Pages: Dashboard, Sessions, Memory, Costs, Config.
 - `AdminService` — singleton data access layer for admin pages. Reads sessions, memory, costs, config from disk.
 - Blazor files live in `Components/` (App, Routes, Layout, Pages). Static assets in `wwwroot/css/` (Bootstrap 5, app.css).

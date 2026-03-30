@@ -10,6 +10,7 @@ enum ContentBlock: Identifiable, Sendable, Equatable {
     case thinking(id: String, text: String, collapsed: Bool)
     case toolCall(id: String, name: String, status: ToolCallStatus, result: String?)
     case image(id: String, data: Data, mimeType: String)
+    case remoteImage(id: String, url: URL)
 
     var id: String {
         switch self {
@@ -17,6 +18,7 @@ enum ContentBlock: Identifiable, Sendable, Equatable {
         case .thinking(let id, _, _): return "thinking-\(id)"
         case .toolCall(let id, _, _, _): return "tool-\(id)"
         case .image(let id, _, _): return "image-\(id)"
+        case .remoteImage(let id, _): return "image-\(id)"
         }
     }
 }

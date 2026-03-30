@@ -138,7 +138,7 @@ final class AppState {
                 "agent": .string(agent.id),
             ])
             if let payload {
-                let newSegments = TimelineSegment.fromTimeline(payload, agentId: agent.id)
+                let newSegments = TimelineSegment.fromTimeline(payload, agentId: agent.id, serverURL: serverURL)
                 segments = newSegments
                 hasMoreHistory = newSegments.count >= 50
                 rebuildTimeline()
@@ -163,7 +163,7 @@ final class AppState {
                 "before": .int(beforeMs),
             ])
             if let payload {
-                let olderSegments = TimelineSegment.fromTimeline(payload, agentId: agent.id)
+                let olderSegments = TimelineSegment.fromTimeline(payload, agentId: agent.id, serverURL: serverURL)
                 hasMoreHistory = olderSegments.count >= 50
                 segments.insert(contentsOf: olderSegments, at: 0)
                 rebuildTimeline()

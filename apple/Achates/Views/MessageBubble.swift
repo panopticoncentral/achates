@@ -67,6 +67,9 @@ struct MessageBubble: View {
 
         case .image(_, let data, _):
             imageBubble(data)
+
+        case .remoteImage(_, let url):
+            remoteImageBubble(url)
         }
     }
 
@@ -89,6 +92,33 @@ struct MessageBubble: View {
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         #endif
+    }
+
+    @ViewBuilder
+    private func remoteImageBubble(_ url: URL) -> some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 260)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            case .failure:
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(width: 260, height: 180)
+                    .overlay {
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
+            default:
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.gray.opacity(0.1))
+                    .frame(width: 260, height: 180)
+                    .overlay { ProgressView() }
+            }
+        }
     }
 
     private func textBubble(_ text: String) -> some View {

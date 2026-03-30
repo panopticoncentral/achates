@@ -933,12 +933,7 @@ public sealed class MobileTransport(
     {
         var messages = session.Messages.Select<AgentMessage, AgentMessage>(m => m switch
         {
-            ToolResultMessage tr => tr with
-            {
-                Content = tr.Content
-                    .Where(c => c is not (CompletionImageContent or CompletionAudioInputContent or CompletionFileContent))
-                    .ToList(),
-            },
+            ToolResultMessage tr => StripToolResult(tr),
             AssistantMessage am => am with
             {
                 Content = am.Content
@@ -956,6 +951,53 @@ public sealed class MobileTransport(
             Updated = session.Updated,
             Messages = messages,
         };
+    }
+
+    private static ToolResultMessage StripToolResult(ToolResultMessage tr)
+    {
+        var imageUrl = tr.ImageUrl ?? InferImageUrl(tr);
+
+        var content = tr.Content
+            .Where(c => c is not (CompletionImageContent or CompletionAudioInputContent or CompletionFileContent))
+            .ToList();
+
+        // Inject a lightweight image reference so the client can render it from the URL
+        if (imageUrl is not null)
+        {
+            content.Add(new CompletionImageContent { Data = "", MimeType = "image/jpeg", Url = imageUrl });
+        }
+
+        return tr with { Content = content, ImageUrl = imageUrl };
+    }
+
+    /// <summary>
+    /// Backfill image_url for old sessions that have a filesystem path in the tool result text.
+    /// Matches "Image saved to: .../{agentName}/images/{fileName}" or "Generated image: /agents/...".
+    /// </summary>
+    private static string? InferImageUrl(ToolResultMessage tr)
+    {
+        if (tr.ToolName != "image") return null;
+
+        var text = tr.Content.OfType<CompletionTextContent>().FirstOrDefault()?.Text;
+        if (text is null) return null;
+
+        // New format: "Generated image: /agents/{name}/images/{file}"
+        const string newPrefix = "Generated image: ";
+        if (text.StartsWith(newPrefix))
+            return text[newPrefix.Length..];
+
+        // Old format: "Image saved to: /absolute/path/.achates/agents/{name}/images/{file}"
+        const string oldPrefix = "Image saved to: ";
+        if (text.StartsWith(oldPrefix))
+        {
+            var path = text[oldPrefix.Length..];
+            var marker = "/agents/";
+            var idx = path.IndexOf(marker, StringComparison.Ordinal);
+            if (idx >= 0)
+                return path[idx..];
+        }
+
+        return null;
     }
 
     private static string[] FormatModalities(ModelModalities m)
@@ -1027,15 +1069,18 @@ public sealed class MobileTransport(
                         break;
 
                     case ToolEndEvent toolEnd:
-                        // Emit image.block events for any images in the tool result
-                        foreach (var img in toolEnd.Result.Content.OfType<CompletionImageContent>())
+                        // Emit image.block from tool details (e.g. ImageTool)
+                        var imageUrl = (string?)null;
+                        if (toolEnd.Result.Details is ImageDetails imgDetails)
                         {
+                            imageUrl = imgDetails.Url;
                             await BroadcastEventAsync("image.block", new
                             {
                                 agent = agentName,
                                 session_id = sessionId,
-                                data = img.Data,
-                                mime_type = img.MimeType,
+                                url = imgDetails.Url,
+                                data = imgDetails.Data,
+                                mime_type = imgDetails.MimeType,
                             }, ct);
                         }
 
@@ -1046,6 +1091,7 @@ public sealed class MobileTransport(
                             tool_call_id = toolEnd.ToolCallId,
                             tool_name = toolEnd.ToolName,
                             is_error = toolEnd.IsError,
+                            image_url = imageUrl,
                         }, ct);
                         break;
 
