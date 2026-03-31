@@ -321,6 +321,9 @@ public sealed class CronService : IAsyncDisposable
 
     private async Task DeliverAsync(CronJob job, string agentName, string sessionId, CancellationToken ct)
     {
+        // Invalidate cache so next agents.list picks up the new session
+        _transport.InvalidateAgentCache(agentName);
+
         // Broadcast to all connected clients; result is also persisted as a session
         await _transport.BroadcastEventAsync("cron.result", new
         {

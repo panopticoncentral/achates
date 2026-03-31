@@ -102,6 +102,12 @@ public sealed class MobileTransport(
     }
 
     /// <summary>
+    /// Invalidate the cached preview for an agent, forcing recomputation on next access.
+    /// </summary>
+    public void InvalidateAgentCache(string agentName) =>
+        stateCache.Invalidate(agentName);
+
+    /// <summary>
     /// All currently connected clients.
     /// </summary>
     public ICollection<MobileConnection> Connections => _connections.Values;
