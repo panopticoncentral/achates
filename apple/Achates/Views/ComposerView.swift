@@ -30,7 +30,11 @@ struct ComposerView: View {
             HStack(alignment: .bottom, spacing: 8) {
                 TextField("Message", text: $text, axis: .vertical)
                     .textFieldStyle(.plain)
+                    #if os(macOS)
+                    .lineLimit(1...12)
+                    #else
                     .lineLimit(1...6)
+                    #endif
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(
@@ -38,15 +42,7 @@ struct ComposerView: View {
                             .fill(Color(.systemGray6))
                     )
                     .focused($isFocused)
-                    #if os(macOS)
-                    .onKeyPress(keys: [.return], phases: .down) { keyPress in
-                        if keyPress.modifiers.contains(.command) {
-                            send()
-                            return .handled
-                        }
-                        return .ignored
-                    }
-                    #endif
+                    .onSubmit { send() }
 
                 if appState.isStreaming {
                     Button(action: onCancel) {
@@ -55,6 +51,7 @@ struct ComposerView: View {
                             .foregroundStyle(.red)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Stop generating")
                 } else if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Button(action: toggleRecording) {
                         Image(systemName: speechService.isRecording ? "mic.fill" : "mic")
@@ -67,6 +64,7 @@ struct ComposerView: View {
                             )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(speechService.isRecording ? "Stop recording" : "Start recording")
                 } else {
                     Button(action: send) {
                         Image(systemName: "arrow.up.circle.fill")
@@ -74,6 +72,7 @@ struct ComposerView: View {
                             .foregroundStyle(.blue)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Send message")
                 }
             }
             .padding(.horizontal, 12)
@@ -85,6 +84,9 @@ struct ComposerView: View {
     private func send() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        #if os(iOS)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        #endif
         onSend(trimmed)
         text = ""
     }

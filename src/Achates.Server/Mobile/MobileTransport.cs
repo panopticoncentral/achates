@@ -1084,6 +1084,10 @@ public sealed class MobileTransport(
                             }, ct);
                         }
 
+                        var resultText = string.Join("\n", toolEnd.Result.Content
+                            .OfType<CompletionTextContent>()
+                            .Select(c => c.Text));
+
                         await BroadcastEventAsync("tool.end", new
                         {
                             agent = agentName,
@@ -1091,6 +1095,7 @@ public sealed class MobileTransport(
                             tool_call_id = toolEnd.ToolCallId,
                             tool_name = toolEnd.ToolName,
                             is_error = toolEnd.IsError,
+                            result = string.IsNullOrEmpty(resultText) ? null : resultText,
                             image_url = imageUrl,
                         }, ct);
                         break;

@@ -1,5 +1,6 @@
 import SwiftUI
 import MarkdownUI
+import UniformTypeIdentifiers
 
 enum BubblePosition {
     case alone, first, middle, last
@@ -16,11 +17,15 @@ struct MessageBubble: View {
     let message: ChatMessage
     var position: BubblePosition = .alone
     var agent: Agent? = nil
+    var isLastAssistantMessage: Bool = false
+    var isStreaming: Bool = false
+    var onRetry: (() -> Void)? = nil
+    @State private var fullscreenImageData: Data? = nil
+    @State private var fullscreenImageURL: URL? = nil
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 6) {
             if message.role == .assistant {
-                // Small avatar on last message of a group, invisible spacer otherwise
                 if showAvatar, let agent {
                     AgentAvatar(agent: agent, size: 28)
                 } else {
@@ -36,10 +41,13 @@ struct MessageBubble: View {
                 }
 
                 if message.blocks.isEmpty && message.role == .assistant {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(height: 20)
-                        .padding(.leading, 4)
+                    TypingIndicator()
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(Color(.systemGray5))
+                        )
                 }
             }
 
@@ -47,6 +55,8 @@ struct MessageBubble: View {
                 Spacer(minLength: 48)
             }
         }
+        .fullScreenImageViewer(imageData: $fullscreenImageData)
+        .fullScreenImageViewer(imageURL: $fullscreenImageURL)
     }
 
     private var showAvatar: Bool {
@@ -82,6 +92,9 @@ struct MessageBubble: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(maxWidth: 260)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .onTapGesture { fullscreenImageData = data }
+                .accessibilityLabel("Image from assistant")
+                .accessibilityAddTraits(.isImage)
         }
         #else
         if let nsImage = NSImage(data: data) {
@@ -90,6 +103,9 @@ struct MessageBubble: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(maxWidth: 260)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .onTapGesture { fullscreenImageData = data }
+                .accessibilityLabel("Image from assistant")
+                .accessibilityAddTraits(.isImage)
         }
         #endif
     }
@@ -104,61 +120,96 @@ struct MessageBubble: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(maxWidth: 260)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .onTapGesture { fullscreenImageURL = url }
             case .failure:
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(Color.gray.opacity(0.2))
-                    .frame(width: 260, height: 180)
+                    .frame(width: 120, height: 80)
                     .overlay {
                         Image(systemName: "photo")
                             .foregroundStyle(.secondary)
                     }
             default:
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.gray.opacity(0.1))
-                    .frame(width: 260, height: 180)
-                    .overlay { ProgressView() }
+                ProgressView()
+                    .frame(width: 120, height: 80)
             }
         }
+        .accessibilityLabel("Image")
+        .accessibilityAddTraits(.isImage)
     }
 
     private func textBubble(_ text: String) -> some View {
-        Markdown(text)
-            .markdownTextStyle {
-                if message.role == .user {
-                    ForegroundColor(.white)
+        HStack(spacing: 0) {
+            Markdown(text)
+                .markdownTextStyle {
+                    if message.role == .user {
+                        ForegroundColor(.white)
+                    }
+                }
+                .markdownBlockStyle(\.heading1) { configuration in
+                    configuration.label.markdownTextStyle { FontSize(.em(1.15)); FontWeight(.semibold) }
+                }
+                .markdownBlockStyle(\.heading2) { configuration in
+                    configuration.label.markdownTextStyle { FontSize(.em(1.1)); FontWeight(.semibold) }
+                }
+                .markdownBlockStyle(\.heading3) { configuration in
+                    configuration.label.markdownTextStyle { FontSize(.em(1.05)); FontWeight(.semibold) }
+                }
+                .markdownBlockStyle(\.codeBlock) { configuration in
+                    configuration.label
+                        .markdownTextStyle {
+                            FontFamilyVariant(.monospaced)
+                            FontSize(.em(0.9))
+                        }
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(message.role == .user
+                                      ? Color.white.opacity(0.15)
+                                      : Color(.systemGray6))
+                        )
+                }
+
+            if isStreaming && message.role == .assistant {
+                StreamingCursor()
+                    .alignmentGuide(.lastTextBaseline) { d in d[.lastTextBaseline] }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(bubbleShape.fill(bubbleColor))
+        .textSelection(.enabled)
+        .contextMenu {
+            Button {
+                copyToClipboard(text)
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+
+            if message.role == .assistant && isLastAssistantMessage {
+                if let onRetry {
+                    Button {
+                        onRetry()
+                    } label: {
+                        Label("Retry", systemImage: "arrow.counterclockwise")
+                    }
                 }
             }
-            .markdownBlockStyle(\.heading1) { configuration in
-                configuration.label.markdownTextStyle { FontSize(.em(1.15)); FontWeight(.semibold) }
-            }
-            .markdownBlockStyle(\.heading2) { configuration in
-                configuration.label.markdownTextStyle { FontSize(.em(1.1)); FontWeight(.semibold) }
-            }
-            .markdownBlockStyle(\.heading3) { configuration in
-                configuration.label.markdownTextStyle { FontSize(.em(1.05)); FontWeight(.semibold) }
-            }
-            .markdownBlockStyle(\.codeBlock) { configuration in
-                configuration.label
-                    .markdownTextStyle {
-                        FontFamilyVariant(.monospaced)
-                        FontSize(.em(0.9))
-                    }
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(message.role == .user
-                                  ? Color.white.opacity(0.15)
-                                  : Color(.systemGray6))
-                    )
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(bubbleShape.fill(bubbleColor))
-            .textSelection(.enabled)
+        }
+        .accessibilityLabel(message.role == .user ? "You said: \(text)" : text)
+    }
+
+    private func copyToClipboard(_ text: String) {
+        #if os(iOS)
+        UIPasteboard.general.string = text
+        #else
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #endif
     }
 
     private var bubbleColor: Color {
-        message.role == .user ? .blue : Color(.systemGray5)
+        message.role == .user ? .accentColor : Color(.systemGray5)
     }
 
     /// Messenger-style rounded rect with variable corner radii for grouped bubbles.
@@ -198,5 +249,166 @@ struct MessageBubble: View {
             topTrailingRadius: topTrailing,
             style: .continuous
         )
+    }
+}
+
+/// Animated three-dot typing indicator, like iMessage.
+struct TypingIndicator: View {
+    @State private var animating = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { i in
+                Circle()
+                    .fill(Color.secondary)
+                    .frame(width: 7, height: 7)
+                    .scaleEffect(animating ? 1.0 : 0.5)
+                    .opacity(animating ? 1.0 : 0.4)
+                    .animation(
+                        .easeInOut(duration: 0.5)
+                        .repeatForever(autoreverses: true)
+                        .delay(Double(i) * 0.15),
+                        value: animating
+                    )
+            }
+        }
+        .onAppear { animating = true }
+    }
+}
+
+/// Blinking cursor at the end of streaming text.
+private struct StreamingCursor: View {
+    @State private var visible = true
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary)
+            .frame(width: 2, height: 16)
+            .opacity(visible ? 1.0 : 0.0)
+            .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: visible)
+            .onAppear { visible = false }
+            .padding(.leading, 1)
+    }
+}
+
+// MARK: - Fullscreen Image Viewer
+
+private struct FullScreenImageViewer: View {
+    let imageData: Data?
+    let imageURL: URL?
+    let onDismiss: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            if let data = imageData {
+                #if os(iOS)
+                if let uiImage = UIImage(data: data) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .ignoresSafeArea()
+                }
+                #else
+                if let nsImage = NSImage(data: data) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                }
+                #endif
+            } else if let url = imageURL {
+                AsyncImage(url: url) { phase in
+                    if case .success(let image) = phase {
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .ignoresSafeArea()
+                    } else {
+                        ProgressView().tint(.white)
+                    }
+                }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            Button(action: onDismiss) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, .white.opacity(0.3))
+            }
+            .buttonStyle(.plain)
+            .padding()
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if let data = imageData {
+                ShareLink(item: ImageTransferable(data: data), preview: SharePreview("Image")) {
+                    Image(systemName: "square.and.arrow.up.circle.fill")
+                        .font(.title)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, .white.opacity(0.3))
+                }
+                .buttonStyle(.plain)
+                .padding()
+            }
+        }
+    }
+}
+
+private struct ImageTransferable: Transferable {
+    let data: Data
+
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(exportedContentType: .image) { item in
+            item.data
+        }
+    }
+}
+
+private extension View {
+    func fullScreenImageViewer(imageData: Binding<Data?>) -> some View {
+        #if os(iOS)
+        self.fullScreenCover(isPresented: .init(
+            get: { imageData.wrappedValue != nil },
+            set: { if !$0 { imageData.wrappedValue = nil } }
+        )) {
+            FullScreenImageViewer(imageData: imageData.wrappedValue, imageURL: nil) {
+                imageData.wrappedValue = nil
+            }
+        }
+        #else
+        self.sheet(isPresented: .init(
+            get: { imageData.wrappedValue != nil },
+            set: { if !$0 { imageData.wrappedValue = nil } }
+        )) {
+            FullScreenImageViewer(imageData: imageData.wrappedValue, imageURL: nil) {
+                imageData.wrappedValue = nil
+            }
+            .frame(minWidth: 600, minHeight: 500)
+        }
+        #endif
+    }
+
+    func fullScreenImageViewer(imageURL: Binding<URL?>) -> some View {
+        #if os(iOS)
+        self.fullScreenCover(isPresented: .init(
+            get: { imageURL.wrappedValue != nil },
+            set: { if !$0 { imageURL.wrappedValue = nil } }
+        )) {
+            FullScreenImageViewer(imageData: nil, imageURL: imageURL.wrappedValue) {
+                imageURL.wrappedValue = nil
+            }
+        }
+        #else
+        self.sheet(isPresented: .init(
+            get: { imageURL.wrappedValue != nil },
+            set: { if !$0 { imageURL.wrappedValue = nil } }
+        )) {
+            FullScreenImageViewer(imageData: nil, imageURL: imageURL.wrappedValue) {
+                imageURL.wrappedValue = nil
+            }
+            .frame(minWidth: 600, minHeight: 500)
+        }
+        #endif
     }
 }

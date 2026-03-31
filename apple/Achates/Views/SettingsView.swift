@@ -85,6 +85,15 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            Section("About") {
+                HStack {
+                    Text("Version")
+                    Spacer()
+                    Text(appVersion)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .alert("Connection Error", isPresented: $showError) {
             Button("OK") {}
@@ -96,6 +105,12 @@ struct SettingsView: View {
                 urlString = url.absoluteString
             }
         }
+    }
+
+    private var appVersion: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "–"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "–"
+        return "\(version) (\(build))"
     }
 
     private func connect() {

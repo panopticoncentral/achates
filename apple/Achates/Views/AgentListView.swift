@@ -144,6 +144,16 @@ struct AgentAvatar: View {
     let agent: Agent
     var size: CGFloat = 60
 
+    private static let avatarColors: [Color] = [
+        .blue, .purple, .pink, .red, .orange, .yellow,
+        .green, .teal, .cyan, .indigo, .mint, .brown
+    ]
+
+    static func avatarColor(for id: String) -> Color {
+        let hash = id.utf8.reduce(0) { $0 &+ Int($1) }
+        return avatarColors[abs(hash) % avatarColors.count]
+    }
+
     var body: some View {
         if let avatarImage = agent.avatarImage {
             #if os(macOS)
@@ -162,7 +172,7 @@ struct AgentAvatar: View {
         } else {
             ZStack {
                 Circle()
-                    .fill(.blue.gradient)
+                    .fill(Self.avatarColor(for: agent.id).gradient)
                     .frame(width: size, height: size)
                 Text(agent.initials)
                     .font(.system(size: size * 0.4, weight: .semibold))
@@ -208,6 +218,9 @@ private struct AgentRow: View {
             }
         }
         .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(agent.displayName). \(previewText)")
+        .accessibilityValue(agent.unreadCount > 0 ? "\(agent.unreadCount) unread" : "")
     }
 
     private var previewText: String {

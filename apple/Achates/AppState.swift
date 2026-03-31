@@ -175,6 +175,16 @@ final class AppState {
 
     // MARK: - Break management
 
+    func addBreakAtEnd() async {
+        // Find the last message in the timeline and add a break after it
+        for item in timeline.reversed() {
+            if case .message(let msg) = item {
+                await addBreak(afterMessage: msg)
+                return
+            }
+        }
+    }
+
     func addBreak(afterMessage message: ChatMessage) async {
         guard let agent = currentAgent, client != nil else { return }
 

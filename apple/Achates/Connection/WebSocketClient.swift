@@ -237,14 +237,14 @@ final class WebSocketClient {
             }
 
         case "tool.start":
-            let toolId = payload["id"]?.stringValue ?? UUID().uuidString
-            let name = payload["name"]?.stringValue ?? "unknown"
+            let toolId = payload["tool_call_id"]?.stringValue ?? UUID().uuidString
+            let name = payload["tool_name"]?.stringValue ?? "unknown"
             appState.addToolCall(toolId: toolId, name: name)
 
         case "tool.end":
-            let toolId = payload["id"]?.stringValue ?? ""
+            let toolId = payload["tool_call_id"]?.stringValue ?? ""
             let result = payload["result"]?.stringValue
-            let success = payload["success"]?.boolValue ?? true
+            let success = !(payload["is_error"]?.boolValue ?? false)
             appState.completeToolCall(toolId: toolId, result: result, success: success)
 
         case "message.end":

@@ -19,6 +19,15 @@ struct AchatesApp: App {
         }
         #if os(macOS)
         .defaultSize(width: 1000, height: 700)
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("New Conversation") {
+                    Task { await appState.addBreakAtEnd() }
+                }
+                .keyboardShortcut("n", modifiers: .command)
+                .disabled(appState.currentAgent == nil)
+            }
+        }
         #endif
 
         #if os(macOS)

@@ -7,44 +7,42 @@ struct ThinkingView: View {
     @State private var isExpanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Button(action: { withAnimation { isExpanded.toggle() } }) {
-                HStack(spacing: 6) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption2)
-                    Image(systemName: "brain")
-                        .font(.caption)
-                    Text("Thinking")
-                        .font(.caption)
-                        .fontWeight(.medium)
+        VStack(alignment: .leading, spacing: 2) {
+            Button(action: {
+                if collapsed {
+                    withAnimation { isExpanded.toggle() }
+                }
+            }) {
+                HStack(spacing: 5) {
                     if !collapsed {
                         ProgressView()
                             .controlSize(.mini)
                     }
-                    Spacer()
+                    Text(collapsed ? "Thought for a moment" : "Thinking...")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    if collapsed {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.quaternary)
+                    }
                 }
-                .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
 
-            if isExpanded {
+            if isExpanded && collapsed {
                 Text(text)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(Color(.systemGray6))
                     )
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.systemGray6).opacity(0.5))
-        )
+        .padding(.leading, 4)
+        .padding(.vertical, 2)
     }
 }
