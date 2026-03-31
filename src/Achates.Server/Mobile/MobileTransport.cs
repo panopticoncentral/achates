@@ -1181,10 +1181,14 @@ public sealed class MobileTransport(
                         };
                         await sessionStore.SaveAsync(agentName, session, ct);
 
+                        var preview = await ComputeAndCachePreviewAsync(agentName, sessionId, ct);
                         await BroadcastEventAsync("done", new
                         {
                             agent = agentName,
                             session_id = sessionId,
+                            last_message = preview.LastMessage,
+                            last_activity = preview.LastActivity,
+                            unread_count = preview.UnreadCount,
                         }, ct);
                         break;
                 }
@@ -1193,6 +1197,7 @@ public sealed class MobileTransport(
         catch (OperationCanceledException)
         {
             _logger.LogDebug("Agent stream cancelled for {Agent}/{Session}", agentName, sessionId);
+            stateCache.Invalidate(agentName);
             try
             {
                 await BroadcastEventAsync("done", new
@@ -1206,6 +1211,7 @@ public sealed class MobileTransport(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error streaming agent response for {Agent}/{Session}", agentName, sessionId);
+            stateCache.Invalidate(agentName);
             try
             {
                 await BroadcastEventAsync("error", new
@@ -1224,6 +1230,20 @@ public sealed class MobileTransport(
             }
             catch { /* best effort */ }
         }
+    }
+
+    /// <summary>
+    /// Compute the preview for an agent from a just-saved session, update the cache,
+    /// and return the preview for inclusion in the done event.
+    /// </summary>
+    private async Task<AgentPreviewState> ComputeAndCachePreviewAsync(
+        string agentName, string sessionId, CancellationToken ct)
+    {
+        var (lastMessage, lastActivity) = await GetLastMessagePreviewAsync(agentName, ct);
+        var unreadCount = await GetUnreadCountAsync(agentName, ct);
+        var preview = new AgentPreviewState(lastMessage, lastActivity, unreadCount);
+        stateCache.Set(agentName, preview);
+        return preview;
     }
 
     private static readonly string SharedMemoryPath = Path.Combine(
