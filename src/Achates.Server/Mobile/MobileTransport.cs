@@ -1233,14 +1233,14 @@ public sealed class MobileTransport(
                     agent = agentName,
                     session_id = sessionId,
                     error = ex.Message,
-                }, ct);
+                }, CancellationToken.None);
 
                 // Always send done so the client exits the typing/streaming state
                 await BroadcastEventAsync("done", new
                 {
                     agent = agentName,
                     session_id = sessionId,
-                }, ct);
+                }, CancellationToken.None);
             }
             catch { /* best effort */ }
         }

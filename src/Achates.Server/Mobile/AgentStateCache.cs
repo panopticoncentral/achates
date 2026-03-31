@@ -25,11 +25,15 @@ public sealed class AgentStateCache
 
     /// <summary>
     /// Optimistically set unread count to zero without invalidating the rest of the preview.
+    /// Retry loop handles concurrent updates from Set/ComputeAndCache.
     /// </summary>
     public void MarkRead(string agentName)
     {
-        if (_cache.TryGetValue(agentName, out var state))
-            _cache[agentName] = state with { UnreadCount = 0 };
+        while (_cache.TryGetValue(agentName, out var state) && state.UnreadCount != 0)
+        {
+            if (_cache.TryUpdate(agentName, state with { UnreadCount = 0 }, state))
+                break;
+        }
     }
 }
 
