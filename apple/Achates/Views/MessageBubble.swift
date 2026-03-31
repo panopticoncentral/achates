@@ -170,10 +170,7 @@ struct MessageBubble: View {
                         )
                 }
 
-            if isStreaming && message.role == .assistant {
-                StreamingCursor()
-                    .alignmentGuide(.lastTextBaseline) { d in d[.lastTextBaseline] }
-            }
+
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -276,20 +273,6 @@ struct TypingIndicator: View {
     }
 }
 
-/// Blinking cursor at the end of streaming text.
-private struct StreamingCursor: View {
-    @State private var visible = true
-
-    var body: some View {
-        Rectangle()
-            .fill(Color.primary)
-            .frame(width: 2, height: 16)
-            .opacity(visible ? 1.0 : 0.0)
-            .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: visible)
-            .onAppear { visible = false }
-            .padding(.leading, 1)
-    }
-}
 
 // MARK: - Fullscreen Image Viewer
 

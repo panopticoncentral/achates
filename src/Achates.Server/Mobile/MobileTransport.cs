@@ -378,7 +378,8 @@ public sealed class MobileTransport(
                 case AssistantMessage assistant:
                     text = string.Join(" ", assistant.Content
                         .OfType<CompletionTextContent>()
-                        .Select(c => c.Text));
+                        .Select(c => c.Text)
+                        .Where(t => !System.Text.RegularExpressions.Regex.IsMatch(t.Trim(), @"^!\[.*?\]\(.*?\)\s*$")));
                     break;
 
                 default:

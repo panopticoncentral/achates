@@ -254,6 +254,7 @@ final class WebSocketClient {
             appState.isStreaming = false
             appState.streamingMessageId = nil
             appState.markCurrentAgentAsRead()
+            Task { await appState.refreshAgents() }
 
         case "cron.result":
             let agent = payload["agent"]?.stringValue
