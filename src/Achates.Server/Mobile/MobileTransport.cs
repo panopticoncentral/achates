@@ -838,6 +838,14 @@ public sealed class MobileTransport(
             }
         }
 
+        // Notify all clients that the agent list has changed
+        stateCache.Invalidate(agentName);
+        _ = BroadcastEventAsync("agents.changed", new
+        {
+            agent = agentName,
+            reason = "profile_updated",
+        }, CancellationToken.None);
+
         var payload = JsonSerializer.SerializeToElement(new { ok = true, warning }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
