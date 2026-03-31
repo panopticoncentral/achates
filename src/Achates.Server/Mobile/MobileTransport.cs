@@ -564,6 +564,13 @@ public sealed class MobileTransport(
         foreach (var session in sessions)
             await sessionStore.DeleteAsync(agentName, session.Id, ct);
 
+        // Delete generated images
+        var imagesDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".achates", "agents", agentName, "images");
+        if (Directory.Exists(imagesDir))
+            Directory.Delete(imagesDir, recursive: true);
+
         var payload = JsonSerializer.SerializeToElement(new { cleared = true }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
@@ -1167,6 +1174,15 @@ public sealed class MobileTransport(
         catch (OperationCanceledException)
         {
             _logger.LogDebug("Agent stream cancelled for {Agent}/{Session}", agentName, sessionId);
+            try
+            {
+                await BroadcastEventAsync("done", new
+                {
+                    agent = agentName,
+                    session_id = sessionId,
+                }, CancellationToken.None);
+            }
+            catch { /* best effort */ }
         }
         catch (Exception ex)
         {
@@ -1178,6 +1194,13 @@ public sealed class MobileTransport(
                     agent = agentName,
                     session_id = sessionId,
                     error = ex.Message,
+                }, ct);
+
+                // Always send done so the client exits the typing/streaming state
+                await BroadcastEventAsync("done", new
+                {
+                    agent = agentName,
+                    session_id = sessionId,
                 }, ct);
             }
             catch { /* best effort */ }

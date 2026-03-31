@@ -329,6 +329,13 @@ public sealed class CronService : IAsyncDisposable
             job_id = job.Id,
             job_name = job.Name,
         }, ct);
+
+        // Signal done so clients refresh agent list (summary + unread count)
+        await _transport.BroadcastEventAsync("done", new
+        {
+            agent = agentName,
+            session_id = sessionId,
+        }, ct);
     }
 
     private async Task UpdateJobStateAfterRunAsync(
