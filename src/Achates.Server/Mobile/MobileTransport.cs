@@ -12,7 +12,6 @@ using Achates.Providers.Completions.Events;
 using Achates.Providers.Models;
 using Achates.Server.Cron;
 using Achates.Server.Tools;
-using Achates.Server;
 
 namespace Achates.Server.Mobile;
 
@@ -24,6 +23,7 @@ namespace Achates.Server.Mobile;
 public sealed class MobileTransport(
     IReadOnlyDictionary<string, AgentDefinition> initialAgents,
     MobileSessionStore sessionStore,
+    AgentStateCache stateCache,
     ILoggerFactory loggerFactory)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -72,6 +72,8 @@ public sealed class MobileTransport(
             if (_runtimes.TryRemove(key, out var runtime))
                 runtime.Abort();
         }
+
+        stateCache.Invalidate(name);
     }
 
     /// <summary>
@@ -95,6 +97,8 @@ public sealed class MobileTransport(
     {
         _agents.TryRemove(oldName, out _);
         _agents[newName] = definition;
+        stateCache.Invalidate(oldName);
+        stateCache.Invalidate(newName);
     }
 
     /// <summary>
@@ -336,8 +340,15 @@ public sealed class MobileTransport(
 
         foreach (var (name, def) in _agents)
         {
-            var (lastMessage, lastActivity) = await GetLastMessagePreviewAsync(name, ct);
-            var unreadCount = await GetUnreadCountAsync(name, ct);
+            var preview = stateCache.Get(name);
+            if (preview is null)
+            {
+                // Cache miss — compute from disk and populate
+                var (lastMessage, lastActivity) = await GetLastMessagePreviewAsync(name, ct);
+                var unreadCount = await GetUnreadCountAsync(name, ct);
+                preview = new AgentPreviewState(lastMessage, lastActivity, unreadCount);
+                stateCache.Set(name, preview);
+            }
 
             agentList.Add(new
             {
@@ -346,9 +357,9 @@ public sealed class MobileTransport(
                 description = def.Description ?? "",
                 model = def.Model.Id,
                 tools = def.Tools.Select(t => t.Name).ToArray(),
-                last_message = lastMessage,
-                last_activity = lastActivity,
-                unread_count = unreadCount,
+                last_message = preview.LastMessage,
+                last_activity = preview.LastActivity,
+                unread_count = preview.UnreadCount,
                 avatar = def.AvatarData is not null ? Convert.ToBase64String(def.AvatarData) : null,
             });
         }
@@ -503,6 +514,8 @@ public sealed class MobileTransport(
         if (result is null)
             return ResponseFrame.Failure(request.Id, "invalid_params", "Could not split session at the given timestamp.");
 
+        stateCache.Invalidate(agentName);
+
         // Dispose the old runtime — context has changed
         var runtimeKey = $"{agentName}:{sessionId}";
         if (_runtimes.TryRemove(runtimeKey, out var runtime))
@@ -535,6 +548,8 @@ public sealed class MobileTransport(
         if (merged is null)
             return ResponseFrame.Failure(request.Id, "not_found", "Segment not found or has no predecessor to merge with.");
 
+        stateCache.Invalidate(agentName);
+
         // Dispose runtimes for both the merged segment and its predecessor
         if (predecessorId is not null && _runtimes.TryRemove($"{agentName}:{predecessorId}", out var predRuntime))
             predRuntime.Abort();
@@ -550,6 +565,8 @@ public sealed class MobileTransport(
         var agentName = GetStringParam(request.Params, "agent");
         if (agentName is null)
             return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
+
+        stateCache.Invalidate(agentName);
 
         // Dispose all runtimes for this agent
         var prefix = $"{agentName}:";
@@ -675,6 +692,8 @@ public sealed class MobileTransport(
         var current = await LoadLastReadTimestampAsync(agentName);
         if (timestamp > current)
             await SaveLastReadTimestampAsync(agentName, timestamp);
+
+        stateCache.MarkRead(agentName);
 
         var payload = JsonSerializer.SerializeToElement(new { ok = true }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);

@@ -27,6 +27,7 @@ public sealed class GatewayService(
     private WithingsClient? _withingsClient;
     private MobileTransport? _mobileTransport;
     private MobileSessionStore? _mobileSessionStore;
+    private AgentStateCache? _agentStateCache;
     private readonly DeviceCommandBridge _deviceBridge = new();
 
     /// <summary>
@@ -43,6 +44,7 @@ public sealed class GatewayService(
     public IReadOnlyDictionary<string, AgentDefinition> Agents => _agents;
     public MobileTransport? MobileTransport => _mobileTransport;
     public MobileSessionStore? MobileSessionStore => _mobileSessionStore;
+    public AgentStateCache? AgentStateCache => _agentStateCache;
     public WithingsClient? WithingsClient => _withingsClient;
 
     public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -91,8 +93,9 @@ public sealed class GatewayService(
         _agents = agents;
 
         // Create MobileTransport
+        _agentStateCache = new AgentStateCache();
         _mobileSessionStore = new MobileSessionStore(_achatesHome);
-        _mobileTransport = new MobileTransport(agents, _mobileSessionStore, loggerFactory);
+        _mobileTransport = new MobileTransport(agents, _mobileSessionStore, _agentStateCache, loggerFactory);
         _mobileTransport.AgentReloadFunc = ReloadAgentAsync;
         _mobileTransport.AgentRenameFunc = RenameAgentAsync;
         _mobileTransport.ModelsListFunc = GetAllModelsAsync;
