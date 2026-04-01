@@ -428,6 +428,11 @@ public sealed class GatewayService(
                 case "profile":
                     tools.Add(new ProfileTool(agentDir, ct => ReloadAgentAsync(agentName, ct)));
                     break;
+                case "agent_creator":
+                    tools.Add(new AgentCreatorTool(
+                        Path.GetDirectoryName(agentDir)!,
+                        async (name, ct) => await ReloadAgentAsync(name, ct)));
+                    break;
                 default:
                     throw new InvalidOperationException($"Unknown tool '{toolName}'.");
             }
