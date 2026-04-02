@@ -88,7 +88,7 @@ struct AgentEditView: View {
                 HStack {
                     Text("Name")
                     Spacer()
-                    TextField("Name", text: binding(\.displayName))
+                    TextField("", text: binding(\.displayName))
                         .multilineTextAlignment(.trailing)
                         .foregroundStyle(.secondary)
                 }
@@ -96,7 +96,7 @@ struct AgentEditView: View {
                 HStack {
                     Text("Description")
                     Spacer()
-                    TextField("Description", text: binding(\.description))
+                    TextField("", text: binding(\.description))
                         .multilineTextAlignment(.trailing)
                         .foregroundStyle(.secondary)
                 }
@@ -136,7 +136,7 @@ struct AgentEditView: View {
                     TextField("Default", text: temperatureBinding)
                         .multilineTextAlignment(.trailing)
                         .foregroundStyle(.secondary)
-                        .frame(width: 80)
+                        .fixedSize()
                         #if os(iOS)
                         .keyboardType(.decimalPad)
                         #endif
@@ -148,7 +148,7 @@ struct AgentEditView: View {
                     TextField("Default", text: maxTokensBinding)
                         .multilineTextAlignment(.trailing)
                         .foregroundStyle(.secondary)
-                        .frame(width: 80)
+                        .fixedSize()
                         #if os(iOS)
                         .keyboardType(.numberPad)
                         #endif

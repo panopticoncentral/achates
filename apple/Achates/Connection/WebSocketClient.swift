@@ -262,6 +262,9 @@ final class WebSocketClient {
                 Task { await appState.loadTimeline() }
             }
 
+        case "agents.changed":
+            Task { await appState.refreshAgents() }
+
         case "agent.renamed":
             let oldId = payload["old_id"]?.stringValue
             let newId = payload["new_id"]?.stringValue

@@ -594,6 +594,13 @@ public sealed class MobileTransport(
         if (Directory.Exists(imagesDir))
             Directory.Delete(imagesDir, recursive: true);
 
+        // Notify clients so agent list preview clears
+        _ = BroadcastEventAsync("agents.changed", new
+        {
+            agent = agentName,
+            reason = "timeline_cleared",
+        }, CancellationToken.None);
+
         var payload = JsonSerializer.SerializeToElement(new { cleared = true }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
