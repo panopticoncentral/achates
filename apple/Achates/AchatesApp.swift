@@ -22,7 +22,14 @@ struct AchatesApp: App {
         .commands {
             CommandGroup(after: .newItem) {
                 Button("New Conversation") {
-                    Task { await appState.addBreakAtEnd() }
+                    Task {
+                        if let agent = appState.currentAgent {
+                            if let sessionId = await appState.createSession(for: agent) {
+                                appState.currentSessionId = sessionId
+                                appState.messages = []
+                            }
+                        }
+                    }
                 }
                 .keyboardShortcut("n", modifiers: .command)
                 .disabled(appState.currentAgent == nil)

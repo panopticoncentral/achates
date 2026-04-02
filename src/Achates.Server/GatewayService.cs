@@ -100,6 +100,22 @@ public sealed class GatewayService(
         _mobileTransport.AgentRenameFunc = RenameAgentAsync;
         _mobileTransport.ModelsListFunc = ct => GetAllModelsAsync(ct: ct);
         _mobileTransport.GenerateAvatarFunc = GenerateAvatarAsync;
+
+        // Resolve title model for auto-titling sessions
+        var titleModelId = config.Tools?.Title?.Model;
+        if (titleModelId is not null)
+        {
+            try
+            {
+                _mobileTransport.TitleModel = await ResolveModelAsync(config.Provider?.Name, titleModelId, cancellationToken);
+                logger.LogInformation("Title model resolved: {Model}", _mobileTransport.TitleModel.Id);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to resolve title model '{Model}', falling back to agent model", titleModelId);
+            }
+        }
+
         _deviceBridge.SetTransport(_mobileTransport);
 
         // Start cron service for agents that have scheduled tasks enabled

@@ -13,6 +13,12 @@ struct ContentView: View {
                 #else
                 NavigationStack {
                     AgentListView()
+                        .navigationDestination(for: Agent.self) { agent in
+                            SessionListView(agent: agent)
+                        }
+                        .navigationDestination(for: SessionSelection.self) { selection in
+                            ChatView(agent: selection.agent)
+                        }
                 }
                 #endif
             }
@@ -24,12 +30,17 @@ struct ContentView: View {
     private var macOSNavigation: some View {
         NavigationSplitView {
             AgentListView()
-        } detail: {
+        } content: {
             if let agent = appState.currentAgent {
-                ChatView(agent: agent)
-                    .id(agent.id)
+                SessionListView(agent: agent)
             } else {
                 ContentUnavailableView("Select an Agent", systemImage: "bubble.left.and.bubble.right")
+            }
+        } detail: {
+            if let agent = appState.currentAgent, appState.currentSessionId != nil {
+                ChatView(agent: agent)
+            } else {
+                ContentUnavailableView("Select a Conversation", systemImage: "bubble.left")
             }
         }
     }

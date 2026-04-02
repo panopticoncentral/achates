@@ -42,8 +42,9 @@ public sealed class MobileSessionStoreTests : IDisposable
         await _store.SaveAsync("agent1", s1);
         await _store.SaveAsync("agent1", s2);
 
-        var list = await _store.ListAsync("agent1");
+        var (list, hasMore) = await _store.ListAsync("agent1");
         Assert.Equal(2, list.Count);
+        Assert.False(hasMore);
         Assert.Contains(list, m => m.Id == "a" && m.Title == "First" && m.MessageCount == 1);
         Assert.Contains(list, m => m.Id == "b" && m.Title == "Second" && m.MessageCount == 2);
     }
@@ -86,7 +87,7 @@ public sealed class MobileSessionStoreTests : IDisposable
     [Fact]
     public async Task ListAsync_ReturnsEmpty_WhenNone()
     {
-        var list = await _store.ListAsync("agent1");
+        var (list, _) = await _store.ListAsync("agent1");
         Assert.Empty(list);
     }
 }

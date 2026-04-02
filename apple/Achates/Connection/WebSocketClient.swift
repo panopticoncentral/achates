@@ -96,19 +96,17 @@ final class WebSocketClient {
     }
 
     func sendMessage(_ text: String) async {
-        guard let agent = appState.currentAgent else {
-            print("Cannot send message: no agent selected")
+        guard let agent = appState.currentAgent,
+              let sessionId = appState.currentSessionId else {
+            print("Cannot send message: no agent or session selected")
             return
         }
         do {
-            let payload = try await sendRequest(method: "chat.send", params: [
+            _ = try await sendRequest(method: "chat.send", params: [
                 "text": .string(text),
                 "agent": .string(agent.id),
+                "session_id": .string(sessionId),
             ])
-            if let sessionId = payload?["session_id"]?.stringValue {
-                let isNew = payload?["new_session"]?.boolValue ?? false
-                appState.handleChatSendResponse(sessionId: sessionId, isNewSession: isNew)
-            }
         } catch {
             print("Failed to send message: \(error)")
         }
@@ -256,10 +254,16 @@ final class WebSocketClient {
             appState.markCurrentAgentAsRead()
             Task { await appState.refreshAgents() }
 
+        case "session.updated":
+            let sessionId = payload["session_id"]?.stringValue
+            let title = payload["title"]?.stringValue
+            if let sessionId, let title {
+                appState.updateSessionTitle(sessionId: sessionId, title: title)
+            }
+
         case "cron.result":
-            let agent = payload["agent"]?.stringValue
-            if agent == nil || agent == appState.currentAgent?.id {
-                Task { await appState.loadTimeline() }
+            if let agent = appState.currentAgent {
+                Task { await appState.loadSessions(for: agent) }
             }
 
         case "agents.changed":

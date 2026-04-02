@@ -5,8 +5,6 @@ struct ChatView: View {
     let agent: Agent
     @State private var speechService = SpeechService()
     @State private var showAgentEditor = false
-    @State private var breakToRemove: String? = nil
-    @State private var showClearConfirmation = false
     @State private var isAtBottom = true
 
     var body: some View {
@@ -42,70 +40,39 @@ struct ChatView: View {
             ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 2) {
-                            if appState.timeline.isEmpty && !appState.isStreaming {
+                            if appState.messages.isEmpty && !appState.isStreaming {
                                 emptyState
                             }
 
-                            if appState.hasMoreHistory {
-                                Button("Load earlier messages") {
-                                    Task { await appState.loadMoreHistory() }
+                            let items = appState.messages
+                            ForEach(Array(items.enumerated()), id: \.element.id) { index, message in
+                                // Show timestamp if >5 min gap from previous message
+                                if let gap = timeGap(at: index, in: items), gap {
+                                    Text(items[index].timestamp.formatted(date: .omitted, time: .shortened))
+                                        .font(.caption2)
+                                        .foregroundStyle(.quaternary)
+                                        .padding(.top, 8)
+                                        .padding(.bottom, 2)
                                 }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 8)
-                                .padding(.bottom, 4)
-                            }
 
-                            let items = appState.timeline
-                            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                                switch item {
-                                case .message(let message):
-                                    // Show timestamp if >5 min gap from previous message
-                                    if let gap = timeGap(at: index, in: items), gap {
-                                        if case .message(let msg) = items[index] {
-                                            Text(msg.timestamp.formatted(date: .omitted, time: .shortened))
-                                                .font(.caption2)
-                                                .foregroundStyle(.quaternary)
-                                                .padding(.top, 8)
-                                                .padding(.bottom, 2)
+                                let position = bubblePosition(for: index, in: items)
+                                let isLast = isLastAssistantMessage(at: index, in: items)
+                                let isStreamingMsg = appState.isStreaming && appState.streamingMessageId == message.id
+                                MessageBubble(
+                                    message: message,
+                                    position: position,
+                                    agent: agent,
+                                    isLastAssistantMessage: isLast,
+                                    isStreaming: isStreamingMsg,
+                                    onRetry: isLast ? {
+                                        if let lastUserText = lastUserMessageText(in: items) {
+                                            Task { await appState.sendMessage(lastUserText) }
                                         }
-                                    }
-
-                                    let position = bubblePosition(for: index, in: items)
-                                    let isLast = isLastAssistantMessage(at: index, in: items)
-                                    let isStreamingMsg = appState.isStreaming && appState.streamingMessageId == message.id
-                                    MessageBubble(
-                                        message: message,
-                                        position: position,
-                                        agent: agent,
-                                        isLastAssistantMessage: isLast,
-                                        isStreaming: isStreamingMsg,
-                                        onRetry: isLast ? {
-                                            if let lastUserText = lastUserMessageText(in: items) {
-                                                Task { await appState.sendMessage(lastUserText) }
-                                            }
-                                        } : nil
-                                    )
-                                    .id(item.id)
-                                    .padding(.top, position.topPadding)
-                                    .transition(.opacity.animation(.easeIn(duration: 0.15)))
-                                    .contextMenu {
-                                        Button("Start new conversation here") {
-                                            Task { await appState.addBreak(afterMessage: message) }
-                                        }
-                                    }
-
-                                case .sessionBreak(_, let segmentId, let date):
-                                    SessionBreakDivider(date: date) {
-                                        #if os(iOS)
-                                        breakToRemove = segmentId
-                                        #else
-                                        Task { await appState.removeBreak(segmentId: segmentId) }
-                                        #endif
-                                    }
-                                    .id(item.id)
-                                    .padding(.vertical, 4)
-                                }
+                                    } : nil
+                                )
+                                .id(message.id)
+                                .padding(.top, position.topPadding)
+                                .transition(.opacity.animation(.easeIn(duration: 0.15)))
                             }
 
                             // Invisible anchor for scroll tracking
@@ -115,12 +82,7 @@ struct ChatView: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 8)
                     }
-                    #if os(iOS)
-                    .refreshable {
-                        await appState.loadMoreHistory()
-                    }
-                    #endif
-                    .onChange(of: appState.timeline.last?.id) { _, _ in
+                    .onChange(of: appState.messages.last?.id) { _, _ in
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo("bottom-anchor", anchor: .bottom)
                         }
@@ -130,13 +92,7 @@ struct ChatView: View {
                         proxy.scrollTo("bottom-anchor", anchor: .bottom)
                         isAtBottom = true
                     }
-                    .onScrollGeometryChange(for: Bool.self) { geometry in
-                        // Consider "at bottom" if within 100pt of the bottom
-                        let offset = geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height
-                        return offset < 100
-                    } action: { _, newValue in
-                        isAtBottom = newValue
-                    }
+                    .modifier(ScrollBottomDetector(isAtBottom: $isAtBottom))
                     .overlay(alignment: .bottomTrailing) {
                         if !isAtBottom {
                             Button {
@@ -150,7 +106,7 @@ struct ChatView: View {
                                     .symbolRenderingMode(.palette)
                                     .foregroundStyle(.primary, Color(.systemGray5))
                                     .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-                            }
+                                }
                             .buttonStyle(.plain)
                             .padding(12)
                             .transition(.opacity.animation(.easeInOut(duration: 0.2)))
@@ -167,31 +123,7 @@ struct ChatView: View {
         }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Remove Break", isPresented: .init(
-            get: { breakToRemove != nil },
-            set: { if !$0 { breakToRemove = nil } }
-        )) {
-            Button("Remove", role: .destructive) {
-                if let segmentId = breakToRemove {
-                    Task { await appState.removeBreak(segmentId: segmentId) }
-                }
-                breakToRemove = nil
-            }
-            Button("Cancel", role: .cancel) {
-                breakToRemove = nil
-            }
-        } message: {
-            Text("Merge these conversations?")
-        }
         #endif
-        .alert("Clear All Messages", isPresented: $showClearConfirmation) {
-            Button("Delete", role: .destructive) {
-                Task { await appState.clearTimeline() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Delete all messages with \(agent.displayName)? This cannot be undone.")
-        }
         #if os(macOS)
         .onKeyPress(.escape) {
             if appState.isStreaming {
@@ -245,25 +177,12 @@ struct ChatView: View {
             #endif
 
             ToolbarItem(placement: .automatic) {
-                Menu {
-                    Button {
-                        showAgentEditor = true
-                    } label: {
-                        Label("Edit Agent", systemImage: "pencil")
-                    }
-
-                    Button(role: .destructive) {
-                        showClearConfirmation = true
-                    } label: {
-                        Label("Clear All", systemImage: "trash")
-                    }
+                Button {
+                    showAgentEditor = true
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    Image(systemName: "pencil.circle")
                 }
             }
-        }
-        .task {
-            await appState.selectAgent(agent)
         }
         .sheet(isPresented: $showAgentEditor) {
             NavigationStack {
@@ -281,53 +200,44 @@ struct ChatView: View {
             AgentAvatar(agent: agent, size: 72)
             Text(agent.displayName)
                 .font(.title3.weight(.semibold))
-            if !agent.description.isEmpty {
-                Text(agent.description)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
+            Text("Start a conversation")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.vertical, 40)
     }
 
-    /// Returns true if the message at this index has a >5 min gap from the previous message.
-    private func timeGap(at index: Int, in items: [TimelineItem]) -> Bool? {
-        guard index > 0,
-              case .message(let current) = items[index],
-              case .message(let previous) = items[index - 1] else { return nil }
+    private func timeGap(at index: Int, in items: [ChatMessage]) -> Bool? {
+        guard index > 0 else { return nil }
+        let current = items[index]
+        let previous = items[index - 1]
         return current.timestamp.timeIntervalSince(previous.timestamp) > 300
     }
 
-    /// Check if this is the last assistant message in the timeline.
-    private func isLastAssistantMessage(at index: Int, in items: [TimelineItem]) -> Bool {
-        guard case .message(let msg) = items[index], msg.role == .assistant else { return false }
+    private func isLastAssistantMessage(at index: Int, in items: [ChatMessage]) -> Bool {
+        guard items[index].role == .assistant else { return false }
         for i in stride(from: items.count - 1, through: index + 1, by: -1) {
-            if case .message(let later) = items[i], later.role == .assistant {
+            if items[i].role == .assistant {
                 return false
             }
         }
         return true
     }
 
-    /// Find the last user message text for retry.
-    private func lastUserMessageText(in items: [TimelineItem]) -> String? {
+    private func lastUserMessageText(in items: [ChatMessage]) -> String? {
         for item in items.reversed() {
-            if case .message(let msg) = item, msg.role == .user {
-                return msg.textContent
+            if item.role == .user {
+                return item.textContent
             }
         }
         return nil
     }
 
-    /// Track the text content of the last message for auto-scrolling during streaming
     private var lastMessageText: String {
-        guard let last = appState.timeline.last,
-              case .message(let msg) = last else { return "" }
-        return msg.textContent
+        guard let last = appState.messages.last else { return "" }
+        return last.textContent
     }
 
     private var connectionLabel: String {
@@ -338,19 +248,11 @@ struct ChatView: View {
         }
     }
 
-    /// Compute bubble grouping position for consecutive same-role messages.
-    private func bubblePosition(for index: Int, in items: [TimelineItem]) -> BubblePosition {
-        let current: MessageRole
-        if case .message(let msg) = items[index] { current = msg.role } else { return .alone }
+    private func bubblePosition(for index: Int, in items: [ChatMessage]) -> BubblePosition {
+        let current = items[index].role
 
-        let prevRole: MessageRole? = {
-            guard index > 0, case .message(let msg) = items[index - 1] else { return nil }
-            return msg.role
-        }()
-        let nextRole: MessageRole? = {
-            guard index + 1 < items.count, case .message(let msg) = items[index + 1] else { return nil }
-            return msg.role
-        }()
+        let prevRole: MessageRole? = index > 0 ? items[index - 1].role : nil
+        let nextRole: MessageRole? = index + 1 < items.count ? items[index + 1].role : nil
 
         let sameAsPrev = prevRole == current
         let sameAsNext = nextRole == current
@@ -362,53 +264,20 @@ struct ChatView: View {
     }
 }
 
-/// A subtle date/time divider between sessions, like iMessage date headers.
-private struct SessionBreakDivider: View {
-    let date: Date
-    let onRemove: () -> Void
+/// Wraps onScrollGeometryChange with an availability check for iOS 18+/macOS 15+.
+private struct ScrollBottomDetector: ViewModifier {
+    @Binding var isAtBottom: Bool
 
-    var body: some View {
-        HStack {
-            line
-            Text(formatted)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                #if os(macOS)
-                .contextMenu {
-                    Button(role: .destructive) {
-                        onRemove()
-                    } label: {
-                        Label("Remove Break", systemImage: "xmark")
-                    }
-                }
-                #else
-                .onLongPressGesture {
-                    onRemove()
-                }
-                #endif
-            line
-        }
-        .padding(.vertical, 8)
-    }
-
-    private var line: some View {
-        Rectangle()
-            .fill(.separator)
-            .frame(height: 0.5)
-    }
-
-    private var formatted: String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(date) {
-            return date.formatted(date: .omitted, time: .shortened)
-        } else if calendar.isDateInYesterday(date) {
-            return "Yesterday \(date.formatted(date: .omitted, time: .shortened))"
-        } else if calendar.isDate(date, equalTo: Date(), toGranularity: .weekOfYear) {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "EEEE h:mm a"
-            return formatter.string(from: date)
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, macOS 15.0, *) {
+            content.onScrollGeometryChange(for: Bool.self) { geometry in
+                let offset = geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height
+                return offset < 100
+            } action: { _, newValue in
+                isAtBottom = newValue
+            }
         } else {
-            return date.formatted(date: .abbreviated, time: .shortened)
+            content
         }
     }
 }

@@ -49,15 +49,6 @@ struct AgentListView: View {
                         } label: {
                             Label("Edit Agent", systemImage: "pencil")
                         }
-
-                        Button(role: .destructive) {
-                            Task {
-                                await appState.selectAgent(agent)
-                                await appState.clearTimeline()
-                            }
-                        } label: {
-                            Label("Clear All", systemImage: "trash")
-                        }
                     }
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                 }
@@ -83,11 +74,6 @@ struct AgentListView: View {
                 #endif
             }
         }
-        #if os(iOS)
-        .navigationDestination(for: Agent.self) { agent in
-            ChatView(agent: agent)
-        }
-        #endif
         .onAppear {
             if appState.connectionStatus == .disconnected && appState.serverURL != nil {
                 appState.connectToServer()
@@ -112,6 +98,7 @@ struct AgentListView: View {
             set: { id in
                 if let agent = appState.agents.first(where: { $0.id == id }) {
                     appState.currentAgent = agent
+                    Task { await appState.loadSessions(for: agent) }
                 }
             }
         )
@@ -123,15 +110,6 @@ struct AgentListView: View {
                         agentToEdit = agent
                     } label: {
                         Label("Edit Agent", systemImage: "pencil")
-                    }
-
-                    Button(role: .destructive) {
-                        Task {
-                            await appState.selectAgent(agent)
-                            await appState.clearTimeline()
-                        }
-                    } label: {
-                        Label("Clear All", systemImage: "trash")
                     }
                 }
         }

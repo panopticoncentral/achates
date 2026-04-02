@@ -46,7 +46,7 @@ Providers <- Agent <- Server
 - `IModelProvider` — interface with `GetModelsAsync()`, `GetCompletions()` (streaming), and `GenerateImageAsync()` (single image from prompt)
 - `ModelProviders.Create(id)` — factory for provider instances
 - Only implementation: `OpenRouterProvider` (SSE streaming, `api_key` in config or `OPENROUTER_API_KEY` env var)
-- Content types: `CompletionContent` base, subtypes for text, image, audio, thinking, tool calls, files. `CompletionImageContent` has optional `Url` for lightweight references (empty `Data` + URL, used in timeline payloads).
+- Content types: `CompletionContent` base, subtypes for text, image, audio, thinking, tool calls, files. `CompletionImageContent` has optional `Url` for lightweight references (empty `Data` + URL).
 - `CompletionUserContent` — input-only base. `CompletionAudioContent` is output-only (extends `CompletionContent`), `CompletionAudioInputContent` is input-only (extends `CompletionUserContent`). This asymmetry is intentional.
 - Event streaming via `CompletionEventStream` using `System.Threading.Channels`
 
@@ -100,12 +100,12 @@ Providers <- Agent <- Server
 ### Transport (`Achates.Server.Mobile`)
 - `MobileTransport` — WebSocket handler for `/ws` connections. Supports multiple concurrent clients. All clients share the same session namespace (sessions are per-agent, not per-client). Events are broadcast to all connected clients. Manages RPC dispatch, agent event streaming, and session persistence.
 - `MobileConnection` — per-connection state: RPC correlation, event sequencing, agent runtimes, `Capabilities` set (populated from `connect` params).
-- `MobileSessionStore` — session persistence per agent under `~/.achates/agents/{agentName}/sessions/{sessionId}.json`. Provides timeline operations: `LoadTimelineAsync` (paginated chronological loading), `GetLatestSessionAsync`, `MergeSessionsAsync` (combine adjacent sessions), `SplitSessionAsync` (split at message boundary).
+- `MobileSessionStore` — session persistence per agent under `~/.achates/agents/{agentName}/sessions/{sessionId}.json`. Operations: `ListAsync` (paginated, sorted by Updated desc, returns `(sessions, hasMore)` tuple), `LoadAsync`, `SaveAsync`, `DeleteAsync`, `CreateAsync` (new empty session), `DeleteAllAsync`, `UpdateMetadataAsync` (title updates).
 - `MobileSession` — session model with Id, Title, Created, Updated, Messages.
 - `DeviceCommandBridge` — routes tool requests (location, camera) to any connected client with the required capability. Used by `LocationTool` and `CameraTool`.
 - Frame protocol: `RequestFrame` (req), `ResponseFrame` (res), `EventFrame` (evt). JSON with snake_case naming.
-- RPC methods: `connect`, `ping`, `agents.list`, `timeline.load`, `timeline.break.add`, `timeline.break.remove`, `timeline.clear`, `chat.send`, `chat.cancel`, `chat.read`, `agent.get`, `agent.update`, `agent.rename`, `agent.generate_avatar`, `tools.list`, `models.list`.
-- Timeline model: sessions are presented as a continuous timeline per agent (like iMessage). Session breaks appear as date/time dividers. Server auto-creates a new session after 4h of inactivity. Users can manually add breaks (split) or remove them (merge). `chat.send` no longer requires `session_id` — server auto-resolves to the latest session.
+- RPC methods: `connect`, `ping`, `agents.list`, `sessions.list`, `sessions.create`, `sessions.get`, `sessions.delete`, `sessions.rename`, `sessions.delete_all`, `chat.send`, `chat.cancel`, `chat.read`, `agent.get`, `agent.update`, `agent.rename`, `agent.generate_avatar`, `tools.list`, `models.list`.
+- Session model: discrete sessions per agent (like ChatGPT/Claude). Each session is a standalone conversation. Users see a list of sessions and explicitly create or revisit them. `chat.send` requires `session_id`. Auto-titling generates a short title via LLM after the first response (uses `tools.title.model` or falls back to agent's model), broadcast as `session.updated` event.
 - Device commands (server-to-client requests): `device.location`, `device.camera`.
 - Per-session tool injection: `CreateRuntime` adds MemoryTool, TodoTool, CostTool, CronTool per-session.
 
@@ -145,6 +145,8 @@ tools:
       user_email: user@example.com     # required for client credentials
   transcribe:
     model: google/gemini-2.5-flash  # audio-capable model for transcription
+  title:
+    model: google/gemini-2.5-flash  # model for auto-generating session titles (default: agent's model)
   avatar:
     model: google/gemini-2.5-flash-image  # image-capable model for avatar generation (default)
   withings:
