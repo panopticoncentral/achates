@@ -28,10 +28,20 @@ internal sealed class OpenRouterProvider : IModelProvider
             ProcessStreamAsync(client, stream, model, completionContext, options, cancellationToken));
     }
 
-    public async Task<IReadOnlyList<Model>> GetModelsAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Model>> GetModelsAsync(ModelModalities? outputModalities = null, CancellationToken cancellationToken = default)
     {
         var client = new OpenRouterClient(HttpClient, Key);
-        var orModels = await client.GetModelsAsync(cancellationToken).ConfigureAwait(false);
+
+        Dictionary<string, string>? queryParams = null;
+        if (outputModalities is { } om)
+        {
+            queryParams = [];
+            if (om.HasFlag(ModelModalities.Image)) queryParams["output_modalities"] = "image";
+            else if (om.HasFlag(ModelModalities.Audio)) queryParams["output_modalities"] = "audio";
+            else if (om.HasFlag(ModelModalities.Text)) queryParams["output_modalities"] = "text";
+        }
+
+        var orModels = await client.GetModelsAsync(queryParams, cancellationToken).ConfigureAwait(false);
 
         var models = new List<Model>(orModels.Count);
         models.AddRange(orModels.Select(or => new Model

@@ -13,9 +13,17 @@ internal sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
     private void SetAuth(HttpRequestMessage request) =>
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
-    public async Task<IReadOnlyList<OpenRouterModel>> GetModelsAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<OpenRouterModel>> GetModelsAsync(
+        IReadOnlyDictionary<string, string>? queryParams = null,
+        CancellationToken cancellationToken = default)
     {
         var requestUri = $"{GetBaseUrl()}/models";
+        if (queryParams is { Count: > 0 })
+        {
+            var qs = string.Join("&", queryParams.Select(kv =>
+                $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
+            requestUri = $"{requestUri}?{qs}";
+        }
 
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
         SetAuth(request);

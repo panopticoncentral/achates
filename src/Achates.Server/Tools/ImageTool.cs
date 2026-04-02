@@ -14,7 +14,7 @@ internal sealed class ImageTool(
     string agentName,
     string agentDir,
     Func<string, string, IReadOnlyList<byte[]>?, CancellationToken, Task<byte[]?>> generateFunc,
-    Func<CancellationToken, Task<IReadOnlyList<Model>>> listModelsFunc) : AgentTool
+    Func<ModelModalities?, CancellationToken, Task<IReadOnlyList<Model>>> listModelsFunc) : AgentTool
 {
     private static readonly JsonElement _schema = ObjectSchema(
         new Dictionary<string, JsonElement>
@@ -50,10 +50,7 @@ internal sealed class ImageTool(
 
     private async Task<AgentToolResult> ListModelsAsync(CancellationToken cancellationToken)
     {
-        var allModels = await listModelsFunc(cancellationToken);
-        var imageModels = allModels
-            .Where(m => m.Output.HasFlag(ModelModalities.Image))
-            .ToList();
+        var imageModels = (await listModelsFunc(ModelModalities.Image, cancellationToken)).ToList();
 
         if (imageModels.Count == 0)
             return TextResult("No image-capable models available.");

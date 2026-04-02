@@ -31,9 +31,9 @@ public interface IModelProvider
     string Key { set; }
 
     /// <summary>
-    /// Gets all models available from this provider.
+    /// Gets all models available from this provider, optionally filtered by output modality.
     /// </summary>
-    Task<IReadOnlyList<Model>> GetModelsAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Model>> GetModelsAsync(ModelModalities? outputModalities = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Stream a completion, returning an event stream that emits events as content is generated.

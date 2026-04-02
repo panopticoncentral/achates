@@ -98,7 +98,7 @@ public sealed class GatewayService(
         _mobileTransport = new MobileTransport(agents, _mobileSessionStore, _agentStateCache, loggerFactory);
         _mobileTransport.AgentReloadFunc = ReloadAgentAsync;
         _mobileTransport.AgentRenameFunc = RenameAgentAsync;
-        _mobileTransport.ModelsListFunc = GetAllModelsAsync;
+        _mobileTransport.ModelsListFunc = ct => GetAllModelsAsync(ct: ct);
         _mobileTransport.GenerateAvatarFunc = GenerateAvatarAsync;
         _deviceBridge.SetTransport(_mobileTransport);
 
@@ -117,7 +117,9 @@ public sealed class GatewayService(
         logger.LogInformation("Started with {AgentCount} agent(s)", agents.Count);
     }
 
-    public async Task<IReadOnlyList<Achates.Providers.Models.Model>> GetAllModelsAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<Achates.Providers.Models.Model>> GetAllModelsAsync(
+        Achates.Providers.Models.ModelModalities? outputModalities = null,
+        CancellationToken ct = default)
     {
         var providerId = config.Provider?.Name
             ?? throw new InvalidOperationException("No provider specified.");
@@ -132,7 +134,7 @@ public sealed class GatewayService(
         provider.Key = apiKey;
         provider.HttpClient = httpClientFactory.CreateClient("achates");
 
-        return await provider.GetModelsAsync(ct);
+        return await provider.GetModelsAsync(outputModalities, ct);
     }
 
     public async Task<byte[]?> GenerateAvatarAsync(string prompt, byte[]? referenceImage, CancellationToken ct)
@@ -509,7 +511,7 @@ public sealed class GatewayService(
         provider.Key = apiKey;
         provider.HttpClient = httpClientFactory.CreateClient("achates");
 
-        var models = await provider.GetModelsAsync(cancellationToken);
+        var models = await provider.GetModelsAsync(cancellationToken: cancellationToken);
         return models.FirstOrDefault(m => m.Id.Equals(modelId, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException($"Model '{modelId}' not found.");
     }

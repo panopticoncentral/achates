@@ -199,7 +199,7 @@ public sealed class ChatToolTests
         public string EnvironmentKey => "STUB_KEY";
         public string? Key { get; set; }
         public HttpClient? HttpClient { get; set; }
-        public Task<IReadOnlyList<Model>> GetModelsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Model>>([]);
+        public Task<IReadOnlyList<Model>> GetModelsAsync(ModelModalities? outputModalities = null, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Model>>([]);
         public CompletionEventStream GetCompletions(Model model, CompletionContext context, CompletionOptions? options = null, CancellationToken ct = default) => throw new NotImplementedException();
     }
 }
