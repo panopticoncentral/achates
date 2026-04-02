@@ -315,7 +315,6 @@ public sealed class GatewayService(
         var systemPrompt = SystemPrompt.Build(agentConfig.Description, prompt, tools,
             hasTodo: toolsConfig?.Todo?.File is not null,
             hasNotes: hasTools.Contains("notes"),
-            notesFolderName: ResolveNotesFolder(toolsConfig),
             hasMail: hasTools.Contains("mail"),
             hasCalendar: hasTools.Contains("calendar"),
             graphAccountNames: graphAccountNames,
@@ -400,7 +399,7 @@ public sealed class GatewayService(
                     tools.Add(new MailTool(graphClients));
                     break;
                 case "notes":
-                    tools.Add(new NotesTool(ResolveNotesFolder(toolsConfig)));
+                    tools.Add(new NotesTool());
                     break;
                 case "calendar":
                     if (graphClients.Count == 0)
@@ -506,8 +505,6 @@ public sealed class GatewayService(
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..])
             : path;
 
-    private static string ResolveNotesFolder(ToolsConfig? toolsConfig) =>
-        string.IsNullOrWhiteSpace(toolsConfig?.Notes?.Folder) ? "Achates" : toolsConfig.Notes.Folder;
 
     private async Task<Model> ResolveModelAsync(string? providerId, string? modelId, CancellationToken cancellationToken)
     {

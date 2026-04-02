@@ -13,7 +13,6 @@ public static class SystemPrompt
         IReadOnlyList<AgentTool>? tools = null,
         bool hasTodo = false,
         bool hasNotes = false,
-        string? notesFolderName = null,
         bool hasMail = false,
         bool hasCalendar = false,
         IReadOnlyList<string>? graphAccountNames = null,
@@ -88,10 +87,10 @@ public static class SystemPrompt
 
         if (hasNotes)
         {
-            var folder = string.IsNullOrWhiteSpace(notesFolderName) ? "Achates" : notesFolderName;
             lines.Add("## Notes");
-            lines.Add($"You can access the user's Apple Notes in the '{folder}' folder via the notes tool.");
-            lines.Add("Use 'list' to see available note titles, 'read' to open a note by exact title, and create/update/rename only within that folder.");
+            lines.Add("You can access the user's Apple Notes via the notes tool.");
+            lines.Add("Use 'folders' to discover available folders, then 'list' with a folder name to see notes. You can read, create, update, and rename notes in any folder.");
+            lines.Add("Notes are read and written as HTML. When updating a note, preserve the existing HTML structure and formatting. Use standard tags: <h1>, <b>, <i>, <ul>/<ol>/<li>, <br>, etc.");
             lines.Add("You cannot search across all notes or access notes outside that folder.");
             lines.Add("");
         }

@@ -95,20 +95,12 @@ public sealed class SystemPromptTests
     }
 
     [Fact]
-    public void Notes_section_uses_custom_folder_name()
-    {
-        var result = SystemPrompt.Build(hasNotes: true, notesFolderName: "MyNotes");
-
-        Assert.Contains("## Notes", result);
-        Assert.Contains("'MyNotes'", result);
-    }
-
-    [Fact]
-    public void Notes_section_defaults_to_achates_folder()
+    public void Notes_section_included_when_enabled()
     {
         var result = SystemPrompt.Build(hasNotes: true);
 
-        Assert.Contains("'Achates'", result);
+        Assert.Contains("## Notes", result);
+        Assert.Contains("folders", result);
     }
 
     [Fact]
