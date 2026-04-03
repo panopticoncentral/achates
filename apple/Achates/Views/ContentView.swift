@@ -16,9 +16,6 @@ struct ContentView: View {
                         .navigationDestination(for: Agent.self) { agent in
                             SessionListView(agent: agent)
                         }
-                        .navigationDestination(for: SessionSelection.self) { selection in
-                            ChatView(agent: selection.agent)
-                        }
                 }
                 #endif
             }
