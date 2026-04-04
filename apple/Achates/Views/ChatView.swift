@@ -6,6 +6,7 @@ struct ChatView: View {
     @State private var speechService = SpeechService()
     @State private var showAgentEditor = false
     @State private var isAtBottom = true
+    @AppStorage("show_tool_activity") private var showToolActivity = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,7 +45,7 @@ struct ChatView: View {
                                 emptyState
                             }
 
-                            let items = appState.messages
+                            let items = visibleMessages
                             ForEach(Array(items.enumerated()), id: \.element.id) { index, message in
                                 // Show timestamp if >5 min gap from previous message
                                 if let gap = timeGap(at: index, in: items), gap {
@@ -65,7 +66,7 @@ struct ChatView: View {
                                     isLastAssistantMessage: isLast,
                                     isStreaming: isStreamingMsg,
                                     onRetry: isLast ? {
-                                        if let lastUserText = lastUserMessageText(in: items) {
+                                        if let lastUserText = lastUserMessageText(in: appState.messages) {
                                             Task { await appState.sendMessage(lastUserText) }
                                         }
                                     } : nil
@@ -233,6 +234,19 @@ struct ChatView: View {
             }
         }
         return nil
+    }
+
+    private var visibleMessages: [ChatMessage] {
+        if showToolActivity { return appState.messages }
+        return appState.messages.filter { message in
+            // Keep if message has any non-tool-call blocks, or any still-running tool calls
+            message.blocks.contains { block in
+                if case .toolCall(_, _, let status, _) = block {
+                    return status == .running
+                }
+                return true
+            }
+        }
     }
 
     private var lastMessageText: String {

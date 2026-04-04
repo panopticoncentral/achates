@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @AppStorage("show_message_costs") private var showMessageCosts = false
+    @AppStorage("show_tool_activity") private var showToolActivity = false
     @State private var urlString = ""
     @State private var showError = false
     @State private var errorMessage = ""
@@ -89,6 +90,7 @@ struct SettingsView: View {
 
             Section("Display") {
                 Toggle("Show message costs", isOn: $showMessageCosts)
+                Toggle("Show tool activity", isOn: $showToolActivity)
             }
 
             Section("About") {

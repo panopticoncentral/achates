@@ -21,6 +21,7 @@ struct MessageBubble: View {
     var isStreaming: Bool = false
     var onRetry: (() -> Void)? = nil
     @AppStorage("show_message_costs") private var showMessageCosts = false
+    @AppStorage("show_tool_activity") private var showToolActivity = false
     @State private var fullscreenImageData: Data? = nil
     @State private var fullscreenImageURL: URL? = nil
 
@@ -37,7 +38,7 @@ struct MessageBubble: View {
             }
 
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
-                ForEach(message.blocks) { block in
+                ForEach(visibleBlocks) { block in
                     blockView(block)
                 }
 
@@ -69,6 +70,16 @@ struct MessageBubble: View {
 
     private var showAvatar: Bool {
         position == .last || position == .alone
+    }
+
+    private var visibleBlocks: [ContentBlock] {
+        if showToolActivity { return message.blocks }
+        return message.blocks.filter { block in
+            if case .toolCall(_, _, let status, _) = block, status != .running {
+                return false
+            }
+            return true
+        }
     }
 
     @ViewBuilder
