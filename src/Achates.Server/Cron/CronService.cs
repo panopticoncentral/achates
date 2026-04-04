@@ -285,7 +285,7 @@ public sealed class CronService : IAsyncDisposable
             var session = new MobileSession
             {
                 Id = sessionId,
-                Title = $"[Cron] {job.Name}",
+                Title = job.Name,
                 Messages = [.. agent.Messages],
             };
             await _sessionStore.SaveAsync(agentName, session, ct);
