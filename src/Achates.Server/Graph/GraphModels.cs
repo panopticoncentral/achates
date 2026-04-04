@@ -45,6 +45,16 @@ internal sealed class GraphBody
     public string? Content { get; set; }
 }
 
+internal sealed class GraphMailFolder
+{
+    public string? Id { get; set; }
+    public string? DisplayName { get; set; }
+    public string? ParentFolderId { get; set; }
+    public int TotalItemCount { get; set; }
+    public int UnreadItemCount { get; set; }
+    public int ChildFolderCount { get; set; }
+}
+
 internal sealed class GraphEvent
 {
     public string? Id { get; set; }

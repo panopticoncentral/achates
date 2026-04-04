@@ -17,7 +17,7 @@ internal sealed class MailTool(IReadOnlyDictionary<string, GraphClient> graphCli
         required: ["action"]);
 
     public override string Name => "mail";
-    public override string Description => "Read Outlook email: list recent messages, read a specific message, or search.";
+    public override string Description => "Read Outlook email: list recent messages, read a specific message, search, or browse folders.";
     public override string Label => "Mail";
     public override JsonElement Parameters => _schema;
 
@@ -35,6 +35,7 @@ internal sealed class MailTool(IReadOnlyDictionary<string, GraphClient> graphCli
             "list" => await ListAsync(graph, arguments, cancellationToken),
             "read" => await ReadAsync(graph, arguments, cancellationToken),
             "search" => await SearchAsync(graph, arguments, cancellationToken),
+            "folders" => await FoldersAsync(graph, arguments, cancellationToken),
             _ => TextResult($"Unknown action: {action}"),
         };
     }
@@ -88,6 +89,39 @@ internal sealed class MailTool(IReadOnlyDictionary<string, GraphClient> graphCli
             new Dictionary<string, string> { ["ConsistencyLevel"] = "eventual" },
             cancellationToken);
         return FormatMessageList(result.Value, "search results");
+    }
+
+    private async Task<AgentToolResult> FoldersAsync(
+        GraphClient graph, Dictionary<string, object?> arguments, CancellationToken cancellationToken)
+    {
+        var parentFolderId = GetString(arguments, "parent_folder_id");
+
+        var path = parentFolderId is not null
+            ? $"mailFolders/{Uri.EscapeDataString(parentFolderId)}/childFolders?$top=50"
+            : "mailFolders?$top=50";
+
+        var result = await graph.GetAsync<GraphCollection<GraphMailFolder>>(path, cancellationToken);
+        return FormatFolderList(result.Value, parentFolderId);
+    }
+
+    private static AgentToolResult FormatFolderList(List<GraphMailFolder> folders, string? parentId)
+    {
+        if (folders.Count == 0)
+            return TextResult(parentId is not null ? "No child folders found." : "No mail folders found.");
+
+        var sb = new StringBuilder();
+        sb.AppendLine(parentId is not null ? "**Child folders:**" : "**Mail folders:**");
+        sb.AppendLine();
+
+        foreach (var folder in folders)
+        {
+            var unread = folder.UnreadItemCount > 0 ? $" ({folder.UnreadItemCount} unread)" : "";
+            var children = folder.ChildFolderCount > 0 ? $" [{folder.ChildFolderCount} subfolders]" : "";
+            sb.AppendLine($"- **{folder.DisplayName}** — {folder.TotalItemCount} items{unread}{children}");
+            sb.AppendLine($"  ID: `{folder.Id}`");
+        }
+
+        return TextResult(sb.ToString().TrimEnd());
     }
 
     private static AgentToolResult FormatMessageList(List<GraphMessage> messages, string context)
@@ -156,11 +190,12 @@ internal sealed class MailTool(IReadOnlyDictionary<string, GraphClient> graphCli
     {
         var props = new Dictionary<string, JsonElement>
         {
-            ["action"] = StringEnum(["list", "read", "search"], "Action to perform.", "list"),
+            ["action"] = StringEnum(["list", "read", "search", "folders"], "Action to perform.", "list"),
             ["message_id"] = StringSchema("Message ID. Required for 'read'."),
             ["query"] = StringSchema("Search query (KQL syntax). Required for 'search'."),
             ["count"] = NumberSchema("Number of messages to return. Default 10, max 50."),
-            ["folder"] = StringSchema("Mail folder (e.g. 'inbox', 'sentitems', 'drafts'). Default 'inbox'. Only for 'list'."),
+            ["folder"] = StringSchema("Mail folder name or ID (e.g. 'inbox', 'sentitems', 'drafts', or a folder ID). Default 'inbox'. For 'list'."),
+            ["parent_folder_id"] = StringSchema("Parent folder ID to list child folders of. For 'folders'. Omit to list top-level folders."),
         };
 
         if (clients.Count > 1)
