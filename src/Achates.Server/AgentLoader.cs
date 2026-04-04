@@ -62,6 +62,9 @@ public static class AgentLoader
         if (!string.IsNullOrWhiteSpace(config.Model))
             sb.AppendLine($"**Model:** {config.Model}");
 
+        if (!string.IsNullOrWhiteSpace(config.ThinkingModel))
+            sb.AppendLine($"**Thinking Model:** {config.ThinkingModel}");
+
         if (!string.IsNullOrWhiteSpace(config.Provider))
             sb.AppendLine($"**Provider:** {config.Provider}");
 
@@ -298,6 +301,9 @@ public static class AgentLoader
         {
             case "model":
                 config.Model = value;
+                break;
+            case "thinking model":
+                config.ThinkingModel = value;
                 break;
             case "provider":
                 config.Provider = value;

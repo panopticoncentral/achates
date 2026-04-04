@@ -13,6 +13,7 @@ namespace Achates.Server;
 public sealed record AgentDefinition
 {
     public required Model Model { get; init; }
+    public Model? ThinkingModel { get; init; }
     public required string SystemPrompt { get; init; }
     public required IReadOnlyList<AgentTool> Tools { get; init; }
     public required CompletionOptions? CompletionOptions { get; init; }

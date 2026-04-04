@@ -295,6 +295,17 @@ public sealed class GatewayService(
         if (withingsClient is not null)
             _withingsClient = withingsClient;
 
+        // Resolve thinking model if agent has think tool + thinking model configured
+        Model? thinkingModel = null;
+        if (agentConfig.Tools?.Contains("think") == true && agentConfig.ThinkingModel is { } thinkingModelId)
+        {
+            thinkingModel = await ResolveModelAsync(
+                agentConfig.Provider ?? config.Provider?.Name,
+                thinkingModelId,
+                ct);
+            logger.LogInformation("Thinking model resolved: {Model}", thinkingModel.Id);
+        }
+
         // Resolve transcription model if any agent uses the transcribe tool
         Model? transcribeModel = null;
         if (agentConfig.Tools?.Contains("transcribe") == true)
@@ -309,7 +320,7 @@ public sealed class GatewayService(
 
         var agentDir = Path.Combine(achatesHome, "agents", name);
         var tools = ResolveTools(agentConfig, toolsConfig, model, graphClients, withingsClient,
-            name, agentDir, transcribeModel);
+            name, agentDir, transcribeModel, thinkingModel);
         var hasTools = agentConfig.Tools ?? [];
         var graphAccountNames = graphClients.Keys.ToList();
         var systemPrompt = SystemPrompt.Build(agentConfig.Description, prompt, tools,
@@ -326,7 +337,8 @@ public sealed class GatewayService(
             hasHealth: hasTools.Contains("health"),
             hasTranscribe: hasTools.Contains("transcribe"),
             hasChat: hasTools.Contains("chat"),
-            chatAgentNames: agentConfig.AllowChat);
+            chatAgentNames: agentConfig.AllowChat,
+            hasThink: hasTools.Contains("think"));
         var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
         var costLedgerPath = Path.Combine(achatesHome, "agents", name, "costs.jsonl");
         var costLedger = new CostLedger(costLedgerPath);
@@ -341,6 +353,7 @@ public sealed class GatewayService(
         var agentDef = new AgentDefinition
         {
             Model = model,
+            ThinkingModel = thinkingModel,
             SystemPrompt = systemPrompt,
             Tools = tools,
             CompletionOptions = BuildCompletionOptions(agentConfig.Completion, model),
@@ -373,7 +386,7 @@ public sealed class GatewayService(
 
     private IReadOnlyList<AgentTool> ResolveTools(AgentConfig agentConfig, ToolsConfig? toolsConfig,
         Model model, IReadOnlyDictionary<string, GraphClient> graphClients, WithingsClient? withingsClient,
-        string agentName, string agentDir, Model? transcribeModel = null)
+        string agentName, string agentDir, Model? transcribeModel = null, Model? thinkingModel = null)
     {
         if (!model.Parameters.HasFlag(ModelParameters.Tools))
             return [];
@@ -432,6 +445,12 @@ public sealed class GatewayService(
                         throw new InvalidOperationException(
                             "Transcribe tool requires a transcribe model. Set tools.transcribe.model in config.");
                     tools.Add(new TranscribeTool(transcribeModel));
+                    break;
+                case "think":
+                    if (thinkingModel is null)
+                        throw new InvalidOperationException(
+                            "Think tool requires a thinking model. Set **Thinking Model:** in AGENT.md.");
+                    tools.Add(new ThinkTool(thinkingModel));
                     break;
                 case "location":
                     tools.Add(new LocationTool(_deviceBridge));

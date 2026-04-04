@@ -15,6 +15,7 @@ public sealed class AgentConfig
 
     public string? Description { get; set; }
     public string? Model { get; set; }
+    public string? ThinkingModel { get; set; }
     public string? Provider { get; set; }
     public List<string>? Tools { get; set; }
     public CompletionConfig? Completion { get; set; }

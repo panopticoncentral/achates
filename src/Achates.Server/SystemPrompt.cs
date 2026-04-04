@@ -24,7 +24,8 @@ public static class SystemPrompt
         bool hasHealth = false,
         bool hasTranscribe = false,
         bool hasChat = false,
-        IReadOnlyList<string>? chatAgentNames = null)
+        IReadOnlyList<string>? chatAgentNames = null,
+        bool hasThink = false)
     {
         var lines = new List<string>();
 
@@ -193,6 +194,15 @@ public static class SystemPrompt
             lines.Add("Either agent can end the conversation early by including <<DONE>> in their response.");
             if (chatAgentNames is { Count: > 0 })
                 lines.Add($"You can chat with: {string.Join(", ", chatAgentNames)}.");
+            lines.Add("");
+        }
+
+        if (hasThink)
+        {
+            lines.Add("## Deep Thinking");
+            lines.Add("You can escalate to a more powerful reasoning model via the think tool.");
+            lines.Add("Use it when a question requires careful analysis, multi-step reasoning, weighing complex trade-offs, or when getting it wrong would have real consequences.");
+            lines.Add("Don't use it for simple factual questions, casual conversation, or tasks you can handle confidently on your own.");
             lines.Add("");
         }
 
