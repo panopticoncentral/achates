@@ -20,6 +20,7 @@ struct MessageBubble: View {
     var isLastAssistantMessage: Bool = false
     var isStreaming: Bool = false
     var onRetry: (() -> Void)? = nil
+    @AppStorage("show_message_costs") private var showMessageCosts = false
     @State private var fullscreenImageData: Data? = nil
     @State private var fullscreenImageURL: URL? = nil
 
@@ -38,6 +39,13 @@ struct MessageBubble: View {
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
                 ForEach(message.blocks) { block in
                     blockView(block)
+                }
+
+                if showMessageCosts, message.role == .assistant, let usage = message.usage {
+                    Text(formatCost(usage))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 4)
                 }
 
                 if message.blocks.isEmpty && message.role == .assistant {
@@ -203,6 +211,26 @@ struct MessageBubble: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         #endif
+    }
+
+    private func formatCost(_ usage: MessageUsage) -> String {
+        let cost = usage.cost
+        let tokens = usage.inputTokens + usage.outputTokens
+        let costStr: String
+        if cost < 0.01 {
+            costStr = String(format: "$%.4f", cost)
+        } else if cost < 1.0 {
+            costStr = String(format: "$%.3f", cost)
+        } else {
+            costStr = String(format: "$%.2f", cost)
+        }
+        let tokenStr: String
+        if tokens >= 1000 {
+            tokenStr = String(format: "%.1fk tokens", Double(tokens) / 1000.0)
+        } else {
+            tokenStr = "\(tokens) tokens"
+        }
+        return "\(costStr) · \(tokenStr)"
     }
 
     private var bubbleColor: Color {

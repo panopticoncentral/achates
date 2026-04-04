@@ -318,6 +318,14 @@ final class AppState {
         return items.compactMap { if case .string(let s) = $0 { return s } else { return nil } }
     }
 
+    func fetchCostSummary(agent: String, period: String) async -> CostSummary? {
+        guard let payload = try? await client?.sendRequest(method: "costs.summary", params: [
+            "agent": .string(agent),
+            "period": .string(period),
+        ]) else { return nil }
+        return CostSummary.from(payload)
+    }
+
     func handleAgentRenamed(oldId: String?, newId: String?) async {
         let wasCurrentAgent = currentAgent?.id == oldId
         await refreshAgents()
@@ -394,8 +402,10 @@ final class AppState {
         messages[index].completeToolCall(toolId: toolId, result: result, success: success)
     }
 
-    func finalizeStreamingMessage() {
-        // Message is complete but stream might continue (e.g., tool results leading to more text)
+    func finalizeStreamingMessage(usage: MessageUsage? = nil) {
+        if let usage, let id = streamingMessageId, let index = lastMessageIndex(id: id) {
+            messages[index].usage = usage
+        }
     }
 
     // MARK: - Private helpers

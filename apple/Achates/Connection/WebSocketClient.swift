@@ -246,7 +246,14 @@ final class WebSocketClient {
             appState.completeToolCall(toolId: toolId, result: result, success: success)
 
         case "message.end":
-            appState.finalizeStreamingMessage()
+            var messageUsage: MessageUsage?
+            if let usageDict = payload["usage"]?.objectValue,
+               let input = usageDict["input"]?.intValue,
+               let output = usageDict["output"]?.intValue {
+                let cost = usageDict["cost"]?.doubleValue ?? Double(usageDict["cost"]?.intValue ?? 0)
+                messageUsage = MessageUsage(inputTokens: input, outputTokens: output, cost: cost)
+            }
+            appState.finalizeStreamingMessage(usage: messageUsage)
 
         case "done":
             appState.isStreaming = false

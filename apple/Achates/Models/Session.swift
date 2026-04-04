@@ -86,7 +86,15 @@ func parseMessage(_ value: JSONValue, serverURL: URL?) -> ChatMessage? {
                 }
             }
         }
-        return ChatMessage(id: id, role: .assistant, blocks: blocks, timestamp: timestamp)
+        var parsedUsage: MessageUsage?
+        if let usageDict = dict["usage"]?.objectValue,
+           let input = usageDict["input"]?.intValue,
+           let output = usageDict["output"]?.intValue,
+           let costDict = usageDict["cost"]?.objectValue {
+            let cost = costDict["total"]?.doubleValue ?? 0
+            parsedUsage = MessageUsage(inputTokens: input, outputTokens: output, cost: cost)
+        }
+        return ChatMessage(id: id, role: .assistant, blocks: blocks, timestamp: timestamp, usage: parsedUsage)
     case "tool_result":
         if let imageUrl = dict["image_url"]?.stringValue,
            let serverURL,

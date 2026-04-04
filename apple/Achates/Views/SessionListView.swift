@@ -6,6 +6,7 @@ struct SessionListView: View {
     @State private var sessionToRename: SessionInfo?
     @State private var renameText = ""
     @State private var showDeleteAll = false
+    @State private var showCosts = false
 
     var body: some View {
         Group {
@@ -37,18 +38,35 @@ struct SessionListView: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Button {
-                    Task {
-                        if let sessionId = await appState.createSession(for: agent) {
-                            appState.currentSessionId = sessionId
-                            appState.messages = []
-                        }
+                HStack(spacing: 12) {
+                    Button {
+                        showCosts = true
+                    } label: {
+                        Image(systemName: "chart.bar")
                     }
-                } label: {
-                    Image(systemName: "square.and.pencil")
+                    .accessibilityLabel("Costs")
+
+                    Button {
+                        Task {
+                            if let sessionId = await appState.createSession(for: agent) {
+                                appState.currentSessionId = sessionId
+                                appState.messages = []
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .accessibilityLabel("New Chat")
                 }
-                .accessibilityLabel("New Chat")
             }
+        }
+        .sheet(isPresented: $showCosts) {
+            NavigationStack {
+                CostsView(agent: agent)
+            }
+            #if os(macOS)
+            .frame(minWidth: 450, minHeight: 500)
+            #endif
         }
         .task {
             appState.currentAgent = agent

@@ -246,6 +246,7 @@ public sealed class MobileTransport(
                 "agent.generate_avatar" => await HandleAgentGenerateAvatarAsync(request, ct),
                 "tools.list" => HandleToolsList(request),
                 "models.list" => await HandleModelsListAsync(request, ct),
+                "costs.summary" => await HandleCostsSummaryAsync(request, ct),
                 _ => ResponseFrame.Failure(request.Id, "unknown_method", $"Unknown method: {request.Method}"),
             };
 
@@ -997,6 +998,53 @@ public sealed class MobileTransport(
         }
 
         var payload = JsonSerializer.SerializeToElement(new { models = _modelsCache }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleCostsSummaryAsync(RequestFrame request, CancellationToken ct)
+    {
+        var agentName = GetStringParam(request.Params, "agent");
+        if (agentName is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
+
+        if (!_agents.TryGetValue(agentName, out var agentDef) || agentDef.CostLedger is not { } ledger)
+            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found or has no cost ledger.");
+
+        var period = GetStringParam(request.Params, "period") ?? "month";
+        var now = DateTimeOffset.Now;
+        DateTimeOffset? from = period switch
+        {
+            "today" => new DateTimeOffset(now.Date, now.Offset),
+            "week" => now.AddDays(-7),
+            "month" => now.AddDays(-30),
+            "all" => null,
+            _ => new DateTimeOffset(now.Date, now.Offset),
+        };
+
+        var entries = await ledger.QueryAsync(from);
+
+        var byDay = entries
+            .GroupBy(e => e.Timestamp.LocalDateTime.Date)
+            .OrderByDescending(g => g.Key)
+            .Select(g => new { date = g.Key.ToString("yyyy-MM-dd"), cost = g.Sum(e => e.CostTotal), completions = g.Count() })
+            .ToList();
+
+        var byModel = entries
+            .GroupBy(e => e.Model)
+            .OrderByDescending(g => g.Sum(e => e.CostTotal))
+            .Select(g => new { model = g.Key, cost = g.Sum(e => e.CostTotal), completions = g.Count() })
+            .ToList();
+
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            total_cost = entries.Sum(e => e.CostTotal),
+            completions = entries.Count,
+            input_tokens = entries.Sum(e => e.InputTokens),
+            output_tokens = entries.Sum(e => e.OutputTokens),
+            by_day = byDay,
+            by_model = byModel,
+        }, JsonOptions);
+
         return ResponseFrame.Success(request.Id, payload);
     }
 

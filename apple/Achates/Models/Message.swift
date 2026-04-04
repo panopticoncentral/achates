@@ -1,5 +1,11 @@
 import Foundation
 
+struct MessageUsage: Sendable, Equatable {
+    let inputTokens: Int
+    let outputTokens: Int
+    let cost: Double
+}
+
 enum MessageRole: String, Sendable, Codable {
     case user
     case assistant
@@ -34,6 +40,7 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
     let role: MessageRole
     var blocks: [ContentBlock]
     let timestamp: Date
+    var usage: MessageUsage?
 
     var textContent: String {
         blocks.compactMap { block in
@@ -49,11 +56,12 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
         self.timestamp = timestamp
     }
 
-    init(id: String = UUID().uuidString, role: MessageRole, blocks: [ContentBlock] = [], timestamp: Date = Date()) {
+    init(id: String = UUID().uuidString, role: MessageRole, blocks: [ContentBlock] = [], timestamp: Date = Date(), usage: MessageUsage? = nil) {
         self.id = id
         self.role = role
         self.blocks = blocks
         self.timestamp = timestamp
+        self.usage = usage
     }
 
     mutating func appendText(_ delta: String) {
