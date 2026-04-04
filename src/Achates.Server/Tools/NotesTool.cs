@@ -1,26 +1,27 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Achates.Agent.Tools;
 using Achates.Providers.Completions.Content;
+using Markdig;
 using static Achates.Providers.Util.JsonSchemaHelpers;
 
 namespace Achates.Server.Tools;
 
 /// <summary>
 /// Access to Apple Notes across all accounts and folders.
-/// Supports listing folders, listing notes, reading, creating,
-/// renaming, and replacing note contents.
+/// Supports listing folders, listing notes, reading, and creating notes.
 /// </summary>
 internal sealed class NotesTool : AgentTool
 {
     private static readonly JsonElement _schema = ObjectSchema(
         new Dictionary<string, JsonElement>
         {
-            ["action"] = StringEnum(["folders", "list", "read", "create", "update", "rename"], "Action to perform.", "list"),
-            ["folder"] = StringSchema("Folder name. Required for 'list', 'read', 'create', 'update', and 'rename'."),
-            ["title"] = StringSchema("Exact note title. Required for 'read', 'update', and 'rename'."),
-            ["new_title"] = StringSchema("New exact note title. Required for 'create' and 'rename'."),
-            ["content"] = StringSchema("Full note content as HTML. Use standard tags: <h1>, <b>, <i>, <ul>/<ol>/<li>, <br>, etc. Required for 'create' and 'update'."),
+            ["action"] = StringEnum(["folders", "list", "read", "create"], "Action to perform.", "list"),
+            ["folder"] = StringSchema("Folder name. Required for 'list', 'read', and 'create'."),
+            ["title"] = StringSchema("Exact note title. Required for 'read'."),
+            ["new_title"] = StringSchema("New exact note title. Required for 'create'."),
+            ["content"] = StringSchema("Full note content as markdown. Use standard formatting: # headings, **bold**, *italic*, - lists, etc. Required for 'create'."),
         },
         required: ["action"]);
 
@@ -44,8 +45,6 @@ internal sealed class NotesTool : AgentTool
             "list" => await ListAsync(folder, cancellationToken),
             "read" => await ReadAsync(folder, GetString(arguments, "title"), cancellationToken),
             "create" => await CreateAsync(folder, GetString(arguments, "new_title"), GetString(arguments, "content"), cancellationToken),
-            "update" => await UpdateAsync(folder, GetString(arguments, "title"), GetString(arguments, "content"), cancellationToken),
-            "rename" => await RenameAsync(folder, GetString(arguments, "title"), GetString(arguments, "new_title"), cancellationToken),
             _ => TextResult($"Unknown action: {action}"),
         };
     }
@@ -87,7 +86,10 @@ internal sealed class NotesTool : AgentTool
             return TextResult("title is required for 'read'.");
 
         var result = await RunScriptAsync(BuildReadScript(folder, title), cancellationToken);
-        return TextResult(result.Message);
+        if (!result.Success) return TextResult(result.Message);
+
+        // Convert HTML body to markdown for the agent
+        return TextResult(HtmlToMarkdown(result.Message));
     }
 
     private async Task<AgentToolResult> CreateAsync(string? folder, string? title, string? content, CancellationToken cancellationToken)
@@ -103,31 +105,6 @@ internal sealed class NotesTool : AgentTool
         return TextResult(result.Message);
     }
 
-    private async Task<AgentToolResult> UpdateAsync(string? folder, string? title, string? content, CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(folder))
-            return TextResult("folder is required for 'update'.");
-        if (string.IsNullOrWhiteSpace(title))
-            return TextResult("title is required for 'update'.");
-        if (content is null)
-            return TextResult("content is required for 'update'.");
-
-        var result = await RunScriptAsync(BuildUpdateScript(folder, title, content), cancellationToken);
-        return TextResult(result.Message);
-    }
-
-    private async Task<AgentToolResult> RenameAsync(string? folder, string? title, string? newTitle, CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(folder))
-            return TextResult("folder is required for 'rename'.");
-        if (string.IsNullOrWhiteSpace(title))
-            return TextResult("title is required for 'rename'.");
-        if (string.IsNullOrWhiteSpace(newTitle))
-            return TextResult("new_title is required for 'rename'.");
-
-        var result = await RunScriptAsync(BuildRenameScript(folder, title, newTitle), cancellationToken);
-        return TextResult(result.Message);
-    }
 
     private async Task<ScriptResult> RunScriptAsync(string script, CancellationToken cancellationToken)
     {
@@ -267,55 +244,11 @@ tell application "Notes"
         return "ERROR: A note named '{{EscapeAppleScriptString(title)}}' already exists in the '{{EscapeAppleScriptString(folder)}}' folder."
     end if
 
-    make new note at folderRef with properties {name:"{{EscapeAppleScriptString(title)}}", body:"{{EscapeAppleScriptString(ToHtmlBody(content))}}"}
+    make new note at folderRef with properties {name:"{{EscapeAppleScriptString(title)}}", body:"{{EscapeAppleScriptString(MarkdownToHtml(content))}}"}
     return "OK:Created note '{{EscapeAppleScriptString(title)}}' in '{{EscapeAppleScriptString(folder)}}'."
 end tell
 """;
 
-    private static string BuildUpdateScript(string folder, string title, string content) =>
-        $$"""
-tell application "Notes"
-{{FindFolderPreamble(folder)}}
-    set matchingNotes to every note of folderRef whose name is "{{EscapeAppleScriptString(title)}}"
-
-    if (count of matchingNotes) is 0 then
-        return "ERROR: Note '{{EscapeAppleScriptString(title)}}' was not found in the '{{EscapeAppleScriptString(folder)}}' folder."
-    end if
-
-    if (count of matchingNotes) is greater than 1 then
-        return "ERROR: Multiple notes named '{{EscapeAppleScriptString(title)}}' exist in the '{{EscapeAppleScriptString(folder)}}' folder."
-    end if
-
-    set noteRef to item 1 of matchingNotes
-    set body of noteRef to "{{EscapeAppleScriptString(ToHtmlBody(content))}}"
-    return "OK:Updated note '{{EscapeAppleScriptString(title)}}' in '{{EscapeAppleScriptString(folder)}}'."
-end tell
-""";
-
-    private static string BuildRenameScript(string folder, string title, string newTitle) =>
-        $$"""
-tell application "Notes"
-{{FindFolderPreamble(folder)}}
-    set matchingNotes to every note of folderRef whose name is "{{EscapeAppleScriptString(title)}}"
-    set conflictingNotes to every note of folderRef whose name is "{{EscapeAppleScriptString(newTitle)}}"
-
-    if (count of matchingNotes) is 0 then
-        return "ERROR: Note '{{EscapeAppleScriptString(title)}}' was not found in the '{{EscapeAppleScriptString(folder)}}' folder."
-    end if
-
-    if (count of matchingNotes) is greater than 1 then
-        return "ERROR: Multiple notes named '{{EscapeAppleScriptString(title)}}' exist in the '{{EscapeAppleScriptString(folder)}}' folder."
-    end if
-
-    if "{{EscapeAppleScriptString(title)}}" is not "{{EscapeAppleScriptString(newTitle)}}" and (count of conflictingNotes) is greater than 0 then
-        return "ERROR: A note named '{{EscapeAppleScriptString(newTitle)}}' already exists in the '{{EscapeAppleScriptString(folder)}}' folder."
-    end if
-
-    set noteRef to item 1 of matchingNotes
-    set name of noteRef to "{{EscapeAppleScriptString(newTitle)}}"
-    return "OK:Renamed note '{{EscapeAppleScriptString(title)}}' to '{{EscapeAppleScriptString(newTitle)}}' in '{{EscapeAppleScriptString(folder)}}'."
-end tell
-""";
 
     // --- Helpers ---
 
@@ -328,30 +261,73 @@ end tell
             .Replace("\n", "\\n", StringComparison.Ordinal)
             .Replace("\r", "\\r", StringComparison.Ordinal);
 
+    private static readonly MarkdownPipeline _markdownPipeline = new MarkdownPipelineBuilder()
+        .UseEmphasisExtras()
+        .UseTaskLists()
+        .Build();
+
     /// <summary>
-    /// Wrap content for Apple Notes body property. If the content already contains HTML tags,
-    /// pass it through as-is (wrapped in a div). Otherwise treat as plain text with line breaks.
+    /// Convert markdown content to HTML suitable for Apple Notes body property.
     /// </summary>
-    private static string ToHtmlBody(string content)
+    private static string MarkdownToHtml(string markdown)
     {
-        if (content.Contains('<'))
-        {
-            // Already HTML — wrap in div if not already wrapped
-            return content.TrimStart().StartsWith("<div", StringComparison.OrdinalIgnoreCase)
-                ? content
-                : $"<div>{content}</div>";
-        }
+        var html = Markdown.ToHtml(markdown, _markdownPipeline);
+        return $"<div>{html}</div>";
+    }
 
-        // Plain text fallback
-        var escaped = content
-            .Replace("&", "&amp;", StringComparison.Ordinal)
-            .Replace("<", "&lt;", StringComparison.Ordinal)
-            .Replace(">", "&gt;", StringComparison.Ordinal)
-            .Replace("\"", "&quot;", StringComparison.Ordinal);
+    /// <summary>
+    /// Convert Apple Notes HTML body to markdown for the agent.
+    /// Handles the common tags that Apple Notes uses.
+    /// </summary>
+    private static string HtmlToMarkdown(string html)
+    {
+        var text = html;
 
-        return "<div>" + escaped.Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace("\r", "\n", StringComparison.Ordinal)
-            .Replace("\n", "<br>", StringComparison.Ordinal) + "</div>";
+        // Strip outer wrapper divs
+        text = Regex.Replace(text, @"^<div[^>]*>|</div>\s*$", "", RegexOptions.IgnoreCase);
+
+        // Headings (Apple Notes uses h1-h3)
+        text = Regex.Replace(text, @"<h1[^>]*>(.*?)</h1>", "# $1\n", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        text = Regex.Replace(text, @"<h2[^>]*>(.*?)</h2>", "## $1\n", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        text = Regex.Replace(text, @"<h3[^>]*>(.*?)</h3>", "### $1\n", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        // Bold and italic
+        text = Regex.Replace(text, @"<b[^>]*>(.*?)</b>", "**$1**", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        text = Regex.Replace(text, @"<strong[^>]*>(.*?)</strong>", "**$1**", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        text = Regex.Replace(text, @"<i[^>]*>(.*?)</i>", "*$1*", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        text = Regex.Replace(text, @"<em[^>]*>(.*?)</em>", "*$1*", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        text = Regex.Replace(text, @"<u[^>]*>(.*?)</u>", "$1", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        text = Regex.Replace(text, @"<strike[^>]*>(.*?)</strike>", "~~$1~~", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        // Links
+        text = Regex.Replace(text, @"<a[^>]*href=""([^""]*)""[^>]*>(.*?)</a>", "[$2]($1)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        // List items (before stripping ul/ol tags)
+        text = Regex.Replace(text, @"<li[^>]*>(.*?)</li>", "- $1\n", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        text = Regex.Replace(text, @"</?[uo]l[^>]*>", "\n", RegexOptions.IgnoreCase);
+
+        // Line breaks and paragraphs
+        text = Regex.Replace(text, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"</p>", "\n\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<p[^>]*>", "", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"</div>", "\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<div[^>]*>", "", RegexOptions.IgnoreCase);
+
+        // Strip any remaining tags
+        text = Regex.Replace(text, @"<[^>]+>", "");
+
+        // Decode HTML entities
+        text = text.Replace("&amp;", "&", StringComparison.Ordinal)
+            .Replace("&lt;", "<", StringComparison.Ordinal)
+            .Replace("&gt;", ">", StringComparison.Ordinal)
+            .Replace("&quot;", "\"", StringComparison.Ordinal)
+            .Replace("&nbsp;", " ", StringComparison.Ordinal)
+            .Replace("&#x27;", "'", StringComparison.Ordinal);
+
+        // Clean up excessive blank lines
+        text = Regex.Replace(text, @"\n{3,}", "\n\n");
+
+        return text.Trim();
     }
 
     private static AgentToolResult TextResult(string text) =>

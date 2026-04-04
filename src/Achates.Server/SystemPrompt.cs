@@ -90,7 +90,7 @@ public static class SystemPrompt
             lines.Add("## Notes");
             lines.Add("You can access the user's Apple Notes via the notes tool.");
             lines.Add("Use 'folders' to discover available folders, then 'list' with a folder name to see notes. You can read, create, update, and rename notes in any folder.");
-            lines.Add("Notes are read and written as HTML. When updating a note, preserve the existing HTML structure and formatting. Use standard tags: <h1>, <b>, <i>, <ul>/<ol>/<li>, <br>, etc.");
+            lines.Add("Notes are read and written as markdown. When updating a note, preserve the existing formatting. Use standard markdown: # headings, **bold**, *italic*, - lists, etc. Note: Apple Notes checklists (interactive checkboxes) cannot be created programmatically — use regular lists instead.");
             lines.Add("You cannot search across all notes or access notes outside that folder.");
             lines.Add("");
         }
