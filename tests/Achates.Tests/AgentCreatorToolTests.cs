@@ -21,7 +21,7 @@ public sealed class AgentCreatorToolTests : IDisposable
     }
 
     private AgentCreatorTool CreateTool() =>
-        new(_agentsDir, (name, ct) =>
+        new(_agentsDir, "anthropic/claude-sonnet-4", (name, ct) =>
         {
             _loadedAgents.Add(name);
             return Task.CompletedTask;

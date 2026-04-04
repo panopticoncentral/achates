@@ -5,11 +5,12 @@ struct ModelPickerView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var selectedModel: String
     let agentModels: [String]
+    var allowNone: Bool = false
 
     @State private var searchText = ""
 
     private var favoriteModels: [String] {
-        agentModels.filter { $0 != selectedModel }
+        agentModels.filter { $0 != selectedModel && !$0.isEmpty }
     }
 
     private var filteredFavorites: [String] {
@@ -19,17 +20,38 @@ struct ModelPickerView: View {
 
     var body: some View {
         List {
-            Section("Current") {
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(shortName(selectedModel))
-                        Text(selectedModel)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            if allowNone {
+                Section {
+                    Button {
+                        selectedModel = ""
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Text("None")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if selectedModel.isEmpty {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.blue)
+                            }
+                        }
                     }
-                    Spacer()
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(.blue)
+                }
+            }
+
+            if !selectedModel.isEmpty {
+                Section("Current") {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(shortName(selectedModel))
+                            Text(selectedModel)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "checkmark")
+                            .foregroundStyle(.blue)
+                    }
                 }
             }
 

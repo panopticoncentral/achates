@@ -8,7 +8,7 @@ namespace Achates.Server.Tools;
 /// <summary>
 /// Allows an agent to create new agents at runtime.
 /// </summary>
-internal sealed class AgentCreatorTool(string agentsDir, Func<string, CancellationToken, Task> loadFunc) : AgentTool
+internal sealed class AgentCreatorTool(string agentsDir, string defaultModel, Func<string, CancellationToken, Task> loadFunc) : AgentTool
 {
     private static readonly JsonElement _schema = ObjectSchema(
         new Dictionary<string, JsonElement>
@@ -48,7 +48,7 @@ internal sealed class AgentCreatorTool(string agentsDir, Func<string, Cancellati
         if (Directory.Exists(agentDir))
             return TextResult($"An agent '{agentId}' already exists.");
 
-        var model = GetString(arguments, "model");
+        var model = GetString(arguments, "model") ?? defaultModel;
         var tools = GetStringList(arguments, "tools");
 
         var config = new AgentConfig

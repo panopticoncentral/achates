@@ -128,6 +128,22 @@ struct AgentEditView: View {
                     }
                 }
 
+                NavigationLink {
+                    ModelPickerView(
+                        selectedModel: thinkingModelBinding,
+                        agentModels: config?.agentModels ?? [],
+                        allowNone: true
+                    )
+                    .navigationTitle("Thinking Model")
+                } label: {
+                    HStack {
+                        Text("Thinking Model")
+                        Spacer()
+                        Text(config?.thinkingModel.isEmpty == true ? "None" : shortModelName(config?.thinkingModel ?? ""))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 reasoningEffortPicker
 
                 HStack {
@@ -212,6 +228,13 @@ struct AgentEditView: View {
         Binding(
             get: { config?.reasoningEffort ?? "medium" },
             set: { config?.reasoningEffort = $0 }
+        )
+    }
+
+    private var thinkingModelBinding: Binding<String> {
+        Binding(
+            get: { config?.thinkingModel ?? "" },
+            set: { config?.thinkingModel = $0 }
         )
     }
 

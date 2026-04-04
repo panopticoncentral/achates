@@ -4,6 +4,7 @@ struct AgentEditModel: Equatable {
     var displayName: String
     var description: String
     var model: String
+    var thinkingModel: String
     var tools: [String]
     var reasoningEffort: String?
     var temperature: Double?
@@ -21,6 +22,7 @@ struct AgentEditModel: Equatable {
             displayName: payload["display_name"]?.stringValue ?? "",
             description: payload["description"]?.stringValue ?? "",
             model: model,
+            thinkingModel: payload["thinking_model"]?.stringValue ?? "",
             tools: payload["tools"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             reasoningEffort: payload["reasoning_effort"]?.stringValue,
             temperature: payload["temperature"]?.doubleValue,
@@ -37,6 +39,7 @@ struct AgentEditModel: Equatable {
             "agent": .string(agentId),
             "description": .string(description),
             "model": .string(model),
+            "thinking_model": .string(thinkingModel),
             "tools": .array(tools.map { .string($0) }),
             "allowed_chats": .array(allowedChats.map { .string($0) }),
             "prompt": .string(prompt),

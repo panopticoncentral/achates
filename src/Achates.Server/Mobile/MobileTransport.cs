@@ -79,6 +79,12 @@ public sealed class MobileTransport(
         }
 
         stateCache.Invalidate(name);
+
+        _ = BroadcastEventAsync("agents.changed", new
+        {
+            agent = name,
+            reason = "agent_reloaded",
+        }, CancellationToken.None);
     }
 
     /// <summary>
@@ -772,6 +778,7 @@ public sealed class MobileTransport(
             display_name = config.Title ?? agentName,
             description = config.Description ?? "",
             model = config.Model ?? "",
+            thinking_model = config.ThinkingModel ?? "",
             tools = config.Tools ?? [],
             reasoning_effort = config.Completion?.ReasoningEffort,
             temperature = config.Completion?.Temperature,
@@ -798,6 +805,7 @@ public sealed class MobileTransport(
         {
             Description = GetStringParam(p, "description"),
             Model = GetStringParam(p, "model"),
+            ThinkingModel = GetStringParam(p, "thinking_model"),
             Prompt = GetStringParam(p, "prompt"),
         };
 

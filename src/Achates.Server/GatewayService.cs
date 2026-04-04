@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Achates.Agent.Tools;
 using Achates.Providers;
 using Achates.Providers.Completions;
@@ -32,14 +33,12 @@ public sealed class GatewayService(
 
     /// <summary>
     /// All known tool names that can be assigned to agents.
+    /// Derived by scanning all concrete <see cref="AgentTool"/> subclasses in this assembly.
     /// </summary>
-    public static readonly IReadOnlyList<string> AllToolNames =
-    [
-        "calendar", "camera", "chat", "cost", "cron", "health",
-        "image", "imessage", "location", "mail", "memory", "notes",
-        "profile", "session", "todo", "transcribe", "web_fetch",
-        "web_search",
-    ];
+    public static IReadOnlyCollection<string> AllToolNames { get; } = new SortedSet<string>(
+        typeof(GatewayService).Assembly.GetTypes()
+            .Where(t => t.IsSubclassOf(typeof(AgentTool)) && !t.IsAbstract)
+            .Select(t => ((AgentTool)RuntimeHelpers.GetUninitializedObject(t)).Name));
 
     public IReadOnlyDictionary<string, AgentDefinition> Agents => _agents;
     public MobileTransport? MobileTransport => _mobileTransport;
@@ -408,7 +407,7 @@ public sealed class GatewayService(
                     break;
                 case "mail":
                     if (graphClients.Count == 0)
-                        throw new InvalidOperationException("Mail tool requires graph configuration.");
+                    { logger.LogWarning("Agent '{Agent}': mail tool skipped — no graph configuration", agentName); break; }
                     tools.Add(new MailTool(graphClients));
                     break;
                 case "notes":
@@ -416,14 +415,14 @@ public sealed class GatewayService(
                     break;
                 case "calendar":
                     if (graphClients.Count == 0)
-                        throw new InvalidOperationException("Calendar tool requires graph configuration.");
+                    { logger.LogWarning("Agent '{Agent}': calendar tool skipped — no graph configuration", agentName); break; }
                     tools.Add(new CalendarTool(graphClients));
                     break;
                 case "web_search":
                     var braveKey = toolsConfig?.WebSearch?.BraveApiKey
-                        ?? Environment.GetEnvironmentVariable("BRAVE_API_KEY")
-                        ?? throw new InvalidOperationException(
-                            "web_search requires brave_api_key in config or BRAVE_API_KEY env var.");
+                        ?? Environment.GetEnvironmentVariable("BRAVE_API_KEY");
+                    if (braveKey is null)
+                    { logger.LogWarning("Agent '{Agent}': web_search tool skipped — no brave_api_key in config or BRAVE_API_KEY env var", agentName); break; }
                     tools.Add(new WebSearchTool(braveKey, httpClientFactory.CreateClient("brave")));
                     break;
                 case "web_fetch":
@@ -437,19 +436,17 @@ public sealed class GatewayService(
                     break;
                 case "health":
                     if (withingsClient is null)
-                        throw new InvalidOperationException("Health tool requires withings configuration.");
+                    { logger.LogWarning("Agent '{Agent}': health tool skipped — no withings configuration", agentName); break; }
                     tools.Add(new HealthTool(withingsClient));
                     break;
                 case "transcribe":
                     if (transcribeModel is null)
-                        throw new InvalidOperationException(
-                            "Transcribe tool requires a transcribe model. Set tools.transcribe.model in config.");
+                    { logger.LogWarning("Agent '{Agent}': transcribe tool skipped — no transcribe model configured", agentName); break; }
                     tools.Add(new TranscribeTool(transcribeModel));
                     break;
                 case "think":
                     if (thinkingModel is null)
-                        throw new InvalidOperationException(
-                            "Think tool requires a thinking model. Set **Thinking Model:** in AGENT.md.");
+                    { logger.LogWarning("Agent '{Agent}': think tool skipped — no thinking model configured", agentName); break; }
                     tools.Add(new ThinkTool(thinkingModel));
                     break;
                 case "location":
@@ -467,6 +464,7 @@ public sealed class GatewayService(
                 case "agent_creator":
                     tools.Add(new AgentCreatorTool(
                         Path.GetDirectoryName(agentDir)!,
+                        model.Id,
                         async (name, ct) => await ReloadAgentAsync(name, ct)));
                     break;
                 default:
