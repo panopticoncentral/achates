@@ -102,6 +102,12 @@ public static class AgentLoader
             sb.AppendLine($"**Max Tokens:** {mt}");
         }
 
+        if (config.Dreamtime is { } dreamtime)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"**Dreamtime:** {dreamtime:h:mm tt}");
+        }
+
         if (!string.IsNullOrWhiteSpace(config.Prompt))
         {
             sb.AppendLine();
@@ -330,6 +336,15 @@ public static class AgentLoader
                 {
                     config.Completion ??= new CompletionConfig();
                     config.Completion.MaxTokens = maxTokens;
+                }
+                break;
+            case "dreamtime":
+                if (value is not null &&
+                    !value.Equals("off", StringComparison.OrdinalIgnoreCase) &&
+                    !value.Equals("disabled", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (TimeOnly.TryParse(value, out var time))
+                        config.Dreamtime = time;
                 }
                 break;
         }

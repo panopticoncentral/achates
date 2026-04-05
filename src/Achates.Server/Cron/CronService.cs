@@ -24,6 +24,37 @@ public sealed class CronService : IAsyncDisposable
 
     private static readonly TimeSpan MaxSleep = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan MinSleep = TimeSpan.FromSeconds(2);
+    private const int MaxJobTurns = 20;
+
+    private const string DreamtimeInstructions = """
+
+        --- Dreamtime Mode ---
+
+        You are performing your nightly memory review.
+
+        You have access to your current memory and the sessions that have occurred since
+        your last review. Your job is to:
+
+        1. Use the session_review tool to list recent sessions.
+        2. Scan the list and decide which sessions contain information worth remembering.
+        3. Read those sessions in full.
+        4. Read your current memory (both shared and agent-scoped).
+        5. Update your memory to incorporate new learnings — add new facts, correct
+           outdated ones, remove things that are no longer true, and consolidate where
+           appropriate.
+
+        Focus on:
+        - User preferences, habits, and facts you've learned
+        - Recurring requests or patterns
+        - Corrections the user made
+        - Things the user explicitly asked you to remember
+        - Outdated information in memory that sessions contradict
+
+        Do NOT memorize transient details (specific appointment times, one-off questions).
+        Focus on durable knowledge that will help you serve the user better.
+
+        When you're done, briefly summarize what you changed and why.
+        """;
 
     public CronService(
         Dictionary<string, (CronStore Store, AgentDefinition Agent)> agents,
@@ -226,13 +257,20 @@ public sealed class CronService : IAsyncDisposable
         _logger.LogInformation("Executing cron job '{Name}' ({Id}) for agent '{Agent}'",
             job.Name, job.Id, agentName);
 
-        // Build tool list: shared tools + per-agent tools, excluding CronTool
+        // Build tool list and system prompt — dreamtime jobs get special treatment
+        var systemPrompt = agentDef.SystemPrompt;
         var tools = BuildJobTools(agentDef);
+
+        if (job.Kind == CronJobKind.Dreamtime)
+        {
+            systemPrompt = agentDef.SystemPrompt + DreamtimeInstructions;
+            tools = BuildDreamtimeTools(agentName, agentDef, job);
+        }
 
         var agent = new AgentRuntime(new AgentOptions
         {
             Model = agentDef.Model,
-            SystemPrompt = agentDef.SystemPrompt,
+            SystemPrompt = systemPrompt,
             Tools = tools,
             CompletionOptions = agentDef.CompletionOptions,
         });
@@ -244,38 +282,56 @@ public sealed class CronService : IAsyncDisposable
         });
 
         var responseText = "";
+        var turnCount = 0;
+        using var turnCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
-        await foreach (var evt in stream.WithCancellation(ct))
+        try
         {
-            switch (evt)
+            await foreach (var evt in stream.WithCancellation(turnCts.Token))
             {
-                case MessageStreamEvent { Inner: CompletionTextDeltaEvent delta }:
-                    responseText += delta.Delta;
-                    break;
+                switch (evt)
+                {
+                    case MessageStreamEvent { Inner: CompletionTextDeltaEvent delta }:
+                        responseText += delta.Delta;
+                        break;
 
-                case MessageEndEvent { Message: Agent.Messages.AssistantMessage assistantMsg }:
-                    // Record cost
-                    if (agentDef.CostLedger is { } costLedger)
-                    {
-                        _ = costLedger.AppendAsync(new CostEntry
+                    case MessageEndEvent { Message: Agent.Messages.AssistantMessage assistantMsg }:
+                        turnCount++;
+
+                        // Record cost
+                        if (agentDef.CostLedger is { } costLedger)
                         {
-                            Timestamp = DateTimeOffset.UtcNow,
-                            Model = assistantMsg.Model,
-                            Channel = "cron",
-                            Peer = job.Id,
-                            InputTokens = assistantMsg.Usage.Input,
-                            OutputTokens = assistantMsg.Usage.Output,
-                            CacheReadTokens = assistantMsg.Usage.CacheRead,
-                            CacheWriteTokens = assistantMsg.Usage.CacheWrite,
-                            CostTotal = assistantMsg.Usage.Cost.Total,
-                            CostInput = assistantMsg.Usage.Cost.Input,
-                            CostOutput = assistantMsg.Usage.Cost.Output,
-                            CostCacheRead = assistantMsg.Usage.Cost.CacheRead,
-                            CostCacheWrite = assistantMsg.Usage.Cost.CacheWrite,
-                        });
-                    }
-                    break;
+                            _ = costLedger.AppendAsync(new CostEntry
+                            {
+                                Timestamp = DateTimeOffset.UtcNow,
+                                Model = assistantMsg.Model,
+                                Channel = "cron",
+                                Peer = job.Id,
+                                InputTokens = assistantMsg.Usage.Input,
+                                OutputTokens = assistantMsg.Usage.Output,
+                                CacheReadTokens = assistantMsg.Usage.CacheRead,
+                                CacheWriteTokens = assistantMsg.Usage.CacheWrite,
+                                CostTotal = assistantMsg.Usage.Cost.Total,
+                                CostInput = assistantMsg.Usage.Cost.Input,
+                                CostOutput = assistantMsg.Usage.Cost.Output,
+                                CostCacheRead = assistantMsg.Usage.Cost.CacheRead,
+                                CostCacheWrite = assistantMsg.Usage.Cost.CacheWrite,
+                            });
+                        }
+
+                        if (turnCount >= MaxJobTurns)
+                        {
+                            _logger.LogWarning("Cron job '{Name}' ({Id}) reached max turn limit ({Max})",
+                                job.Name, job.Id, MaxJobTurns);
+                            await turnCts.CancelAsync();
+                        }
+                        break;
+                }
             }
+        }
+        catch (OperationCanceledException) when (turnCount >= MaxJobTurns)
+        {
+            responseText += "\n\n[Stopped: reached maximum turn limit]";
         }
 
         // Save as a session so results are visible in the app
@@ -313,6 +369,25 @@ public sealed class CronService : IAsyncDisposable
         tools.Add(new MemoryTool(sharedMemoryPath, agentDef.MemoryPath));
         if (agentDef.TodoPath is { } todoPath)
             tools.Add(new TodoTool(todoPath));
+        if (agentDef.CostLedger is { } costLedger)
+            tools.Add(new CostTool(costLedger));
+
+        return tools;
+    }
+
+    private IReadOnlyList<AgentTool> BuildDreamtimeTools(string agentName, AgentDefinition agentDef, CronJob job)
+    {
+        var tools = new List<AgentTool>();
+
+        // Session review tool — uses LastRunAt from the job itself as the "since" timestamp
+        tools.Add(new SessionReviewTool(_sessionStore, agentName, job.State.LastRunAt));
+
+        // Memory tool for reading and updating persistent memory
+        var sharedMemoryPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
+        tools.Add(new MemoryTool(sharedMemoryPath, agentDef.MemoryPath));
+
+        // Cost tool if available
         if (agentDef.CostLedger is { } costLedger)
             tools.Add(new CostTool(costLedger));
 

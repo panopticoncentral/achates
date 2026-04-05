@@ -25,4 +25,9 @@ public sealed record AgentDefinition
     public CronStore? CronStore { get; init; }
     public IReadOnlyDictionary<string, GraphClient> GraphClients { get; init; } = new Dictionary<string, GraphClient>();
     public byte[]? AvatarData { get; init; }
+
+    /// <summary>
+    /// Local time of day for nightly dreamtime, or null if disabled.
+    /// </summary>
+    public TimeOnly? Dreamtime { get; init; }
 }

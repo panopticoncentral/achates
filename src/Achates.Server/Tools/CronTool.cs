@@ -69,11 +69,12 @@ internal sealed class CronTool(
         foreach (var job in jobs)
         {
             var status = job.Enabled ? "enabled" : "disabled";
+            var kindLabel = job.Kind == CronJobKind.Dreamtime ? " (system)" : "";
             var schedule = FormatSchedule(job.Schedule);
             var nextRun = job.State.NextRunAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—";
             var lastStatus = job.State.LastStatus ?? "—";
 
-            sb.AppendLine($"**{job.Name}** (`{job.Id}`)");
+            sb.AppendLine($"**{job.Name}**{kindLabel} (`{job.Id}`)");
             sb.AppendLine($"  Schedule: {schedule} | Status: {status} | Next: {nextRun} | Last: {lastStatus}");
             sb.AppendLine($"  Message: {Truncate(job.Message, 80)}");
             sb.AppendLine();
@@ -132,6 +133,11 @@ internal sealed class CronTool(
         if (string.IsNullOrWhiteSpace(jobId))
             return TextResult("Error: 'job_id' is required.");
 
+        var jobs = await store.LoadAsync(ct);
+        var target = jobs.FirstOrDefault(j => j.Id == jobId);
+        if (target?.Kind == CronJobKind.Dreamtime)
+            return TextResult("Dreamtime is managed by the system. Change it in AGENT.md.");
+
         var updated = await store.UpdateAsync(jobId, job =>
         {
             if (GetString(args, "name") is { Length: > 0 } newName)
@@ -160,6 +166,11 @@ internal sealed class CronTool(
         var jobId = GetString(args, "job_id");
         if (string.IsNullOrWhiteSpace(jobId))
             return TextResult("Error: 'job_id' is required.");
+
+        var jobs = await store.LoadAsync(ct);
+        var target = jobs.FirstOrDefault(j => j.Id == jobId);
+        if (target?.Kind == CronJobKind.Dreamtime)
+            return TextResult("Dreamtime is managed by the system. Change it in AGENT.md.");
 
         var removed = await store.RemoveAsync(jobId, ct);
         if (!removed)

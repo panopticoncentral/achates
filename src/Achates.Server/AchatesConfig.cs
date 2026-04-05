@@ -27,6 +27,12 @@ public sealed class AgentConfig
     public List<string>? AllowChat { get; set; }
 
     /// <summary>
+    /// Local time of day for nightly dreamtime (memory consolidation).
+    /// Parsed from "HH:mm" or "h:mm AM/PM" format. Null means dreamtime is disabled.
+    /// </summary>
+    public TimeOnly? Dreamtime { get; set; }
+
+    /// <summary>
     /// System prompt from the ## Prompt section of AGENT.md.
     /// Set by <see cref="AgentLoader"/>, not deserialized.
     /// </summary>

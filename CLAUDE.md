@@ -61,7 +61,7 @@ Providers <- Agent <- Server
 ### Tool System (`AgentTool` subclasses)
 - `AgentTool` is the preferred pattern (class-based). Subclass and implement `Name`, `Description`, `Parameters` (JSON Schema as `JsonElement`), `ExecuteAsync()`.
 - Returns `AgentToolResult` with `Content` (list of `CompletionContent`), optional `ImageUrl` (relative URL for generated images), and optional `Details` (transient UI metadata, `[JsonIgnore]`'d from session persistence).
-- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`, `CronTool`, `IMessageTool`, `HealthTool`, `ChatTool`, `TranscribeTool`, `LocationTool`, `CameraTool`, `ImageTool`, `ProfileTool`, `AgentCreatorTool`, `ThinkTool`.
+- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`, `CronTool`, `IMessageTool`, `HealthTool`, `ChatTool`, `TranscribeTool`, `LocationTool`, `CameraTool`, `ImageTool`, `ProfileTool`, `AgentCreatorTool`, `ThinkTool`, `SessionReviewTool`.
 - Tools can be shared (same instance for all sessions) or per-session. `MobileTransport.CreateRuntime` builds per-session tool lists (e.g. `MemoryTool` uses per-agent memory path).
 - Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `ArraySchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
 
@@ -78,6 +78,7 @@ Providers <- Agent <- Server
 - `IMessageTool` — reads local macOS iMessage database (`~/Library/Messages/chat.db`) via SQLite (read-only). Actions: chats (list recent conversations), read (messages from a chat by ID), search (full-text search). Surfaces voice messages with their audio file paths (joins `attachment` table, filters by audio mime types). Resolves phone numbers and emails to contact names via `ContactResolver` (fetches from Microsoft Graph API contacts, cached 30 minutes; requires graph config). Singleton; requires Full Disk Access for the host process.
 - `TranscribeTool` — transcribes audio files to text using an audio-capable model. Parameters: file (absolute path). Reads the file, base64 encodes it, sends to the configured transcription model via `CompletionAudioInputContent`. Singleton; requires `transcribe` in agent's tools list. Model configured via `tools.transcribe.model` (default: `google/gemini-2.5-flash`). Useful for transcribing iMessage voice messages surfaced by `IMessageTool`.
 - `ThinkTool` — escalates to a thinking model for complex reasoning. Parameters: prompt (the problem to reason about). Sends the prompt to the agent's configured thinking model and returns the response. Singleton; requires `think` in agent's tools list. Model configured per-agent via `**Thinking Model:**` in AGENT.md capabilities.
+- `SessionReviewTool` — read-only session browser for dreamtime. Actions: list (sessions since last dreamtime), read (full transcript). Injected only during dreamtime execution; not available in normal sessions.
 - `ChatTool` — inter-agent communication. Actions: agents (list available agents with descriptions and tools), chat (start a ping-pong conversation with another agent). Per-session; requires `chat` in agent's tools list. Creates isolated `AgentRuntime` instances for both agents (target gets all its tools except chat to prevent cascade). Supports up to 5 back-and-forth turns; either agent can end early with `<<DONE>>`. `allow_chat` in agent config restricts which agents can be contacted (null/empty = all). Costs recorded to each agent's ledger with channel `chat`. `AgentInfo` registry built at startup provides agent discovery metadata.
 - `LocationTool` — gets the user's current GPS location via the mobile device. Requires `DeviceCommandBridge` and an active mobile connection with `location` capability. Invokes `device.location` with 15s timeout. Singleton; requires `location` in agent's tools list.
 - `CameraTool` — captures a photo from the user's mobile device camera. Parameters: facing (back/front). Returns `CompletionImageContent` with base64 JPEG. Requires `DeviceCommandBridge` and an active mobile connection with `camera` capability. Singleton; requires `camera` in agent's tools list.
@@ -89,8 +90,9 @@ Providers <- Agent <- Server
 - `GraphClient` (`src/Achates.Server/Graph/`) — Microsoft Graph API client supporting two auth flows. Multiple named accounts per agent. Created per-account during startup. Eagerly authenticates so device code prompts appear at startup. `AsyncLocal` notifier routes device code messages through the transport to the user's chat. Flow is selected by presence of `client_secret`:
   - **Client credentials** (work/school): `client_secret` set → application permissions, `/users/{email}/` paths. Requires `tenant_id`, `user_email`.
   - **Device code** (personal or work/school): no `client_secret` → delegated permissions, `/me/` paths. `tenant_id` defaults to `consumers`. Token cache persisted at `~/.achates/graph-token-cache.bin`.
-- `CronService` (`src/Achates.Server/Cron/`) — background timer loop for scheduled task execution. Not DI-registered; created by `GatewayService` after agents are resolved. Timer sleeps until next due job (max 60s), executes due jobs sequentially, delivers results via `MobileTransport`. `CronStore` persists jobs per-agent as JSON. `CronScheduler` computes next run times using Cronos library for cron expressions.
-- `GatewayService` — ASP.NET Core `IHostedLifecycleService`. Resolves agents from config at startup, creates `MobileTransport` and `CronService`.
+- `CronService` (`src/Achates.Server/Cron/`) — background timer loop for scheduled task execution. Not DI-registered; created by `GatewayService` after agents are resolved. Timer sleeps until next due job (max 60s), executes due jobs sequentially, delivers results via `MobileTransport`. `CronStore` persists jobs per-agent as JSON. `CronScheduler` computes next run times using Cronos library for cron expressions. Max turns safety valve (20 turns) prevents runaway job execution. `CronJobKind` distinguishes `User` (agent-managed) from `Dreamtime` (system-managed) jobs.
+- **Dreamtime** — nightly memory consolidation. Enabled per-agent via `**Dreamtime:** 3:00 AM` in AGENT.md. System auto-creates a protected `CronJob` (Kind=Dreamtime) that agents cannot modify via CronTool. When executed, creates an isolated AgentRuntime with the agent's normal prompt + dreamtime instructions, equipped with `SessionReviewTool` (list/read sessions since last run) and `MemoryTool`. The agent triages recent sessions, reads interesting ones, and updates memory. Reconciled on agent load/reload. Saved as a normal session for auditability.
+- `GatewayService` — ASP.NET Core `IHostedLifecycleService`. Resolves agents from config at startup, creates `MobileTransport` and `CronService`. Reconciles dreamtime jobs on agent load/reload.
 - WebSocket endpoint: `/ws` (query params: `peer`)
 - Health check: `GET /health`
 - Agent images: `GET /agents/{name}/images/{file}` (serves generated images from disk)
@@ -183,12 +185,14 @@ Personal assistant.
 
 **Reasoning Effort:** medium
 
+**Dreamtime:** 3:00 AM
+
 ## Prompt
 
 You are a personal assistant...
 ```
 
-Capabilities keys: `Model`, `Thinking Model`, `Provider`, `Tools`, `Allowed Chats`, `Reasoning Effort`, `Temperature`, `Max Tokens`. List values use sub-bullets; scalar values go inline after the key.
+Capabilities keys: `Model`, `Thinking Model`, `Provider`, `Tools`, `Allowed Chats`, `Reasoning Effort`, `Temperature`, `Max Tokens`, `Dreamtime`. List values use sub-bullets; scalar values go inline after the key.
 
 If no agents are found, a default agent is scaffolded at `~/.achates/agents/default/AGENT.md`.
 

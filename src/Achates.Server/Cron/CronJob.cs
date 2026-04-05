@@ -37,6 +37,15 @@ public sealed class CronJobState
 }
 
 /// <summary>
+/// Distinguishes system-managed jobs from user-created ones.
+/// </summary>
+public enum CronJobKind
+{
+    User,
+    Dreamtime,
+}
+
+/// <summary>
 /// A scheduled job definition.
 /// </summary>
 public sealed class CronJob
@@ -48,6 +57,7 @@ public sealed class CronJob
     public required string Message { get; set; }
     public required CronDeliveryTarget Delivery { get; set; }
     public bool Enabled { get; set; } = true;
+    public CronJobKind Kind { get; init; } = CronJobKind.User;
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public CronJobState State { get; init; } = new();

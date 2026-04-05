@@ -91,6 +91,12 @@ public sealed class GatewayService(
 
         _agents = agents;
 
+        // Reconcile dreamtime jobs for all agents
+        foreach (var (name, agentDef) in agents)
+        {
+            await ReconcileDreamtimeAsync(name, agentDef, logger);
+        }
+
         // Create MobileTransport
         _agentStateCache = new AgentStateCache();
         _mobileSessionStore = new MobileSessionStore(_achatesHome);
@@ -274,8 +280,65 @@ public sealed class GatewayService(
         var agentDef = await ResolveAgentAsync(name, agentConfig, ct);
         _agents[name] = agentDef;
         _mobileTransport?.UpdateAgent(name, agentDef);
+        await ReconcileDreamtimeAsync(name, agentDef, logger);
+        _cronService?.Poke();
         logger.LogInformation("Agent '{Name}' reloaded with model {Model}", name, agentDef.Model.Id);
         return agentDef;
+    }
+
+    private static async Task ReconcileDreamtimeAsync(
+        string agentName, AgentDefinition agentDef, ILogger logger)
+    {
+        if (agentDef.CronStore is null)
+            return;
+
+        var jobs = await agentDef.CronStore.LoadAsync();
+        var existingJob = jobs.FirstOrDefault(j => j.Kind == CronJobKind.Dreamtime);
+
+        if (agentDef.Dreamtime is { } dreamtime)
+        {
+            // Build the cron expression from the local time
+            var cronExpr = $"{dreamtime.Minute} {dreamtime.Hour} * * *";
+            var schedule = new CronSchedule.Cron(cronExpr);
+
+            if (existingJob is null)
+            {
+                // Create new dreamtime job
+                var job = new CronJob
+                {
+                    Id = Guid.NewGuid().ToString("N")[..12],
+                    Name = "Dreamtime",
+                    AgentName = agentName,
+                    Schedule = schedule,
+                    Message = "Perform your nightly memory review.",
+                    Delivery = new CronDeliveryTarget(),
+                    Kind = CronJobKind.Dreamtime,
+                    State = { NextRunAt = CronScheduler.ComputeNextRun(schedule, DateTimeOffset.UtcNow) },
+                };
+                await agentDef.CronStore.AddAsync(job);
+                logger.LogInformation("Agent '{Name}': created dreamtime job at {Time}", agentName, dreamtime);
+            }
+            else
+            {
+                // Update schedule if it changed
+                var currentExpr = (existingJob.Schedule as CronSchedule.Cron)?.Expression;
+                if (currentExpr != cronExpr)
+                {
+                    await agentDef.CronStore.UpdateAsync(existingJob.Id, j =>
+                    {
+                        j.Schedule = schedule;
+                        j.State.NextRunAt = CronScheduler.ComputeNextRun(schedule, DateTimeOffset.UtcNow);
+                    });
+                    logger.LogInformation("Agent '{Name}': updated dreamtime schedule to {Time}", agentName, dreamtime);
+                }
+            }
+        }
+        else if (existingJob is not null)
+        {
+            // Dreamtime was disabled — remove the job
+            await agentDef.CronStore.RemoveAsync(existingJob.Id);
+            logger.LogInformation("Agent '{Name}': removed dreamtime job", agentName);
+        }
     }
 
     private async Task<AgentDefinition> ResolveAgentAsync(string name, AgentConfig agentConfig, CancellationToken ct)
@@ -342,7 +405,9 @@ public sealed class GatewayService(
         var costLedgerPath = Path.Combine(achatesHome, "agents", name, "costs.jsonl");
         var costLedger = new CostLedger(costLedgerPath);
         var cronStorePath = Path.Combine(achatesHome, "agents", name, "cron.json");
-        var cronStore = hasTools.Contains("cron") ? new CronStore(cronStorePath) : null;
+        var cronStore = hasTools.Contains("cron") || agentConfig.Dreamtime is not null
+            ? new CronStore(cronStorePath)
+            : null;
 
         var avatarPath = Path.Combine(agentDir, "avatar.jpg");
         if (!File.Exists(avatarPath))
@@ -364,6 +429,7 @@ public sealed class GatewayService(
             CronStore = cronStore,
             GraphClients = graphClients,
             AvatarData = avatarData,
+            Dreamtime = agentConfig.Dreamtime,
         };
 
         logger.LogInformation("Agent '{Name}' resolved with model {Model}", name, model.Id);
