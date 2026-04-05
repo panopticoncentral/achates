@@ -68,7 +68,7 @@ func parseMessage(_ value: JSONValue, serverURL: URL?) -> ChatMessage? {
                 switch itemType {
                 case "text":
                     let text = itemDict["text"]?.stringValue ?? ""
-                    blocks.append(.text(text))
+                    blocks.append(.text(id: UUID().uuidString, text))
                 case "thinking":
                     let text = itemDict["thinking"]?.stringValue ?? ""
                     let thinkingId = itemDict["id"]?.stringValue ?? UUID().uuidString

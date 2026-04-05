@@ -49,7 +49,7 @@ struct MessageBubble: View {
                         .padding(.leading, 4)
                 }
 
-                if message.blocks.isEmpty && message.role == .assistant {
+                if visibleBlocks.isEmpty && message.role == .assistant && (message.blocks.isEmpty || isStreaming) {
                     TypingIndicator()
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
@@ -85,7 +85,7 @@ struct MessageBubble: View {
     @ViewBuilder
     private func blockView(_ block: ContentBlock) -> some View {
         switch block {
-        case .text(let text):
+        case .text(_, let text):
             textBubble(text)
 
         case .thinking(let id, let text, let collapsed):

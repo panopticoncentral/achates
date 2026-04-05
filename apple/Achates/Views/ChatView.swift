@@ -83,15 +83,18 @@ struct ChatView: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 8)
                     }
-                    .onChange(of: appState.messages.last?.id) { _, _ in
+                    .onChange(of: appState.messages.count) { _, _ in
+                        // New message added — always scroll to bottom
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo("bottom-anchor", anchor: .bottom)
                         }
                         isAtBottom = true
                     }
-                    .onChange(of: lastMessageText) { _, _ in
-                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
-                        isAtBottom = true
+                    .onChange(of: streamingTextLength) { _, _ in
+                        // Streaming delta — only scroll if user was already at bottom
+                        if isAtBottom {
+                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        }
                     }
                     .modifier(ScrollBottomDetector(isAtBottom: $isAtBottom))
                     .overlay(alignment: .bottomTrailing) {
@@ -239,8 +242,12 @@ struct ChatView: View {
     private var visibleMessages: [ChatMessage] {
         if showToolActivity { return appState.messages }
         return appState.messages.filter { message in
+            // Always show the currently streaming message
+            if appState.isStreaming && message.id == appState.streamingMessageId {
+                return true
+            }
             // Keep if message has any non-tool-call blocks, or any still-running tool calls
-            message.blocks.contains { block in
+            return message.blocks.contains { block in
                 if case .toolCall(_, _, let status, _) = block {
                     return status == .running
                 }
@@ -249,9 +256,10 @@ struct ChatView: View {
         }
     }
 
-    private var lastMessageText: String {
-        guard let last = appState.messages.last else { return "" }
-        return last.textContent
+    /// Lightweight proxy for streaming content changes — avoids O(n) string comparison.
+    private var streamingTextLength: Int {
+        guard let last = appState.messages.last else { return 0 }
+        return last.blocks.count * 10000 + last.textContent.count
     }
 
     private var connectionLabel: String {

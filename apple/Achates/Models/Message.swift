@@ -12,7 +12,7 @@ enum MessageRole: String, Sendable, Codable {
 }
 
 enum ContentBlock: Identifiable, Sendable, Equatable {
-    case text(String)
+    case text(id: String, String)
     case thinking(id: String, text: String, collapsed: Bool)
     case toolCall(id: String, name: String, status: ToolCallStatus, result: String?)
     case image(id: String, data: Data, mimeType: String)
@@ -20,7 +20,7 @@ enum ContentBlock: Identifiable, Sendable, Equatable {
 
     var id: String {
         switch self {
-        case .text(let t): return "text-\(t.hashValue)"
+        case .text(let id, _): return "text-\(id)"
         case .thinking(let id, _, _): return "thinking-\(id)"
         case .toolCall(let id, _, _, _): return "tool-\(id)"
         case .image(let id, _, _): return "image-\(id)"
@@ -44,7 +44,7 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
 
     var textContent: String {
         blocks.compactMap { block in
-            if case .text(let t) = block { return t }
+            if case .text(_, let t) = block { return t }
             return nil
         }.joined()
     }
@@ -52,7 +52,7 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
     init(id: String = UUID().uuidString, role: MessageRole, text: String, timestamp: Date = Date()) {
         self.id = id
         self.role = role
-        self.blocks = [.text(text)]
+        self.blocks = [.text(id: UUID().uuidString, text)]
         self.timestamp = timestamp
     }
 
@@ -65,10 +65,10 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
     }
 
     mutating func appendText(_ delta: String) {
-        if case .text(let existing) = blocks.last {
-            blocks[blocks.count - 1] = .text(existing + delta)
+        if case .text(let id, let existing) = blocks.last {
+            blocks[blocks.count - 1] = .text(id: id, existing + delta)
         } else {
-            blocks.append(.text(delta))
+            blocks.append(.text(id: UUID().uuidString, delta))
         }
     }
 
