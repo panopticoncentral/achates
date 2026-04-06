@@ -41,11 +41,11 @@ struct ChatView: View {
             ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 2) {
-                            if appState.messages.isEmpty && !appState.isStreaming {
+                            let items = visibleMessages
+                            if items.isEmpty && !appState.isStreaming {
                                 emptyState
                             }
 
-                            let items = visibleMessages
                             ForEach(Array(items.enumerated()), id: \.element.id) { index, message in
                                 // Show timestamp if >5 min gap from previous message
                                 if let gap = timeGap(at: index, in: items), gap {

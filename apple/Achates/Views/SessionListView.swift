@@ -97,7 +97,15 @@ struct SessionListView: View {
 
     @ViewBuilder
     private var sessionList: some View {
-        List {
+        List(selection: Binding<String?>(
+            get: { appState.currentSessionId },
+            set: { newValue in
+                if let id = newValue {
+                    appState.currentSessionId = id
+                    Task { await appState.openSession(id, for: agent) }
+                }
+            }
+        )) {
             let grouped = groupedSessions
             ForEach(grouped, id: \.label) { group in
                 Section(group.label) {
@@ -105,10 +113,6 @@ struct SessionListView: View {
                         #if os(macOS)
                         sessionRow(session)
                             .tag(session.id)
-                            .onTapGesture {
-                                appState.currentSessionId = session.id
-                                Task { await appState.openSession(session.id, for: agent) }
-                            }
                         #else
                         NavigationLink(value: SessionSelection(agent: agent, sessionId: session.id)) {
                             sessionRow(session)

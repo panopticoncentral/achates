@@ -86,6 +86,9 @@ func parseMessage(_ value: JSONValue, serverURL: URL?) -> ChatMessage? {
                 }
             }
         }
+        if let errorText = dict["error"]?.stringValue, !errorText.isEmpty {
+            blocks.append(.text(id: UUID().uuidString, "⚠️ \(errorText)"))
+        }
         var parsedUsage: MessageUsage?
         if let usageDict = dict["usage"]?.objectValue,
            let input = usageDict["input"]?.intValue,
