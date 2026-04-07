@@ -17,7 +17,7 @@ internal sealed class ProfileTool(string agentDir, Func<CancellationToken, Task>
             ["action"] = StringEnum(["get", "update"], "Action to perform."),
             ["description"] = StringSchema("New agent description. Only used with 'update'."),
             ["prompt"] = StringSchema("New system prompt. Only used with 'update'."),
-            ["avatar"] = StringSchema("Base64-encoded image data for avatar. Only used with 'update'."),
+            ["avatar"] = StringSchema("Avatar image. Provide a file path from the image tool (e.g. '/agents/.../image.jpg') or base64-encoded image data. Only used with 'update'."),
         },
         required: ["action"]);
 
@@ -110,13 +110,25 @@ internal sealed class ProfileTool(string agentDir, Func<CancellationToken, Task>
         if (newAvatar is not null)
         {
             byte[] avatarBytes;
-            try
+
+            // Accept a file path (from ImageTool) or base64 data
+            var resolvedPath = TryResolveImagePath(newAvatar);
+            if (resolvedPath is not null)
             {
-                avatarBytes = Convert.FromBase64String(newAvatar);
+                if (!File.Exists(resolvedPath))
+                    return TextResult($"Image file not found: {newAvatar}");
+                avatarBytes = await File.ReadAllBytesAsync(resolvedPath, ct);
             }
-            catch (FormatException)
+            else
             {
-                return TextResult("Invalid base64 avatar data.");
+                try
+                {
+                    avatarBytes = Convert.FromBase64String(newAvatar);
+                }
+                catch (FormatException)
+                {
+                    return TextResult("Invalid avatar. Provide a file path from the image tool or base64-encoded image data.");
+                }
             }
 
             avatarBytes = CompressAvatar(avatarBytes, 512, 80);
@@ -162,6 +174,32 @@ internal sealed class ProfileTool(string agentDir, Func<CancellationToken, Task>
         using var resized = original.Resize(new SKImageInfo(newWidth, newHeight), SKSamplingOptions.Default);
         using var image = SKImage.FromBitmap(resized ?? original);
         return image.Encode(SKEncodedImageFormat.Jpeg, quality).ToArray();
+    }
+
+    /// <summary>
+    /// Resolves an image tool URL (e.g. "/agents/friday/images/file.jpg") or absolute path to a filesystem path.
+    /// Returns null if the value doesn't look like a path.
+    /// </summary>
+    private string? TryResolveImagePath(string value)
+    {
+        // Absolute filesystem path
+        if (value.StartsWith('/') && !value.StartsWith("/agents/"))
+            return value;
+
+        // Relative URL from ImageTool: /agents/{name}/images/{file}
+        if (value.StartsWith("/agents/") && value.Contains("/images/"))
+        {
+            var fileName = value[(value.LastIndexOf('/') + 1)..];
+            return Path.Combine(agentDir, "images", fileName);
+        }
+
+        // Looks like a path if it ends with an image extension
+        if (value.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
+            value.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
+            value.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+            return Path.Combine(agentDir, "images", value);
+
+        return null;
     }
 
     private static AgentToolResult TextResult(string text) =>

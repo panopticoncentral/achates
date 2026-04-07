@@ -15,7 +15,7 @@ public sealed class MobileSessionStore(string basePath)
     {
         var path = GetPath(agentName, sessionId);
         if (!File.Exists(path)) return null;
-        await using var stream = File.OpenRead(path);
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         return await JsonSerializer.DeserializeAsync<MobileSession>(stream, JsonOptions, ct);
     }
 
@@ -24,7 +24,7 @@ public sealed class MobileSessionStore(string basePath)
         var path = GetPath(agentName, session.Id);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         session.Updated = DateTimeOffset.UtcNow;
-        await using var stream = File.Create(path);
+        await using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
         await JsonSerializer.SerializeAsync(stream, session, JsonOptions, ct);
     }
 
