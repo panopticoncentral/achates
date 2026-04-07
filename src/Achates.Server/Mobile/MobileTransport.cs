@@ -983,7 +983,8 @@ public sealed class MobileTransport(
     private static ResponseFrame HandleToolsList(RequestFrame request)
     {
         var payload = JsonSerializer.SerializeToElement(
-            new { tools = GatewayService.AllToolNames }, JsonOptions);
+            new { tools = GatewayService.AllTools.Select(t => new { name = t.Name, label = t.Label }) },
+            JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
 

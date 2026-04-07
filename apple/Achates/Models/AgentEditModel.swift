@@ -63,6 +63,12 @@ struct AgentEditModel: Equatable {
     }
 }
 
+struct ToolInfo: Identifiable, Equatable {
+    var id: String { name }
+    let name: String
+    let label: String
+}
+
 struct ModelInfo: Identifiable, Equatable {
     let id: String
     let name: String

@@ -18,7 +18,7 @@ internal sealed class CameraTool(DeviceCommandBridge bridge) : AgentTool
 
     public override string Name => "camera";
     public override string Description => "Take a photo using the user's device camera. Returns the captured image.";
-    public override string Label => "Taking Photo";
+    public override string Label => "Camera";
     public override JsonElement Parameters => _schema;
 
     public override async Task<AgentToolResult> ExecuteAsync(

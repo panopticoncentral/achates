@@ -6,6 +6,11 @@ struct ChatView: View {
     @State private var speechService = SpeechService()
     @State private var showAgentEditor = false
     @State private var isAtBottom = true
+
+    /// Live agent data from AppState, falls back to the navigation snapshot.
+    private var liveAgent: Agent {
+        appState.agents.first { $0.id == agent.id } ?? agent
+    }
     @AppStorage("show_tool_activity") private var showToolActivity = false
 
     var body: some View {
@@ -144,9 +149,9 @@ struct ChatView: View {
                     showAgentEditor = true
                 } label: {
                     HStack(spacing: 8) {
-                        AgentAvatar(agent: agent, size: 32)
+                        AgentAvatar(agent: liveAgent, size: 32)
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(agent.displayName)
+                            Text(liveAgent.displayName)
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(.primary)
                             Text(connectionLabel)
@@ -156,7 +161,7 @@ struct ChatView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(agent.displayName), \(connectionLabel)")
+                .accessibilityLabel("\(liveAgent.displayName), \(connectionLabel)")
             }
             #else
             ToolbarItem(placement: .principal) {
@@ -164,9 +169,9 @@ struct ChatView: View {
                     showAgentEditor = true
                 } label: {
                     HStack(spacing: 8) {
-                        AgentAvatar(agent: agent, size: 24)
+                        AgentAvatar(agent: liveAgent, size: 24)
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(agent.displayName)
+                            Text(liveAgent.displayName)
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(.primary)
                             Text(connectionLabel)
@@ -176,7 +181,7 @@ struct ChatView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(agent.displayName), \(connectionLabel)")
+                .accessibilityLabel("\(liveAgent.displayName), \(connectionLabel)")
             }
             #endif
 
@@ -190,7 +195,7 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showAgentEditor) {
             NavigationStack {
-                AgentEditView(agent: agent)
+                AgentEditView(agent: liveAgent)
             }
             #if os(macOS)
             .frame(minWidth: 500, minHeight: 600)
@@ -201,8 +206,8 @@ struct ChatView: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Spacer()
-            AgentAvatar(agent: agent, size: 72)
-            Text(agent.displayName)
+            AgentAvatar(agent: liveAgent, size: 72)
+            Text(liveAgent.displayName)
                 .font(.title3.weight(.semibold))
             Text("Start a conversation")
                 .font(.subheadline)

@@ -15,7 +15,7 @@ internal sealed class LocationTool(DeviceCommandBridge bridge) : AgentTool
 
     public override string Name => "location";
     public override string Description => "Get the user's current GPS location including latitude, longitude, and accuracy.";
-    public override string Label => "Getting Location";
+    public override string Label => "Location";
     public override JsonElement Parameters => _schema;
 
     public override async Task<AgentToolResult> ExecuteAsync(

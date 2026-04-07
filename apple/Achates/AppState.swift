@@ -310,12 +310,17 @@ final class AppState {
         return ModelInfo.fromList(payload)
     }
 
-    func loadAvailableTools() async throws -> [String] {
+    func loadAvailableTools() async throws -> [ToolInfo] {
         guard let payload = try await client?.sendRequest(method: "tools.list") else {
             throw AgentEditError.notConnected
         }
         guard case .array(let items) = payload["tools"] else { return [] }
-        return items.compactMap { if case .string(let s) = $0 { return s } else { return nil } }
+        return items.compactMap { item -> ToolInfo? in
+            guard let obj = item.objectValue,
+                  let name = obj["name"]?.stringValue else { return nil }
+            let label = obj["label"]?.stringValue ?? name
+            return ToolInfo(name: name, label: label)
+        }
     }
 
     func fetchCostSummary(agent: String, period: String) async -> CostSummary? {

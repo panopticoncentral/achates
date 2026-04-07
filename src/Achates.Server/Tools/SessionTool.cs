@@ -19,7 +19,7 @@ internal sealed class SessionTool(Model model) : AgentTool
 
     public override string Name => "session";
     public override string Description => "Get current session status: time, model, and configuration.";
-    public override string Label => "Session Information";
+    public override string Label => "Session";
     public override JsonElement Parameters => _schema;
 
     public override Task<AgentToolResult> ExecuteAsync(

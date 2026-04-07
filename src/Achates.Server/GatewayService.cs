@@ -40,6 +40,17 @@ public sealed class GatewayService(
             .Where(t => t.IsSubclassOf(typeof(AgentTool)) && !t.IsAbstract)
             .Select(t => ((AgentTool)RuntimeHelpers.GetUninitializedObject(t)).Name));
 
+    /// <summary>
+    /// All known tools with names and labels, sorted by name.
+    /// </summary>
+    public static IReadOnlyList<(string Name, string Label)> AllTools { get; } =
+        typeof(GatewayService).Assembly.GetTypes()
+            .Where(t => t.IsSubclassOf(typeof(AgentTool)) && !t.IsAbstract)
+            .Select(t => (AgentTool)RuntimeHelpers.GetUninitializedObject(t))
+            .Select(t => (t.Name, t.Label))
+            .OrderBy(t => t.Name)
+            .ToList();
+
     public IReadOnlyDictionary<string, AgentDefinition> Agents => _agents;
     public MobileTransport? MobileTransport => _mobileTransport;
     public MobileSessionStore? MobileSessionStore => _mobileSessionStore;

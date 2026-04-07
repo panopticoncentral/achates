@@ -24,7 +24,7 @@ internal sealed class AgentCreatorTool(string agentsDir, string defaultModel, Fu
     public override string Name => "agent_creator";
     public override string Description =>
         "Create a new agent. Provide a name, description, and prompt. Optionally specify a model and tools.";
-    public override string Label => "Create Agent";
+    public override string Label => "Agent Creator";
     public override JsonElement Parameters => _schema;
 
     public override async Task<AgentToolResult> ExecuteAsync(

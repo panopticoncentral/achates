@@ -26,7 +26,7 @@ internal sealed class CostTool(CostLedger ledger) : AgentTool
 
     public override string Name => "cost";
     public override string Description => "Query usage costs: summaries, recent completions, or breakdowns by day/model.";
-    public override string Label => "Cost";
+    public override string Label => "Costs";
     public override JsonElement Parameters => _schema;
 
     public override async Task<AgentToolResult> ExecuteAsync(

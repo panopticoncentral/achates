@@ -9,15 +9,12 @@ struct AgentEditView: View {
     @State private var original: AgentEditModel?
     @State private var isLoading = true
     @State private var isSaving = false
+    @State private var saveEnabled = false
     @State private var errorMessage: String?
     @State private var showError = false
     @State private var showAvatarSheet = false
-    @State private var availableTools: [String] = []
-
-    private var hasChanges: Bool {
-        guard let config, let original else { return false }
-        return config != original
-    }
+    @State private var availableTools: [ToolInfo] = []
+    @State private var showToolsEditor = false
 
     var body: some View {
         Group {
@@ -43,10 +40,17 @@ struct AgentEditView: View {
                         Text("Save")
                     }
                 }
-                .disabled(!hasChanges || isSaving)
+                .disabled(!saveEnabled || isSaving)
             }
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
+            }
+        }
+        .onChange(of: config) { _, _ in
+            if let config, let original {
+                saveEnabled = config != original
+            } else {
+                saveEnabled = false
             }
         }
         .alert("Error", isPresented: $showError) {
@@ -130,7 +134,7 @@ struct AgentEditView: View {
 
                 NavigationLink {
                     ModelPickerView(
-                        selectedModel: thinkingModelBinding,
+                        selectedModel: binding(\.thinkingModel),
                         agentModels: config?.agentModels ?? [],
                         allowNone: true
                     )
@@ -172,8 +176,10 @@ struct AgentEditView: View {
             }
 
             Section("Tools") {
-                NavigationLink {
-                    ToolsEditView(tools: binding(\.tools), availableTools: availableTools)
+                DisclosureGroup(isExpanded: $showToolsEditor) {
+                    ForEach(availableTools) { tool in
+                        Toggle(tool.label, isOn: toolToggle(tool.name))
+                    }
                 } label: {
                     HStack {
                         Text("Tools")
@@ -227,23 +233,22 @@ struct AgentEditView: View {
     private var reasoningBinding: Binding<String> {
         Binding(
             get: { config?.reasoningEffort ?? "medium" },
-            set: { config?.reasoningEffort = $0 }
-        )
-    }
-
-    private var thinkingModelBinding: Binding<String> {
-        Binding(
-            get: { config?.thinkingModel ?? "" },
-            set: { config?.thinkingModel = $0 }
+            set: { newValue in
+                guard var c = config else { return }
+                c.reasoningEffort = newValue
+                config = c
+            }
         )
     }
 
     private var temperatureBinding: Binding<String> {
         Binding(
             get: { config?.temperature.map { String($0) } ?? "" },
-            set: {
-                if $0.isEmpty { config?.temperature = nil }
-                else if let v = Double($0) { config?.temperature = v }
+            set: { newValue in
+                guard var c = config else { return }
+                if newValue.isEmpty { c.temperature = nil }
+                else if let v = Double(newValue) { c.temperature = v }
+                config = c
             }
         )
     }
@@ -251,9 +256,26 @@ struct AgentEditView: View {
     private var maxTokensBinding: Binding<String> {
         Binding(
             get: { config?.maxTokens.map { String($0) } ?? "" },
-            set: {
-                if $0.isEmpty { config?.maxTokens = nil }
-                else if let v = Int($0) { config?.maxTokens = v }
+            set: { newValue in
+                guard var c = config else { return }
+                if newValue.isEmpty { c.maxTokens = nil }
+                else if let v = Int(newValue) { c.maxTokens = v }
+                config = c
+            }
+        )
+    }
+
+    private func toolToggle(_ tool: String) -> Binding<Bool> {
+        Binding(
+            get: { config?.tools.contains(tool) ?? false },
+            set: { enabled in
+                guard var c = config else { return }
+                if enabled {
+                    if !c.tools.contains(tool) { c.tools.append(tool) }
+                } else {
+                    c.tools.removeAll { $0 == tool }
+                }
+                config = c
             }
         )
     }
@@ -261,7 +283,11 @@ struct AgentEditView: View {
     private func binding<T>(_ keyPath: WritableKeyPath<AgentEditModel, T>) -> Binding<T> {
         Binding(
             get: { config![keyPath: keyPath] },
-            set: { config![keyPath: keyPath] = $0 }
+            set: { newValue in
+                var updated = config!
+                updated[keyPath: keyPath] = newValue
+                config = updated
+            }
         )
     }
 

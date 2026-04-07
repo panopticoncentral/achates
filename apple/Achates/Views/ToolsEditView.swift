@@ -1,13 +1,13 @@
 import SwiftUI
 
 struct ToolsEditView: View {
-    @Binding var tools: [String]
-    let availableTools: [String]
+    @Binding var config: AgentEditModel?
+    let availableTools: [ToolInfo]
 
     var body: some View {
         List {
-            ForEach(availableTools, id: \.self) { tool in
-                Toggle(tool, isOn: toolBinding(tool))
+            ForEach(availableTools) { tool in
+                Toggle(tool.label, isOn: toolBinding(tool.name))
             }
         }
         .navigationTitle("Tools")
@@ -18,12 +18,15 @@ struct ToolsEditView: View {
 
     private func toolBinding(_ tool: String) -> Binding<Bool> {
         Binding(
-            get: { tools.contains(tool) },
+            get: { config?.tools.contains(tool) ?? false },
             set: { enabled in
+                guard config != nil else { return }
                 if enabled {
-                    if !tools.contains(tool) { tools.append(tool) }
+                    if !(config!.tools.contains(tool)) {
+                        config!.tools.append(tool)
+                    }
                 } else {
-                    tools.removeAll { $0 == tool }
+                    config!.tools.removeAll { $0 == tool }
                 }
             }
         )
