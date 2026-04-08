@@ -412,6 +412,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Achates/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Achates needs camera access when the assistant requests a photo";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Achates needs your location when the assistant asks where you are";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Achates needs microphone access for voice input";
@@ -454,6 +455,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Achates/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Achates needs camera access when the assistant requests a photo";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Achates needs your location when the assistant asks where you are";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Achates needs microphone access for voice input";
