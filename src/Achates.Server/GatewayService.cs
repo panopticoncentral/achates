@@ -111,6 +111,7 @@ public sealed class GatewayService(
         // Create MobileTransport
         _agentStateCache = new AgentStateCache();
         _mobileSessionStore = new MobileSessionStore(_achatesHome);
+        await _mobileSessionStore.MigrateAsync(agents.Keys, cancellationToken);
         _mobileTransport = new MobileTransport(agents, _mobileSessionStore, _agentStateCache, loggerFactory);
         _mobileTransport.AgentReloadFunc = ReloadAgentAsync;
         _mobileTransport.AgentRenameFunc = RenameAgentAsync;

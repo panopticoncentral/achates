@@ -38,7 +38,7 @@ public sealed class AdminService(GatewayService gatewayService, AchatesConfig co
                 sessions.Add(new SessionInfo
                 {
                     AgentName = agentName,
-                    SessionId = Path.GetFileNameWithoutExtension(file),
+                    SessionId = MobileSessionStore.ExtractSessionId(file),
                     SizeBytes = fi.Length,
                     LastModified = fi.LastWriteTimeUtc,
                 });
