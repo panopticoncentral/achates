@@ -281,6 +281,14 @@ final class WebSocketClient {
             let newId = payload["new_id"]?.stringValue
             Task { await appState.handleAgentRenamed(oldId: oldId, newId: newId) }
 
+        case "memory.updated":
+            if let scope = payload["scope"]?.stringValue {
+                appState.handleMemoryUpdated(scope: scope)
+            }
+
+        case "jobs.updated":
+            appState.handleJobsUpdated()
+
         default:
             print("Unknown event: \(evt.event)")
         }

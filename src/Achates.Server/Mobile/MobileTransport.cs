@@ -253,6 +253,12 @@ public sealed class MobileTransport(
                 "tools.list" => HandleToolsList(request),
                 "models.list" => await HandleModelsListAsync(request, ct),
                 "costs.summary" => await HandleCostsSummaryAsync(request, ct),
+                "memory.list" => HandleMemoryList(request),
+                "memory.get" => await HandleMemoryGetAsync(request, ct),
+                "memory.set" => await HandleMemorySetAsync(request, ct),
+                "jobs.list" => await HandleJobsListAsync(request, ct),
+                "jobs.update" => await HandleJobsUpdateAsync(request, ct),
+                "jobs.delete" => await HandleJobsDeleteAsync(request, ct),
                 _ => ResponseFrame.Failure(request.Id, "unknown_method", $"Unknown method: {request.Method}"),
             };
 
@@ -1057,6 +1063,181 @@ public sealed class MobileTransport(
         return ResponseFrame.Success(request.Id, payload);
     }
 
+    // --- Memory ---
+
+    private ResponseFrame HandleMemoryList(RequestFrame request)
+    {
+        var memories = new List<object>();
+
+        long sharedSize = 0;
+        long sharedUpdated = 0;
+        if (File.Exists(SharedMemoryPath))
+        {
+            var fi = new FileInfo(SharedMemoryPath);
+            sharedSize = fi.Length;
+            sharedUpdated = new DateTimeOffset(fi.LastWriteTimeUtc).ToUnixTimeMilliseconds();
+        }
+        memories.Add(new { scope = "shared", size = sharedSize, updated = sharedUpdated });
+
+        foreach (var agentName in _agents.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase))
+        {
+            var path = Path.Combine(AchatesHome, "agents", agentName, "memory.md");
+            if (!File.Exists(path))
+                continue;
+
+            var fi = new FileInfo(path);
+            memories.Add(new
+            {
+                scope = agentName,
+                size = fi.Length,
+                updated = new DateTimeOffset(fi.LastWriteTimeUtc).ToUnixTimeMilliseconds(),
+            });
+        }
+
+        var payload = JsonSerializer.SerializeToElement(new { memories }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private static async Task<ResponseFrame> HandleMemoryGetAsync(RequestFrame request, CancellationToken ct)
+    {
+        var scope = GetStringParam(request.Params, "scope");
+        if (scope is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'scope' parameter.");
+
+        var path = ResolveMemoryPath(scope);
+        var content = File.Exists(path) ? await File.ReadAllTextAsync(path, ct) : "";
+
+        var payload = JsonSerializer.SerializeToElement(new { content }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleMemorySetAsync(RequestFrame request, CancellationToken ct)
+    {
+        var scope = GetStringParam(request.Params, "scope");
+        if (scope is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'scope' parameter.");
+
+        if (!request.Params.TryGetProperty("content", out var contentProp) || contentProp.ValueKind != JsonValueKind.String)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'content' parameter.");
+
+        var content = contentProp.GetString() ?? "";
+        var path = ResolveMemoryPath(scope);
+
+        var dir = Path.GetDirectoryName(path);
+        if (dir is not null)
+            Directory.CreateDirectory(dir);
+        await File.WriteAllTextAsync(path, content, ct);
+
+        _ = BroadcastEventAsync("memory.updated", new { scope }, CancellationToken.None);
+
+        var payload = JsonSerializer.SerializeToElement(new { ok = true }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    // --- Jobs ---
+
+    private async Task<ResponseFrame> HandleJobsListAsync(RequestFrame request, CancellationToken ct)
+    {
+        var jobs = new List<object>();
+
+        foreach (var (agentName, agentDef) in _agents)
+        {
+            if (agentDef.CronStore is not { } store)
+                continue;
+
+            var loaded = await store.LoadAsync(ct);
+            foreach (var job in loaded)
+            {
+                jobs.Add(new
+                {
+                    agent = agentName,
+                    id = job.Id,
+                    name = job.Name,
+                    kind = job.Kind == CronJobKind.Dreamtime ? "dreamtime" : "user",
+                    schedule = ScheduleToDto(job.Schedule),
+                    enabled = job.Enabled,
+                    message = job.Message,
+                    state = new
+                    {
+                        last_status = job.State.LastStatus,
+                        last_run_at = job.State.LastRunAt?.ToUnixTimeMilliseconds(),
+                        next_run_at = job.State.NextRunAt?.ToUnixTimeMilliseconds(),
+                        last_error = job.State.LastError,
+                        consecutive_errors = job.State.ConsecutiveErrors,
+                    },
+                });
+            }
+        }
+
+        var payload = JsonSerializer.SerializeToElement(new { jobs }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleJobsUpdateAsync(RequestFrame request, CancellationToken ct)
+    {
+        var agentName = GetStringParam(request.Params, "agent");
+        var jobId = GetStringParam(request.Params, "id");
+        if (agentName is null || jobId is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'id' parameter.");
+
+        if (!_agents.TryGetValue(agentName, out var agentDef) || agentDef.CronStore is not { } store)
+            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' has no cron store.");
+
+        if (request.Params.TryGetProperty("enabled", out var enabledProp)
+            && enabledProp.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            var enabled = enabledProp.GetBoolean();
+            var updated = await store.UpdateAsync(jobId, j => j.Enabled = enabled, ct);
+            if (updated is null)
+                return ResponseFrame.Failure(request.Id, "not_found", $"Job '{jobId}' not found.");
+        }
+
+        _ = BroadcastEventAsync("jobs.updated", new { agent = agentName, id = jobId }, CancellationToken.None);
+
+        var payload = JsonSerializer.SerializeToElement(new { ok = true }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleJobsDeleteAsync(RequestFrame request, CancellationToken ct)
+    {
+        var agentName = GetStringParam(request.Params, "agent");
+        var jobId = GetStringParam(request.Params, "id");
+        if (agentName is null || jobId is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'id' parameter.");
+
+        if (!_agents.TryGetValue(agentName, out var agentDef) || agentDef.CronStore is not { } store)
+            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' has no cron store.");
+
+        var existing = await store.LoadAsync(ct);
+        var job = existing.FirstOrDefault(j => j.Id == jobId);
+        if (job is null)
+            return ResponseFrame.Failure(request.Id, "not_found", $"Job '{jobId}' not found.");
+
+        if (job.Kind == CronJobKind.Dreamtime)
+            return ResponseFrame.Failure(request.Id, "forbidden",
+                "Dreamtime jobs are system-managed and cannot be deleted.");
+
+        await store.RemoveAsync(jobId, ct);
+
+        _ = BroadcastEventAsync("jobs.updated", new { agent = agentName, id = jobId, deleted = true }, CancellationToken.None);
+
+        var payload = JsonSerializer.SerializeToElement(new { ok = true }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private static object ScheduleToDto(CronSchedule schedule) => schedule switch
+    {
+        CronSchedule.At at => new { type = "at", time = at.Time.ToUnixTimeMilliseconds() },
+        CronSchedule.Every every => new { type = "every", minutes = every.Interval.TotalMinutes },
+        CronSchedule.Cron cron => new { type = "cron", expression = cron.Expression, timezone = cron.Timezone },
+        _ => new { type = "unknown" },
+    };
+
+    private static string ResolveMemoryPath(string scope) =>
+        scope == "shared"
+            ? SharedMemoryPath
+            : Path.Combine(AchatesHome, "agents", scope, "memory.md");
+
     private static string[] FormatModalities(ModelModalities m)
     {
         var list = new List<string> { "text" };
@@ -1350,8 +1531,10 @@ public sealed class MobileTransport(
         return preview;
     }
 
-    private static readonly string SharedMemoryPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
+    private static readonly string AchatesHome = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates");
+
+    private static readonly string SharedMemoryPath = Path.Combine(AchatesHome, "memory.md");
 
     private AgentRuntime CreateRuntime(AgentDefinition agentDef, string agentName,
         IReadOnlyList<AgentMessage>? messages = null)

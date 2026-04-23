@@ -96,9 +96,7 @@ Providers <- Agent <- Server
 - WebSocket endpoint: `/ws` (query params: `peer`)
 - Health check: `GET /health`
 - Agent images: `GET /agents/{name}/images/{file}` (serves generated images from disk)
-- Admin console: Blazor Interactive Server UI at `/admin`. Pages: Dashboard, Sessions, Memory, Costs, Config.
-- `AdminService` — singleton data access layer for admin pages. Reads sessions, memory, costs, config from disk.
-- Blazor files live in `Components/` (App, Routes, Layout, Pages). Static assets in `wwwroot/css/` (Bootstrap 5, app.css).
+- Memory and scheduled-jobs management live in the Apple app under Settings → System (see `memory.*` and `jobs.*` RPC methods below). Costs are exposed via the Costs sheet from the session list.
 
 ### Transport (`Achates.Server.Mobile`)
 - `MobileTransport` — WebSocket handler for `/ws` connections. Supports multiple concurrent clients. All clients share the same session namespace (sessions are per-agent, not per-client). Events are broadcast to all connected clients. Manages RPC dispatch, agent event streaming, and session persistence.
@@ -107,7 +105,8 @@ Providers <- Agent <- Server
 - `MobileSession` — session model with Id, Title, Created, Updated, Messages.
 - `DeviceCommandBridge` — routes tool requests (location, camera) to any connected client with the required capability. Used by `LocationTool` and `CameraTool`.
 - Frame protocol: `RequestFrame` (req), `ResponseFrame` (res), `EventFrame` (evt). JSON with snake_case naming.
-- RPC methods: `connect`, `ping`, `agents.list`, `sessions.list`, `sessions.create`, `sessions.get`, `sessions.delete`, `sessions.rename`, `sessions.delete_all`, `chat.send`, `chat.cancel`, `chat.read`, `agent.get`, `agent.update`, `agent.rename`, `agent.generate_avatar`, `tools.list`, `models.list`.
+- RPC methods: `connect`, `ping`, `agents.list`, `sessions.list`, `sessions.create`, `sessions.get`, `sessions.delete`, `sessions.rename`, `sessions.delete_all`, `chat.send`, `chat.cancel`, `chat.read`, `agent.get`, `agent.update`, `agent.rename`, `agent.generate_avatar`, `tools.list`, `models.list`, `costs.summary`, `memory.list`, `memory.get`, `memory.set`, `jobs.list`, `jobs.update`, `jobs.delete`.
+- Broadcast events: `session.updated`, `agents.changed`, `agent.renamed`, `cron.result`, `memory.updated`, `jobs.updated`, plus agent streaming events (`text.delta`, `text.end`, `thinking.delta`, `thinking.end`, `tool.start`, `tool.end`, `image.block`, `message.end`, `done`).
 - Session model: discrete sessions per agent (like ChatGPT/Claude). Each session is a standalone conversation. Users see a list of sessions and explicitly create or revisit them. `chat.send` requires `session_id`. Auto-titling generates a short title via LLM after the first response (uses `tools.title.model` or falls back to agent's model), broadcast as `session.updated` event.
 - Device commands (server-to-client requests): `device.location`, `device.camera`.
 - Per-session tool injection: `CreateRuntime` adds MemoryTool, TodoTool, CostTool, CronTool per-session.

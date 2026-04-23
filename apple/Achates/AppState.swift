@@ -34,6 +34,17 @@ final class AppState {
     var client: WebSocketClient?
     var error: String?
 
+    /// Signal bumped whenever the server broadcasts `memory.updated`.
+    var memoryUpdateEvent: MemoryUpdateSignal?
+
+    /// Signal bumped whenever the server broadcasts `jobs.updated`.
+    var jobsUpdateEvent: UUID?
+
+    struct MemoryUpdateSignal: Equatable, Sendable {
+        let scope: String
+        let id: UUID
+    }
+
     /// Sessions for the currently selected agent
     var sessions: [SessionInfo] = []
     var hasMoreSessions = false
@@ -329,6 +340,61 @@ final class AppState {
             "period": .string(period),
         ]) else { return nil }
         return CostSummary.from(payload)
+    }
+
+    // MARK: - Memory
+
+    func listMemories() async -> [MemoryInfo] {
+        guard let payload = try? await client?.sendRequest(method: "memory.list")
+        else { return [] }
+        return MemoryInfo.fromList(payload)
+    }
+
+    func loadMemory(scope: String) async -> String {
+        guard let payload = try? await client?.sendRequest(method: "memory.get", params: [
+            "scope": .string(scope),
+        ]) else { return "" }
+        return payload["content"]?.stringValue ?? ""
+    }
+
+    func saveMemory(scope: String, content: String) async throws {
+        _ = try await client?.sendRequest(method: "memory.set", params: [
+            "scope": .string(scope),
+            "content": .string(content),
+        ])
+    }
+
+    // MARK: - Scheduled jobs
+
+    func listJobs() async -> [CronJobInfo] {
+        guard let payload = try? await client?.sendRequest(method: "jobs.list")
+        else { return [] }
+        return CronJobInfo.fromList(payload)
+    }
+
+    func setJobEnabled(agent: String, jobId: String, enabled: Bool) async throws {
+        _ = try await client?.sendRequest(method: "jobs.update", params: [
+            "agent": .string(agent),
+            "id": .string(jobId),
+            "enabled": .bool(enabled),
+        ])
+    }
+
+    func deleteJob(agent: String, jobId: String) async throws {
+        _ = try await client?.sendRequest(method: "jobs.delete", params: [
+            "agent": .string(agent),
+            "id": .string(jobId),
+        ])
+    }
+
+    // MARK: - Event handlers (called from WebSocketClient)
+
+    func handleMemoryUpdated(scope: String) {
+        memoryUpdateEvent = MemoryUpdateSignal(scope: scope, id: UUID())
+    }
+
+    func handleJobsUpdated() {
+        jobsUpdateEvent = UUID()
     }
 
     func handleAgentRenamed(oldId: String?, newId: String?) async {

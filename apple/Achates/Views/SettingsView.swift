@@ -10,9 +10,11 @@ struct SettingsView: View {
 
     var body: some View {
         #if os(macOS)
-        formContent
-            .formStyle(.grouped)
-            .frame(minWidth: 350, idealWidth: 400, minHeight: 200)
+        NavigationStack {
+            formContent
+                .formStyle(.grouped)
+        }
+        .frame(minWidth: 350, idealWidth: 400, minHeight: 200)
         #else
         NavigationStack {
             formContent
@@ -91,6 +93,22 @@ struct SettingsView: View {
             Section("Display") {
                 Toggle("Show message costs", isOn: $showMessageCosts)
                 Toggle("Show tool activity", isOn: $showToolActivity)
+            }
+
+            if appState.connectionStatus == .connected {
+                Section("System") {
+                    NavigationLink {
+                        MemoryListView()
+                    } label: {
+                        Label("Memory", systemImage: "brain")
+                    }
+
+                    NavigationLink {
+                        JobsView()
+                    } label: {
+                        Label("Scheduled Jobs", systemImage: "calendar.badge.clock")
+                    }
+                }
             }
 
             Section("About") {
