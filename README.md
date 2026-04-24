@@ -156,21 +156,25 @@ When multiple accounts are configured, the mail and calendar tools gain an `acco
 
 ## Apple Notes Setup
 
-Achates can access a restricted folder in Apple Notes on macOS. The Notes tool can list note titles, read a note by exact title, create new notes, rename notes, and replace note contents inside one configured folder.
+Achates can access Apple Notes on macOS. The tool spans every account and folder; the folder to use is chosen per call, not configured.
 
-In `~/.achates/config.yaml`:
+Add `notes` to the agent's tools in `AGENT.md`:
 
-```yaml
-tools:
-  notes:
-    folder: Achates
-
-agents:
-  myagent:
-    tools: [session, memory, notes]
+```markdown
+**Tools:**
+  - session
+  - memory
+  - notes
 ```
 
-If `notes.folder` is omitted, Achates defaults to the `Achates` folder. The tool will refuse access to notes outside that folder and will error if multiple accounts contain folders with the same name.
+No `config.yaml` entry is required. Actions:
+
+- `folders` — list every folder as `Account / Folder` so the agent can discover what's available.
+- `list` — note titles in a named folder.
+- `read` — fetch a single note by exact title (HTML body is converted to markdown).
+- `create` — make a new note (errors if a note with that title already exists in the folder).
+
+There is no update, rename, or delete action — the tool is append-only. On first use macOS will prompt to grant Notes automation access to the server process. If the same folder name exists in multiple Notes accounts the tool errors and asks you to rename or remove a copy.
 
 ## Web Search & Fetch Setup
 
@@ -305,7 +309,7 @@ Tokens are cached at `~/.achates/withings-tokens.json` and refresh automatically
 | `session` | Current time, model info, timezone | None |
 | `memory` | Persistent agent memory across sessions | None |
 | `todo` | Manage a Markdown todo list | `tools.todo.file` path |
-| `notes` | Access Apple Notes (macOS only) | Optional `tools.notes.folder` |
+| `notes` | Access Apple Notes (macOS only) — `folders`, `list`, `read`, `create` | Notes automation permission on first use |
 | `mail` | Read Outlook email | `tools.graph` account(s) |
 | `calendar` | View Outlook calendar | `tools.graph` account(s) |
 | `web_search` | Search the web via Brave Search | `BRAVE_API_KEY` or `tools.web_search.brave_api_key` |
@@ -315,3 +319,10 @@ Tokens are cached at `~/.achates/withings-tokens.json` and refresh automatically
 | `health` | Query Withings health data (weight, BP, sleep, activity) | `tools.withings` client_id and client_secret |
 | `chat` | Talk to other agents (discovery + ping-pong conversation) | At least 2 agents configured |
 | `cron` | Create and manage scheduled tasks | None |
+| `transcribe` | Transcribe an audio file via an audio-capable model | Optional `tools.transcribe.model` |
+| `think` | Escalate a prompt to a thinking model for complex reasoning | Per-agent `**Thinking Model:**` in AGENT.md |
+| `image` | List image-capable models and generate images | None (uses provider API key) |
+| `profile` | Let the agent read and update its own description/prompt/avatar | None |
+| `agent_creator` | Create new agents at runtime | None |
+| `location` | Get the user's GPS location from the mobile device | Connected Apple client with `location` capability |
+| `camera` | Capture a photo from the mobile device camera | Connected Apple client with `camera` capability |

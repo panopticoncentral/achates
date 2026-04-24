@@ -60,7 +60,6 @@ public sealed class AgentConfig
 public sealed class ToolsConfig
 {
     public TodoConfig? Todo { get; set; }
-    public NotesConfig? Notes { get; set; }
     public WebSearchConfig? WebSearch { get; set; }
     public TranscribeConfig? Transcribe { get; set; }
     public AvatarConfig? Avatar { get; set; }
@@ -99,11 +98,6 @@ public sealed class WithingsConfig
     public string? ClientId { get; set; }
     public string? ClientSecret { get; set; }
     public string? RedirectUri { get; set; }
-}
-
-public sealed class NotesConfig
-{
-    public string? Folder { get; set; }
 }
 
 public sealed class GraphConfig
