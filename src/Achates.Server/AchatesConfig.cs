@@ -4,6 +4,24 @@ public sealed class AchatesConfig
 {
     public ProviderConfig? Provider { get; set; }
     public ToolsConfig? Tools { get; set; }
+    public CronConfig? Cron { get; set; }
+}
+
+public sealed class CronConfig
+{
+    /// <summary>
+    /// Number of most-recent sessions to keep per cron job. Older sessions
+    /// for the same job are pruned by the reaper. Default 1. Set to 0 to
+    /// disable retention-based pruning.
+    /// </summary>
+    public int? KeepLastPerJob { get; set; }
+
+    /// <summary>
+    /// Absolute ceiling in days — any cron-origin session older than this is
+    /// pruned regardless of <see cref="KeepLastPerJob"/>. Null disables the
+    /// absolute ceiling. Default 30.
+    /// </summary>
+    public int? MaxAgeDays { get; set; }
 }
 
 public sealed class AgentConfig

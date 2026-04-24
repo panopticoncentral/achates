@@ -90,7 +90,8 @@ Providers <- Agent <- Server
 - `GraphClient` (`src/Achates.Server/Graph/`) — Microsoft Graph API client supporting two auth flows. Multiple named accounts per agent. Created per-account during startup. Eagerly authenticates so device code prompts appear at startup. `AsyncLocal` notifier routes device code messages through the transport to the user's chat. Flow is selected by presence of `client_secret`:
   - **Client credentials** (work/school): `client_secret` set → application permissions, `/users/{email}/` paths. Requires `tenant_id`, `user_email`.
   - **Device code** (personal or work/school): no `client_secret` → delegated permissions, `/me/` paths. `tenant_id` defaults to `consumers`. Token cache persisted at `~/.achates/graph-token-cache.bin`.
-- `CronService` (`src/Achates.Server/Cron/`) — background timer loop for scheduled task execution. Not DI-registered; created by `GatewayService` after agents are resolved. Timer sleeps until next due job (max 60s), executes due jobs sequentially, delivers results via `MobileTransport`. `CronStore` persists jobs per-agent as JSON. `CronScheduler` computes next run times using Cronos library for cron expressions. Max turns safety valve (20 turns) prevents runaway job execution. `CronJobKind` distinguishes `User` (agent-managed) from `Dreamtime` (system-managed) jobs.
+- `CronService` (`src/Achates.Server/Cron/`) — background timer loop for scheduled task execution. Not DI-registered; created by `GatewayService` after agents are resolved. Timer sleeps until next due job (max 60s), executes due jobs sequentially, delivers results via `MobileTransport`. `CronStore` persists jobs per-agent as JSON. `CronScheduler` computes next run times using Cronos library for cron expressions. Max turns safety valve (20 turns) prevents runaway job execution. `CronJobKind` distinguishes `User` (agent-managed) from `Dreamtime` (system-managed) jobs. Sessions saved by cron runs carry a `JobId` field tying them back to the originating job.
+- `CronSessionReaper` (`src/Achates.Server/Cron/CronSessionReaper.cs`) — prunes old cron-origin sessions so recurring jobs don't bloat the session list. Invoked from the cron loop after each tick, self-throttled to once per 5 min per agent. Rule: for each `JobId`, keep the N most-recent sessions (default 1, via `cron.keep_last_per_job`); additionally drop anything older than `cron.max_age_days` (default 30). Only touches `User`-kind cron sessions — dreamtime sessions are exempt for auditability.
 - **Dreamtime** — nightly memory consolidation. Enabled per-agent via `**Dreamtime:** 3:00 AM` in AGENT.md. System auto-creates a protected `CronJob` (Kind=Dreamtime) that agents cannot modify via CronTool. When executed, creates an isolated AgentRuntime with the agent's normal prompt + dreamtime instructions, equipped with `SessionReviewTool` (list/read sessions since last run) and `MemoryTool`. The agent triages recent sessions, reads interesting ones, and updates memory. Reconciled on agent load/reload. Saved as a normal session for auditability.
 - `GatewayService` — ASP.NET Core `IHostedLifecycleService`. Resolves agents from config at startup, creates `MobileTransport` and `CronService`. Reconciles dreamtime jobs on agent load/reload.
 - WebSocket endpoint: `/ws` (query params: `peer`)
@@ -155,6 +156,10 @@ tools:
     client_id: <withings-client-id>
     client_secret: <withings-client-secret>  # or set WITHINGS_CLIENT_SECRET env var
     redirect_uri: http://localhost:5000/withings/callback  # optional, this is the default
+
+cron:
+  keep_last_per_job: 1    # sessions retained per cron job (default 1, 0 to disable)
+  max_age_days: 30        # absolute ceiling on cron session age (default 30)
 ```
 
 Loaded by `ConfigLoader.Load()` (in Server project). Env var override: `ACHATES_CONFIG_PATH`. YAML uses underscore naming convention (C# PascalCase <-> YAML snake_case). `~` is expanded in file paths (e.g. `todo_file`). `${ENV_VAR}` expansion is **not yet supported** — use literal values or env vars directly.

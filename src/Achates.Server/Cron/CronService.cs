@@ -17,6 +17,7 @@ public sealed class CronService : IAsyncDisposable
     private readonly Dictionary<string, (CronStore Store, AgentDefinition Agent)> _agents;
     private readonly MobileTransport _transport;
     private readonly MobileSessionStore _sessionStore;
+    private readonly CronSessionReaper? _reaper;
     private readonly ILogger<CronService> _logger;
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _poke = new(0);
@@ -60,12 +61,14 @@ public sealed class CronService : IAsyncDisposable
         Dictionary<string, (CronStore Store, AgentDefinition Agent)> agents,
         MobileTransport transport,
         MobileSessionStore sessionStore,
-        ILogger<CronService> logger)
+        ILogger<CronService> logger,
+        CronSessionReaper? reaper = null)
     {
         _agents = agents;
         _transport = transport;
         _sessionStore = sessionStore;
         _logger = logger;
+        _reaper = reaper;
     }
 
     public Task StartAsync(CancellationToken ct)
@@ -160,6 +163,8 @@ public sealed class CronService : IAsyncDisposable
                         _logger.LogError(ex, "Cron job '{Name}' ({Id}) failed", job.Name, job.Id);
                     }
                 }
+
+                await SweepOldSessionsAsync(ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -342,6 +347,7 @@ public sealed class CronService : IAsyncDisposable
             {
                 Id = sessionId,
                 Title = job.Name,
+                JobId = job.Id,
                 Messages = [.. agent.Messages],
             };
             await _sessionStore.SaveAsync(agentName, session, ct);
@@ -414,6 +420,20 @@ public sealed class CronService : IAsyncDisposable
             agent = agentName,
             session_id = sessionId,
         }, ct);
+    }
+
+    private async Task SweepOldSessionsAsync(CancellationToken ct)
+    {
+        if (_reaper is null) return;
+
+        var input = new List<(string, IReadOnlyList<CronJob>)>(_agents.Count);
+        foreach (var (agentName, (store, _)) in _agents)
+        {
+            var jobs = await store.LoadAsync(ct);
+            input.Add((agentName, jobs));
+        }
+
+        await _reaper.SweepAsync(input, ct);
     }
 
     private async Task UpdateJobStateAfterRunAsync(

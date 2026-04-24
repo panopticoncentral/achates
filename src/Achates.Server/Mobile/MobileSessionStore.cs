@@ -60,7 +60,8 @@ public sealed class MobileSessionStore(string basePath)
                 session.Created,
                 session.Updated,
                 session.Messages.Count,
-                lastUserMessage?.Text));
+                lastUserMessage?.Text,
+                session.JobId));
         }
 
         IEnumerable<MobileSessionInfo> query = results.OrderByDescending(s => s.Updated);

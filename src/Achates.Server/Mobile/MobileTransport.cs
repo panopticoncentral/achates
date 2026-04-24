@@ -423,6 +423,7 @@ public sealed class MobileTransport(
                 preview = s.Preview,
                 created = s.Created.ToUnixTimeMilliseconds(),
                 updated = s.Updated.ToUnixTimeMilliseconds(),
+                job_id = s.JobId,
             }),
             has_more = hasMore,
         }, JsonOptions);
