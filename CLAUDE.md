@@ -61,7 +61,7 @@ Providers <- Agent <- Server
 ### Tool System (`AgentTool` subclasses)
 - `AgentTool` is the preferred pattern (class-based). Subclass and implement `Name`, `Description`, `Parameters` (JSON Schema as `JsonElement`), `ExecuteAsync()`.
 - Returns `AgentToolResult` with `Content` (list of `CompletionContent`), optional `ImageUrl` (relative URL for generated images), and optional `Details` (transient UI metadata, `[JsonIgnore]`'d from session persistence).
-- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `TodoTool`, `NotesTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`, `CronTool`, `IMessageTool`, `HealthTool`, `ChatTool`, `TranscribeTool`, `LocationTool`, `CameraTool`, `ImageTool`, `ProfileTool`, `AgentCreatorTool`, `ThinkTool`, `SessionReviewTool`.
+- Tools live in `src/Achates.Server/Tools/`. Current tools: `SessionTool`, `MemoryTool`, `NotebookTool`, `NotesTool`, `MailTool`, `CalendarTool`, `WebSearchTool`, `WebFetchTool`, `CostTool`, `CronTool`, `IMessageTool`, `HealthTool`, `ChatTool`, `TranscribeTool`, `LocationTool`, `CameraTool`, `ImageTool`, `ProfileTool`, `AgentCreatorTool`, `ThinkTool`, `SessionReviewTool`.
 - Tools can be shared (same instance for all sessions) or per-session. `MobileTransport.CreateRuntime` builds per-session tool lists (e.g. `MemoryTool` uses per-agent memory path).
 - Tool schema pattern: use `JsonSchemaHelpers` (`ObjectSchema`, `StringSchema`, `NumberSchema`, `BooleanSchema`, `ArraySchema`, `StringEnum`) via `using static Achates.Providers.Util.JsonSchemaHelpers`.
 
@@ -69,6 +69,7 @@ Providers <- Agent <- Server
 - `AgentLoader` — discovers agents by scanning `~/.achates/agents/*/AGENT.md`. Parses pure markdown: H1 title, description text, `## Capabilities` (`**Key:** value` lines with optional sub-bullet lists → `AgentConfig` fields), `## Prompt` (system prompt). Creates a default agent if none found. `NormalizeId(displayName)` derives a filesystem-safe agent ID from a display name (lowercase, spaces to hyphens, strip non-alphanumeric, collapse hyphens, max 64 chars).
 - `AgentDefinition` — resolved agent with Model, ThinkingModel, SystemPrompt, Tools, CompletionOptions, MemoryPath, CostLedger, CronStore, GraphClient, AvatarData. Avatar is loaded from `avatar.jpg` (or `.png`) in the agent directory; sent as base64 in `agents.list` responses.
 - `MemoryTool` — layered persistent memory with two scopes. **Shared memory** at `~/.achates/memory.md` stores universal user facts (name, family, preferences) accessible to all agents. **Agent memory** at `~/.achates/agents/{agentName}/memory.md` stores agent-specific notes. `scope` parameter (`shared` or `agent`) controls which file to target; `read` without a scope returns both. Survives session boundaries.
+- `NotebookTool` — a user-configured folder of markdown files for long-term notes, todos, drafts, and ideas. Actions: `list`, `read`, `write` (replaces whole file), `mkdir`. `read`/`write` restricted to `.md`; every path resolved against the root and rejected if it escapes. Root comes from `tools.notebook.root` in config. Singleton; requires `notebook` in agent's tools list.
 - `MailTool` — reads Outlook email via Microsoft Graph API. Actions: list, read, search, folders. `folders` lists mail folders (top-level or children of a parent folder ID), enabling folder navigation. `list` accepts folder by well-known name or ID. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
 - `CalendarTool` — reads Outlook calendar via Microsoft Graph API. Actions: upcoming, read, availability. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
 - `WebSearchTool` — searches the web via Brave Search API. Parameters: query, count. Returns numbered results with title, URL, description. Singleton; requires `brave_api_key` in config or `BRAVE_API_KEY` env var.
@@ -111,7 +112,7 @@ Providers <- Agent <- Server
 - Broadcast events: `session.updated`, `agents.changed`, `agent.renamed`, `cron.result`, `memory.updated`, `jobs.updated`, plus agent streaming events (`text.delta`, `text.end`, `thinking.delta`, `thinking.end`, `tool.start`, `tool.end`, `image.block`, `message.end`, `done`).
 - Session model: discrete sessions per agent (like ChatGPT/Claude). Each session is a standalone conversation. Users see a list of sessions and explicitly create or revisit them. `chat.send` requires `session_id`. Auto-titling generates a short title via LLM after the first response (uses `tools.title.model` or falls back to agent's model), broadcast as `session.updated` event.
 - Device commands (server-to-client requests): `device.location`, `device.camera`.
-- Per-session tool injection: `CreateRuntime` adds MemoryTool, TodoTool, CostTool, CronTool per-session.
+- Per-session tool injection: `CreateRuntime` adds MemoryTool, NotebookTool, CostTool, CronTool per-session.
 
 ## Conventions
 
@@ -133,8 +134,8 @@ provider:
   api_key: sk-...  # or set OPENROUTER_API_KEY env var
 
 tools:
-  todo:
-    file: ~/path/to/todo.md
+  notebook:
+    root: ~/path/to/notebook
   web_search:
     brave_api_key: BSA...  # or set BRAVE_API_KEY env var
   graph:
@@ -163,7 +164,7 @@ cron:
   max_age_days: 30        # absolute ceiling on cron session age (default 30)
 ```
 
-Loaded by `ConfigLoader.Load()` (in Server project). Env var override: `ACHATES_CONFIG_PATH`. YAML uses underscore naming convention (C# PascalCase <-> YAML snake_case). `~` is expanded in file paths (e.g. `todo_file`). `${ENV_VAR}` expansion is **not yet supported** — use literal values or env vars directly.
+Loaded by `ConfigLoader.Load()` (in Server project). Env var override: `ACHATES_CONFIG_PATH`. YAML uses underscore naming convention (C# PascalCase <-> YAML snake_case). `~` is expanded in file paths (e.g. `notebook_root`). `${ENV_VAR}` expansion is **not yet supported** — use literal values or env vars directly.
 
 ### Agent definitions (`~/.achates/agents/{name}/AGENT.md`)
 
@@ -181,7 +182,7 @@ Personal assistant.
 **Tools:**
   - session
   - memory
-  - todo
+  - notebook
   - mail
 
 **Allowed Chats:**

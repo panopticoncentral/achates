@@ -402,7 +402,7 @@ public sealed class GatewayService(
         var hasTools = agentConfig.Tools ?? [];
         var graphAccountNames = graphClients.Keys.ToList();
         var systemPrompt = SystemPrompt.Build(agentConfig.Description, prompt, tools,
-            hasTodo: toolsConfig?.Todo?.File is not null,
+            hasNotebook: tools.Any(t => t.Name == "notebook"),
             hasNotes: hasTools.Contains("notes"),
             hasMail: hasTools.Contains("mail"),
             hasCalendar: hasTools.Contains("calendar"),
@@ -440,7 +440,6 @@ public sealed class GatewayService(
             MemoryPath = memoryPath,
             DisplayName = agentConfig.Title,
             Description = agentConfig.Description,
-            TodoPath = ExpandHome(toolsConfig?.Todo?.File),
             CostLedger = costLedger,
             CronStore = cronStore,
             GraphClients = graphClients,
@@ -481,7 +480,6 @@ public sealed class GatewayService(
                     tools.Add(new SessionTool(model));
                     break;
                 case "memory":
-                case "todo":
                 case "cost":
                 case "cron":
                 case "chat":
@@ -494,6 +492,12 @@ public sealed class GatewayService(
                     break;
                 case "notes":
                     tools.Add(new NotesTool());
+                    break;
+                case "notebook":
+                    var notebookRoot = ExpandHome(toolsConfig?.Notebook?.Root);
+                    if (notebookRoot is null || !Directory.Exists(notebookRoot))
+                    { logger.LogWarning("Agent '{Agent}': notebook tool skipped — tools.notebook.root not set or not a directory", agentName); break; }
+                    tools.Add(new NotebookTool(notebookRoot));
                     break;
                 case "calendar":
                     if (graphClients.Count == 0)

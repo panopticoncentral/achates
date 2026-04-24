@@ -79,19 +79,20 @@ public sealed class SystemPromptTests
     // --- Optional sections ---
 
     [Fact]
-    public void Todo_section_included_when_enabled()
+    public void Includes_notebook_section_when_hasNotebook_is_true()
     {
-        var result = SystemPrompt.Build(hasTodo: true);
+        var result = SystemPrompt.Build(hasNotebook: true);
 
-        Assert.Contains("## Todo List", result);
+        Assert.Contains("## Notebook", result);
+        Assert.Contains("TODO.md", result);
     }
 
     [Fact]
-    public void Todo_section_excluded_when_disabled()
+    public void Omits_notebook_section_when_hasNotebook_is_false()
     {
-        var result = SystemPrompt.Build(hasTodo: false);
+        var result = SystemPrompt.Build(hasNotebook: false);
 
-        Assert.DoesNotContain("## Todo List", result);
+        Assert.DoesNotContain("## Notebook", result);
     }
 
     [Fact]

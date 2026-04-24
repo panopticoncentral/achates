@@ -1543,8 +1543,6 @@ public sealed class MobileTransport(
         var tools = new List<AgentTool>(agentDef.Tools);
 
         tools.Add(new MemoryTool(SharedMemoryPath, agentDef.MemoryPath));
-        if (agentDef.TodoPath is { } todoPath)
-            tools.Add(new TodoTool(todoPath));
         if (agentDef.CostLedger is { } costLedger)
             tools.Add(new CostTool(costLedger));
         if (agentDef.CronStore is { } cronStore && CronService is { } cron)

@@ -373,8 +373,6 @@ public sealed class CronService : IAsyncDisposable
         var sharedMemoryPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
         tools.Add(new MemoryTool(sharedMemoryPath, agentDef.MemoryPath));
-        if (agentDef.TodoPath is { } todoPath)
-            tools.Add(new TodoTool(todoPath));
         if (agentDef.CostLedger is { } costLedger)
             tools.Add(new CostTool(costLedger));
 

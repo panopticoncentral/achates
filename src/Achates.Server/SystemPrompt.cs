@@ -11,7 +11,7 @@ public static class SystemPrompt
         string? agentDescription = null,
         string? agentPrompt = null,
         IReadOnlyList<AgentTool>? tools = null,
-        bool hasTodo = false,
+        bool hasNotebook = false,
         bool hasNotes = false,
         bool hasMail = false,
         bool hasCalendar = false,
@@ -75,14 +75,13 @@ public static class SystemPrompt
         lines.Add("When saving, include everything you want to keep — the file for that scope is replaced, not appended.");
         lines.Add("");
 
-        if (hasTodo)
+        if (hasNotebook)
         {
-            lines.Add("## Todo List");
-            lines.Add("You have access to the user's personal todo list via the todo tool.");
-            lines.Add("The list is organized by sections (Today, This Week, etc.) with emoji category prefixes.");
-            lines.Add("You can list items, add new items, and mark items complete or incomplete.");
-            lines.Add("You CANNOT delete items — completed items stay in the list for the user to manage.");
-            lines.Add("When adding items, always include the appropriate category emoji and place them in the right section.");
+            lines.Add("## Notebook");
+            lines.Add("You have a notebook — a folder of markdown files for long-term notes, todos, drafts, and ideas that persist across sessions.");
+            lines.Add("Use `notebook list` to see what's there, `notebook read` to open a file, `notebook write` to save (writes replace the whole file, so include everything you want to keep), and `notebook mkdir` to organize into subfolders.");
+            lines.Add("If the user wants you to track todos, keep them in `TODO.md` at the root of the notebook.");
+            lines.Add("Only .md files can be read or written; other extensions are rejected.");
             lines.Add("");
         }
 

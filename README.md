@@ -176,6 +176,29 @@ No `config.yaml` entry is required. Actions:
 
 There is no update, rename, or delete action — the tool is append-only. On first use macOS will prompt to grant Notes automation access to the server process. If the same folder name exists in multiple Notes accounts the tool errors and asks you to rename or remove a copy.
 
+## Notebook Setup
+
+Give an agent a folder of markdown files it can read and write. Useful for todos, notes, drafts, and anything you want to carry across sessions.
+
+In `~/.achates/config.yaml`:
+
+```yaml
+tools:
+  notebook:
+    root: ~/path/to/notebook
+```
+
+Then add `notebook` to the agent's tools in `AGENT.md`:
+
+```markdown
+**Tools:**
+  - session
+  - memory
+  - notebook
+```
+
+Actions: `list` (browse directories), `read` (open a `.md` file), `write` (create or replace a `.md` file in full), `mkdir` (create a subfolder). Non-`.md` files are ignored on list and rejected on read/write.
+
 ## Web Search & Fetch Setup
 
 Achates can search the web and fetch page content. Web search uses the [Brave Search API](https://brave.com/search/api/).
@@ -308,7 +331,7 @@ Tokens are cached at `~/.achates/withings-tokens.json` and refresh automatically
 |------|-------------|-----------------|
 | `session` | Current time, model info, timezone | None |
 | `memory` | Persistent agent memory across sessions | None |
-| `todo` | Manage a Markdown todo list | `tools.todo.file` path |
+| `notebook` | Read/write markdown files in a configured folder | `tools.notebook.root` path |
 | `notes` | Access Apple Notes (macOS only) — `folders`, `list`, `read`, `create` | Notes automation permission on first use |
 | `mail` | Read Outlook email | `tools.graph` account(s) |
 | `calendar` | View Outlook calendar | `tools.graph` account(s) |

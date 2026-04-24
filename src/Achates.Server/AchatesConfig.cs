@@ -59,7 +59,7 @@ public sealed class AgentConfig
 
 public sealed class ToolsConfig
 {
-    public TodoConfig? Todo { get; set; }
+    public NotebookConfig? Notebook { get; set; }
     public WebSearchConfig? WebSearch { get; set; }
     public TranscribeConfig? Transcribe { get; set; }
     public AvatarConfig? Avatar { get; set; }
@@ -83,9 +83,9 @@ public sealed class TitleConfig
     public string? Model { get; set; }
 }
 
-public sealed class TodoConfig
+public sealed class NotebookConfig
 {
-    public string? File { get; set; }
+    public string? Root { get; set; }
 }
 
 public sealed class WebSearchConfig

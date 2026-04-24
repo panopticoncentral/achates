@@ -52,11 +52,11 @@ You are a helpful assistant.
 
 Shared tool configuration at the top level. Individual tools are enabled per-agent via the agent's `tools` list in AGENT.md.
 
-#### `tools.todo`
+#### `tools.notebook`
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `file` | string | _(none)_ | Path to a Markdown todo list file. Supports `~` expansion. |
+| `root` | string | _(none)_ | Path to the agent's notebook directory. Supports `~` expansion. The directory must already exist — the tool is skipped with a warning if it doesn't. |
 
 #### `tools.web_search`
 
@@ -138,7 +138,7 @@ Each capability is a `**Key:** value` line. List values (tools, allowed chats) u
 | `Model` | string | _(required)_ | Model ID within the provider. |
 | `Thinking Model` | string | _(none)_ | Model used by the `think` tool. Required when `think` is in the tools list. |
 | `Provider` | string | _(global)_ | Override the provider for this agent. |
-| `Tools` | list | _(none)_ | Tool names to enable. Available: `session`, `memory`, `todo`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cost`, `cron`, `imessage`, `transcribe`, `think`, `health`, `chat`, `location`, `camera`, `image`, `profile`, `agent_creator`. |
+| `Tools` | list | _(none)_ | Tool names to enable. Available: `session`, `memory`, `notebook`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cost`, `cron`, `imessage`, `transcribe`, `think`, `health`, `chat`, `location`, `camera`, `image`, `profile`, `agent_creator`. |
 | `Allowed Chats` | list | _(all)_ | Allowlist of agent names this agent can chat with. Omit to allow all. Only relevant when `chat` is in tools. |
 | `Reasoning Effort` | string | `medium` | Reasoning effort level. Only sent if the model supports it. |
 | `Temperature` | number | _(none)_ | Sampling temperature. |
@@ -155,8 +155,8 @@ provider:
   api_key: sk-...
 
 tools:
-  todo:
-    file: ~/todo.md
+  notebook:
+    root: ~/notebook
   web_search:
     brave_api_key: BSA...
   graph:
@@ -186,7 +186,7 @@ Personal assistant.
 **Tools:**
   - session
   - memory
-  - todo
+  - notebook
   - mail
   - calendar
   - web_search

@@ -20,7 +20,6 @@ public sealed record AgentDefinition
     public required string MemoryPath { get; init; }
     public string? DisplayName { get; init; }
     public string? Description { get; init; }
-    public string? TodoPath { get; init; }
     public CostLedger? CostLedger { get; init; }
     public CronStore? CronStore { get; init; }
     public IReadOnlyDictionary<string, GraphClient> GraphClients { get; init; } = new Dictionary<string, GraphClient>();
