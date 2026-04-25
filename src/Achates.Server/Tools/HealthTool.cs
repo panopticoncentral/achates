@@ -16,9 +16,12 @@ internal sealed class HealthTool(WithingsClient withings) : AgentTool
         new Dictionary<string, JsonElement>
         {
             ["action"] = StringEnum(
-                ["weight", "blood_pressure", "sleep", "activity", "authorize"],
+                ["weight", "blood_pressure", "sleep", "activity", "workouts", "authorize"],
                 "Action to perform."),
             ["days"] = NumberSchema("Number of days to look back. Default 7."),
+            ["detail"] = StringEnum(
+                ["summary", "segments"],
+                "For action=sleep: 'summary' (default, daily aggregates) or 'segments' (raw stage timeline)."),
         },
         required: ["action"]);
 
@@ -48,8 +51,28 @@ internal sealed class HealthTool(WithingsClient withings) : AgentTool
         [TypeBoneMass] = ("Bone mass", "kg"),
     };
 
+    private static readonly Dictionary<int, string> WorkoutCategories = new()
+    {
+        [1] = "Walk",
+        [2] = "Run",
+        [6] = "Cycle",
+        [7] = "Swim",
+        [8] = "Surf",
+        [10] = "Yoga",
+        [16] = "Pilates",
+        [18] = "Weights",
+        [19] = "Elliptical",
+        [20] = "Rowing",
+        [21] = "Zumba",
+        [28] = "Boxing",
+        [36] = "Hiking",
+        [187] = "Climbing",
+        [192] = "Snowboarding",
+        [272] = "HIIT",
+    };
+
     public override string Name => "health";
-    public override string Description => "Query health data from Withings (weight, blood pressure, sleep, activity).";
+    public override string Description => "Query health data from Withings (weight, blood pressure, sleep, activity, workouts).";
     public override string Label => "Health";
     public override JsonElement Parameters => _schema;
 
@@ -61,6 +84,7 @@ internal sealed class HealthTool(WithingsClient withings) : AgentTool
     {
         var action = GetString(arguments, "action");
         var days = GetInt(arguments, "days", 7);
+        var detail = GetString(arguments, "detail") ?? "summary";
 
         return action switch
         {
@@ -68,9 +92,12 @@ internal sealed class HealthTool(WithingsClient withings) : AgentTool
             _ when !withings.IsAuthorized => HandleAuthorize(),
             "weight" => await GetWeightAsync(days, cancellationToken),
             "blood_pressure" => await GetBloodPressureAsync(days, cancellationToken),
-            "sleep" => await GetSleepAsync(days, cancellationToken),
+            "sleep" => detail == "segments"
+                ? await GetSleepSegmentsAsync(days, cancellationToken)
+                : await GetSleepSummaryAsync(days, cancellationToken),
             "activity" => await GetActivityAsync(days, cancellationToken),
-            _ => TextResult($"Unknown action '{action}'. Use: weight, blood_pressure, sleep, activity, authorize."),
+            "workouts" => await GetWorkoutsAsync(days, cancellationToken),
+            _ => TextResult($"Unknown action '{action}'. Use: weight, blood_pressure, sleep, activity, workouts, authorize."),
         };
     }
 
@@ -189,7 +216,104 @@ internal sealed class HealthTool(WithingsClient withings) : AgentTool
         return TextResult(sb.ToString().TrimEnd());
     }
 
-    private async Task<AgentToolResult> GetSleepAsync(int days, CancellationToken ct)
+    private async Task<AgentToolResult> GetSleepSummaryAsync(int days, CancellationToken ct)
+    {
+        var (startYmd, endYmd) = GetDateRangeYmd(days);
+        var body = await withings.ApiAsync("v2/sleep", new Dictionary<string, string>
+        {
+            ["action"] = "getsummary",
+            ["startdateymd"] = startYmd,
+            ["enddateymd"] = endYmd,
+            ["data_fields"] = "sleep_score,total_sleep_time,lightsleepduration,deepsleepduration,remsleepduration,wakeupcount,wakeupduration,durationtosleep,hr_average,hr_min,hr_max,snoring,snoringepisodecount,breathing_disturbances_intensity",
+        }, ct);
+
+        if (!body.TryGetProperty("series", out var series) || series.GetArrayLength() == 0)
+            return TextResult($"No sleep summaries in the last {days} days.");
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Sleep summary (last {days} days):");
+        sb.AppendLine();
+
+        foreach (var night in series.EnumerateArray())
+        {
+            var date = night.TryGetProperty("date", out var d) ? d.GetString() : null;
+            var startTs = night.TryGetProperty("startdate", out var s) ? s.GetInt64() : 0;
+            var endTs = night.TryGetProperty("enddate", out var e) ? e.GetInt64() : 0;
+
+            var start = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeSeconds(startTs), TimeZoneInfo.Local);
+            var end = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeSeconds(endTs), TimeZoneInfo.Local);
+
+            sb.AppendLine($"**{date}**  (asleep {start:h:mm tt} – {end:h:mm tt})");
+
+            if (!night.TryGetProperty("data", out var data))
+            {
+                sb.AppendLine();
+                continue;
+            }
+
+            if (TryGetDouble(data, "sleep_score", out var score) && score > 0)
+                sb.AppendLine($"  Score: {score:F0}");
+
+            TryGetSeconds(data, "lightsleepduration", out var light);
+            TryGetSeconds(data, "deepsleepduration", out var deep);
+            TryGetSeconds(data, "remsleepduration", out var rem);
+            TryGetSeconds(data, "total_sleep_time", out var total);
+            if (total > 0)
+            {
+                var stages = new List<string>();
+                if (light > 0) stages.Add($"light {FormatDuration(light)}");
+                if (deep > 0) stages.Add($"deep {FormatDuration(deep)}");
+                if (rem > 0) stages.Add($"REM {FormatDuration(rem)}");
+                sb.Append($"  Total sleep: {FormatDuration(total)}");
+                if (stages.Count > 0)
+                    sb.Append($" ({string.Join(", ", stages)})");
+                sb.AppendLine();
+            }
+
+            TryGetSeconds(data, "durationtosleep", out var latency);
+            TryGetDouble(data, "wakeupcount", out var wakeCount);
+            TryGetSeconds(data, "wakeupduration", out var wakeDuration);
+            var sleepNotes = new List<string>();
+            if (latency > 0)
+                sleepNotes.Add($"Latency: {FormatDuration(latency)}");
+            if (wakeCount > 0)
+            {
+                var wake = $"Wake count: {wakeCount:F0}";
+                if (wakeDuration > 0) wake += $" ({FormatDuration(wakeDuration)} awake)";
+                sleepNotes.Add(wake);
+            }
+            if (sleepNotes.Count > 0)
+                sb.AppendLine($"  {string.Join("  ", sleepNotes)}");
+
+            if (TryGetDouble(data, "hr_average", out var hr) && hr > 0)
+            {
+                var line = $"  Avg HR: {hr:F0} bpm";
+                if (TryGetDouble(data, "hr_min", out var hrMin)
+                    && TryGetDouble(data, "hr_max", out var hrMax)
+                    && hrMin > 0 && hrMax > 0)
+                    line += $" ({hrMin:F0}–{hrMax:F0})";
+                sb.AppendLine(line);
+            }
+
+            TryGetSeconds(data, "snoring", out var snore);
+            TryGetDouble(data, "snoringepisodecount", out var snoreCount);
+            if (snore > 0)
+            {
+                var line = $"  Snoring: {FormatDuration(snore)}";
+                if (snoreCount > 0) line += $" ({snoreCount:F0} episodes)";
+                sb.AppendLine(line);
+            }
+
+            if (TryGetDouble(data, "breathing_disturbances_intensity", out var bd) && bd > 0)
+                sb.AppendLine($"  Breathing disturbances: {bd:F0}");
+
+            sb.AppendLine();
+        }
+
+        return TextResult(sb.ToString().TrimEnd());
+    }
+
+    private async Task<AgentToolResult> GetSleepSegmentsAsync(int days, CancellationToken ct)
     {
         var (startDate, _) = GetDateRange(days);
 
@@ -238,9 +362,7 @@ internal sealed class HealthTool(WithingsClient withings) : AgentTool
 
     private async Task<AgentToolResult> GetActivityAsync(int days, CancellationToken ct)
     {
-        var (startDate, _) = GetDateRange(days);
-        var startYmd = DateTimeOffset.FromUnixTimeSeconds(startDate).ToString("yyyy-MM-dd");
-        var endYmd = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
+        var (startYmd, endYmd) = GetDateRangeYmd(days);
 
         var body = await withings.ApiAsync("v2/measure", new Dictionary<string, string>
         {
@@ -295,11 +417,103 @@ internal sealed class HealthTool(WithingsClient withings) : AgentTool
         return TextResult(sb.ToString().TrimEnd());
     }
 
+    private async Task<AgentToolResult> GetWorkoutsAsync(int days, CancellationToken ct)
+    {
+        var (startYmd, endYmd) = GetDateRangeYmd(days);
+        var body = await withings.ApiAsync("v2/measure", new Dictionary<string, string>
+        {
+            ["action"] = "getworkouts",
+            ["startdateymd"] = startYmd,
+            ["enddateymd"] = endYmd,
+            ["data_fields"] = "calories,distance,elevation,hr_average,hr_min,hr_max,hr_zone_0,hr_zone_1,hr_zone_2,hr_zone_3,steps",
+        }, ct);
+
+        if (!body.TryGetProperty("series", out var series) || series.GetArrayLength() == 0)
+            return TextResult($"No workouts in the last {days} days.");
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Workouts (last {days} days):");
+        sb.AppendLine();
+
+        foreach (var workout in series.EnumerateArray())
+        {
+            var category = workout.TryGetProperty("category", out var c) ? c.GetInt32() : 0;
+            var startTs = workout.TryGetProperty("startdate", out var s) ? s.GetInt64() : 0;
+            var endTs = workout.TryGetProperty("enddate", out var e) ? e.GetInt64() : 0;
+            var start = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeSeconds(startTs), TimeZoneInfo.Local);
+            var end = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeSeconds(endTs), TimeZoneInfo.Local);
+            var duration = TimeSpan.FromSeconds(endTs - startTs);
+            var name = WorkoutCategories.TryGetValue(category, out var n) ? n : $"Activity {category}";
+
+            sb.AppendLine($"**{start:MMM d, yyyy}**  {name} {start:h:mm tt} – {end:h:mm tt} ({FormatDuration(duration.TotalSeconds)})");
+
+            if (!workout.TryGetProperty("data", out var data))
+            {
+                sb.AppendLine();
+                continue;
+            }
+
+            var topLine = new List<string>();
+            if (TryGetDouble(data, "distance", out var dist) && dist > 0)
+                topLine.Add($"Distance: {dist:N0}m");
+            if (TryGetDouble(data, "calories", out var cal) && cal > 0)
+                topLine.Add($"Calories: {cal:N0}");
+            if (topLine.Count > 0)
+                sb.AppendLine($"  {string.Join("  ", topLine)}");
+
+            if (TryGetDouble(data, "hr_average", out var hr) && hr > 0)
+            {
+                var hrLine = $"  Avg HR: {hr:F0} bpm";
+                if (TryGetDouble(data, "hr_min", out var hrMin)
+                    && TryGetDouble(data, "hr_max", out var hrMax)
+                    && hrMin > 0 && hrMax > 0)
+                    hrLine += $" ({hrMin:F0}–{hrMax:F0})";
+                sb.AppendLine(hrLine);
+            }
+
+            TryGetSeconds(data, "hr_zone_0", out var z0);
+            TryGetSeconds(data, "hr_zone_1", out var z1);
+            TryGetSeconds(data, "hr_zone_2", out var z2);
+            TryGetSeconds(data, "hr_zone_3", out var z3);
+            if (z0 + z1 + z2 + z3 > 0)
+            {
+                // Withings hr_zone numbering: 0=light, 1=moderate, 2=intense, 3=peak.
+                // Verify against a real workout response — if the zones look swapped,
+                // adjust the labels here.
+                var zones = new List<string>();
+                if (z0 > 0) zones.Add($"light {FormatDuration(z0)}");
+                if (z1 > 0) zones.Add($"moderate {FormatDuration(z1)}");
+                if (z2 > 0) zones.Add($"intense {FormatDuration(z2)}");
+                if (z3 > 0) zones.Add($"peak {FormatDuration(z3)}");
+                sb.AppendLine($"  HR zones: {string.Join(", ", zones)}");
+            }
+
+            var extras = new List<string>();
+            if (TryGetDouble(data, "elevation", out var elev) && elev > 0)
+                extras.Add($"Elevation: {elev:N0}m");
+            if (TryGetDouble(data, "steps", out var steps) && steps > 0)
+                extras.Add($"Steps: {steps:N0}");
+            if (extras.Count > 0)
+                sb.AppendLine($"  {string.Join("  ", extras)}");
+
+            sb.AppendLine();
+        }
+
+        return TextResult(sb.ToString().TrimEnd());
+    }
+
     private static (long Start, long End) GetDateRange(int days)
     {
         var end = DateTimeOffset.UtcNow;
         var start = end.AddDays(-days);
         return (start.ToUnixTimeSeconds(), end.ToUnixTimeSeconds());
+    }
+
+    private static (string StartYmd, string EndYmd) GetDateRangeYmd(int days)
+    {
+        var end = DateTimeOffset.UtcNow;
+        var start = end.AddDays(-days);
+        return (start.ToString("yyyy-MM-dd"), end.ToString("yyyy-MM-dd"));
     }
 
     private static string FormatDuration(double totalSeconds)
