@@ -17,7 +17,10 @@ internal sealed class NotebookTool : AgentTool
 
     public NotebookTool(string root)
     {
-        _root = Path.GetFullPath(root);
+        var full = Path.GetFullPath(root);
+        if (full.Length > 1)
+            full = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        _root = full;
     }
 
     private static readonly JsonElement _schema = ObjectSchema(
@@ -56,7 +59,7 @@ internal sealed class NotebookTool : AgentTool
 
     private AgentToolResult List(string? relPath)
     {
-        if (!TryResolve(relPath ?? ".", out var abs, out var error))
+        if (!TryResolve(relPath, out var abs, out var error))
             return TextResult(error);
 
         if (!Directory.Exists(abs))
@@ -125,18 +128,26 @@ internal sealed class NotebookTool : AgentTool
     private static bool IsMarkdown(string path) =>
         Path.GetExtension(path).Equals(".md", StringComparison.OrdinalIgnoreCase);
 
-    private bool TryResolve(string relPath, out string absPath, out string error)
+    private bool TryResolve(string? relPath, out string absPath, out string error)
     {
         absPath = "";
         error = "";
 
-        if (Path.IsPathRooted(relPath))
+        // Treat null/empty, ".", "./", "/", "\" as "the notebook root".
+        var trimmed = relPath?.Trim() ?? "";
+        if (trimmed.Length == 0 || trimmed is "." or "./" or ".\\" or "/" or "\\")
+        {
+            absPath = _root;
+            return true;
+        }
+
+        if (Path.IsPathRooted(trimmed))
         {
             error = "Absolute paths are not allowed. Use a path relative to the notebook root.";
             return false;
         }
 
-        var combined = Path.GetFullPath(Path.Combine(_root, relPath));
+        var combined = Path.GetFullPath(Path.Combine(_root, trimmed));
         var rootWithSep = _root.EndsWith(Path.DirectorySeparatorChar)
             ? _root
             : _root + Path.DirectorySeparatorChar;
