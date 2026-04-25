@@ -19,9 +19,6 @@ internal sealed class HealthTool(WithingsClient withings) : AgentTool
                 ["weight", "blood_pressure", "sleep", "activity", "workouts", "authorize"],
                 "Action to perform."),
             ["days"] = NumberSchema("Number of days to look back. Default 7."),
-            ["detail"] = StringEnum(
-                ["summary", "segments"],
-                "For action=sleep: 'summary' (default, daily aggregates) or 'segments' (raw stage timeline)."),
         },
         required: ["action"]);
 
@@ -84,7 +81,6 @@ internal sealed class HealthTool(WithingsClient withings) : AgentTool
     {
         var action = GetString(arguments, "action");
         var days = GetInt(arguments, "days", 7);
-        var detail = GetString(arguments, "detail") ?? "summary";
 
         return action switch
         {
@@ -92,9 +88,7 @@ internal sealed class HealthTool(WithingsClient withings) : AgentTool
             _ when !withings.IsAuthorized => HandleAuthorize(),
             "weight" => await GetWeightAsync(days, cancellationToken),
             "blood_pressure" => await GetBloodPressureAsync(days, cancellationToken),
-            "sleep" => detail == "segments"
-                ? await GetSleepSegmentsAsync(days, cancellationToken)
-                : await GetSleepSummaryAsync(days, cancellationToken),
+            "sleep" => await GetSleepAsync(days, cancellationToken),
             "activity" => await GetActivityAsync(days, cancellationToken),
             "workouts" => await GetWorkoutsAsync(days, cancellationToken),
             _ => TextResult($"Unknown action '{action}'. Use: weight, blood_pressure, sleep, activity, workouts, authorize."),
@@ -216,104 +210,7 @@ internal sealed class HealthTool(WithingsClient withings) : AgentTool
         return TextResult(sb.ToString().TrimEnd());
     }
 
-    private async Task<AgentToolResult> GetSleepSummaryAsync(int days, CancellationToken ct)
-    {
-        var (startYmd, endYmd) = GetDateRangeYmd(days);
-        var body = await withings.ApiAsync("v2/sleep", new Dictionary<string, string>
-        {
-            ["action"] = "getsummary",
-            ["startdateymd"] = startYmd,
-            ["enddateymd"] = endYmd,
-            ["data_fields"] = "sleep_score,total_sleep_time,lightsleepduration,deepsleepduration,remsleepduration,wakeupcount,wakeupduration,durationtosleep,hr_average,hr_min,hr_max,snoring,snoringepisodecount,breathing_disturbances_intensity",
-        }, ct);
-
-        if (!body.TryGetProperty("series", out var series) || series.GetArrayLength() == 0)
-            return TextResult($"No sleep summaries in the last {days} days.");
-
-        var sb = new StringBuilder();
-        sb.AppendLine($"Sleep summary (last {days} days):");
-        sb.AppendLine();
-
-        foreach (var night in series.EnumerateArray())
-        {
-            var date = night.TryGetProperty("date", out var d) ? d.GetString() : null;
-            var startTs = night.TryGetProperty("startdate", out var s) ? s.GetInt64() : 0;
-            var endTs = night.TryGetProperty("enddate", out var e) ? e.GetInt64() : 0;
-
-            var start = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeSeconds(startTs), TimeZoneInfo.Local);
-            var end = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeSeconds(endTs), TimeZoneInfo.Local);
-
-            sb.AppendLine($"**{date}**  (asleep {start:h:mm tt} – {end:h:mm tt})");
-
-            if (!night.TryGetProperty("data", out var data))
-            {
-                sb.AppendLine();
-                continue;
-            }
-
-            if (TryGetDouble(data, "sleep_score", out var score) && score > 0)
-                sb.AppendLine($"  Score: {score:F0}");
-
-            TryGetSeconds(data, "lightsleepduration", out var light);
-            TryGetSeconds(data, "deepsleepduration", out var deep);
-            TryGetSeconds(data, "remsleepduration", out var rem);
-            TryGetSeconds(data, "total_sleep_time", out var total);
-            if (total > 0)
-            {
-                var stages = new List<string>();
-                if (light > 0) stages.Add($"light {FormatDuration(light)}");
-                if (deep > 0) stages.Add($"deep {FormatDuration(deep)}");
-                if (rem > 0) stages.Add($"REM {FormatDuration(rem)}");
-                sb.Append($"  Total sleep: {FormatDuration(total)}");
-                if (stages.Count > 0)
-                    sb.Append($" ({string.Join(", ", stages)})");
-                sb.AppendLine();
-            }
-
-            TryGetSeconds(data, "durationtosleep", out var latency);
-            TryGetDouble(data, "wakeupcount", out var wakeCount);
-            TryGetSeconds(data, "wakeupduration", out var wakeDuration);
-            var sleepNotes = new List<string>();
-            if (latency > 0)
-                sleepNotes.Add($"Latency: {FormatDuration(latency)}");
-            if (wakeCount > 0)
-            {
-                var wake = $"Wake count: {wakeCount:F0}";
-                if (wakeDuration > 0) wake += $" ({FormatDuration(wakeDuration)} awake)";
-                sleepNotes.Add(wake);
-            }
-            if (sleepNotes.Count > 0)
-                sb.AppendLine($"  {string.Join("  ", sleepNotes)}");
-
-            if (TryGetDouble(data, "hr_average", out var hr) && hr > 0)
-            {
-                var line = $"  Avg HR: {hr:F0} bpm";
-                if (TryGetDouble(data, "hr_min", out var hrMin)
-                    && TryGetDouble(data, "hr_max", out var hrMax)
-                    && hrMin > 0 && hrMax > 0)
-                    line += $" ({hrMin:F0}–{hrMax:F0})";
-                sb.AppendLine(line);
-            }
-
-            TryGetSeconds(data, "snoring", out var snore);
-            TryGetDouble(data, "snoringepisodecount", out var snoreCount);
-            if (snore > 0)
-            {
-                var line = $"  Snoring: {FormatDuration(snore)}";
-                if (snoreCount > 0) line += $" ({snoreCount:F0} episodes)";
-                sb.AppendLine(line);
-            }
-
-            if (TryGetDouble(data, "breathing_disturbances_intensity", out var bd) && bd > 0)
-                sb.AppendLine($"  Breathing disturbances: {bd:F0}");
-
-            sb.AppendLine();
-        }
-
-        return TextResult(sb.ToString().TrimEnd());
-    }
-
-    private async Task<AgentToolResult> GetSleepSegmentsAsync(int days, CancellationToken ct)
+    private async Task<AgentToolResult> GetSleepAsync(int days, CancellationToken ct)
     {
         var (startDate, _) = GetDateRange(days);
 
