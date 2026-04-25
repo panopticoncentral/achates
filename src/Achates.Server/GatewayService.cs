@@ -554,7 +554,8 @@ public sealed class GatewayService(
                         async (name, ct) => await ReloadAgentAsync(name, ct)));
                     break;
                 default:
-                    throw new InvalidOperationException($"Unknown tool '{toolName}'.");
+                    logger.LogWarning("Agent '{Agent}': unknown tool '{Tool}' — skipped. Remove it from AGENT.md or check the spelling.", agentName, toolName);
+                    break;
             }
         }
         return tools;
