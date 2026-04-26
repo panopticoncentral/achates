@@ -153,22 +153,14 @@ struct SessionListView: View {
 
     @ViewBuilder
     private func sessionRow(_ session: SessionInfo) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(session.title ?? session.preview ?? "New conversation")
-                    .font(.system(size: 15, weight: .medium))
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Text(formatTimestamp(session.updated))
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-            }
-            if let preview = session.preview, session.title != nil {
-                Text(preview)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+        HStack {
+            Text(session.title ?? "New conversation")
+                .font(.system(size: 15, weight: .medium))
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(formatTimestamp(session.updated))
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
         .contextMenu {

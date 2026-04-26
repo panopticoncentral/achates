@@ -165,50 +165,30 @@ private struct AgentRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AgentAvatar(agent: agent, size: 56)
+            AgentAvatar(agent: agent, size: 44)
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(agent.displayName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    if let date = agent.lastActivity {
-                        Text(formatTimestamp(date))
-                            .font(.system(size: 13))
-                            .foregroundStyle(agent.unreadCount > 0 ? .blue : .secondary)
-                    }
-                }
+            Text(agent.displayName)
+                .font(.system(size: 16, weight: .semibold))
+                .lineLimit(1)
 
-                HStack(spacing: 6) {
-                    Text(previewText)
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+            if agent.unreadCount > 0 {
+                Circle()
+                    .fill(.blue)
+                    .frame(width: 10, height: 10)
+            }
 
-                    if agent.unreadCount > 0 {
-                        Spacer(minLength: 0)
-                        Circle()
-                            .fill(.blue)
-                            .frame(width: 12, height: 12)
-                    }
-                }
+            Spacer(minLength: 4)
+
+            if let date = agent.lastActivity {
+                Text(formatTimestamp(date))
+                    .font(.system(size: 13))
+                    .foregroundStyle(agent.unreadCount > 0 ? .blue : .secondary)
             }
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(agent.displayName). \(previewText)")
+        .accessibilityLabel(agent.displayName)
         .accessibilityValue(agent.unreadCount > 0 ? "\(agent.unreadCount) unread" : "")
-    }
-
-    private var previewText: String {
-        if let msg = agent.lastMessage, !msg.isEmpty {
-            return msg
-        }
-        if !agent.description.isEmpty {
-            return agent.description
-        }
-        return "No messages yet"
     }
 
     private func formatTimestamp(_ date: Date) -> String {
