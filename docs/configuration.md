@@ -107,6 +107,12 @@ Withings Health API for the `health` tool. OAuth 2.0 authorization code flow —
 |-----|------|---------|-------------|
 | `model` | string | `google/gemini-2.5-flash-image` | Image-capable model used by `agent.generate_avatar`. |
 
+#### `tools.image`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `model` | string | _(none)_ | Image-capable model used by the `image` tool. Required when an agent enables `image`; the tool is skipped on startup if unset. |
+
 ### `cron`
 
 Retention policy for sessions saved by scheduled cron job runs. Applied by `CronSessionReaper` after each cron tick (self-throttled to once per 5 minutes per agent). Only affects `User`-kind cron sessions — dreamtime sessions are exempt.

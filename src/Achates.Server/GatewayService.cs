@@ -542,7 +542,10 @@ public sealed class GatewayService(
                     tools.Add(new CameraTool(_deviceBridge));
                     break;
                 case "image":
-                    tools.Add(new ImageTool(agentName, agentDir, GenerateImageAsync, GetAllModelsAsync));
+                    var imageModelId = toolsConfig?.Image?.Model;
+                    if (string.IsNullOrWhiteSpace(imageModelId))
+                    { logger.LogWarning("Agent '{Agent}': image tool skipped — no image model configured (set tools.image.model)", agentName); break; }
+                    tools.Add(new ImageTool(agentName, agentDir, imageModelId, GenerateImageAsync));
                     break;
                 case "profile":
                     tools.Add(new ProfileTool(agentDir, ct => ReloadAgentAsync(agentName, ct)));
