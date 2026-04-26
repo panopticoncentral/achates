@@ -314,13 +314,6 @@ final class AppState {
         return data
     }
 
-    func loadModels() async throws -> [ModelInfo] {
-        guard let payload = try await client?.sendRequest(method: "models.list") else {
-            throw AgentEditError.notConnected
-        }
-        return ModelInfo.fromList(payload)
-    }
-
     func loadAvailableTools() async throws -> [ToolInfo] {
         guard let payload = try await client?.sendRequest(method: "tools.list") else {
             throw AgentEditError.notConnected

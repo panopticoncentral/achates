@@ -21,7 +21,7 @@ public sealed class AgentCreatorToolTests : IDisposable
     }
 
     private AgentCreatorTool CreateTool() =>
-        new(_agentsDir, "anthropic/claude-sonnet-4", (name, ct) =>
+        new(_agentsDir, (name, ct) =>
         {
             _loadedAgents.Add(name);
             return Task.CompletedTask;
@@ -64,19 +64,17 @@ public sealed class AgentCreatorToolTests : IDisposable
     }
 
     [Fact]
-    public async Task Create_WithModelAndTools_IncludesThemInAgentFile()
+    public async Task Create_WithTools_IncludesThemInAgentFile()
     {
         var tool = CreateTool();
         var result = await tool.ExecuteAsync("tc2", Args(
             ("name", JE("Tooled Bot")),
             ("description", JE("Has tools.")),
             ("prompt", JE("You have tools.")),
-            ("model", JE("anthropic/claude-sonnet-4")),
             ("tools", JEArray("session", "memory"))));
 
         var agentDir = Path.Combine(_agentsDir, "tooled-bot");
         var content = await File.ReadAllTextAsync(Path.Combine(agentDir, "AGENT.md"));
-        Assert.Contains("anthropic/claude-sonnet-4", content);
         Assert.Contains("session", content);
         Assert.Contains("memory", content);
     }

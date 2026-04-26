@@ -117,37 +117,7 @@ struct AgentEditView: View {
                 }
             }
 
-            Section("Model") {
-                NavigationLink {
-                    ModelPickerView(
-                        selectedModel: binding(\.model),
-                        agentModels: config?.agentModels ?? []
-                    )
-                } label: {
-                    HStack {
-                        Text("Model")
-                        Spacer()
-                        Text(shortModelName(config?.model ?? ""))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                NavigationLink {
-                    ModelPickerView(
-                        selectedModel: binding(\.thinkingModel),
-                        agentModels: config?.agentModels ?? [],
-                        allowNone: true
-                    )
-                    .navigationTitle("Thinking Model")
-                } label: {
-                    HStack {
-                        Text("Thinking Model")
-                        Spacer()
-                        Text(config?.thinkingModel.isEmpty == true ? "None" : shortModelName(config?.thinkingModel ?? ""))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
+            Section("Generation") {
                 reasoningEffortPicker
 
                 HStack {
@@ -357,13 +327,6 @@ struct AgentEditView: View {
         }
         return resized.jpegData(compressionQuality: 0.8)
         #endif
-    }
-
-    private func shortModelName(_ id: String) -> String {
-        if let slash = id.lastIndex(of: "/") {
-            return String(id[id.index(after: slash)...])
-        }
-        return id
     }
 
     private func load() async {

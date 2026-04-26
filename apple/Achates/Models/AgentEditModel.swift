@@ -3,33 +3,26 @@ import Foundation
 struct AgentEditModel: Equatable {
     var displayName: String
     var description: String
-    var model: String
-    var thinkingModel: String
     var tools: [String]
     var reasoningEffort: String?
     var temperature: Double?
     var maxTokens: Int?
     var allowedChats: [String]
     var prompt: String
-    var agentModels: [String]
     var hasAvatar: Bool
     var newAvatarData: Data?
     var removeAvatar: Bool = false
 
     static func from(_ payload: [String: JSONValue]) -> AgentEditModel? {
-        guard let model = payload["model"]?.stringValue else { return nil }
-        return AgentEditModel(
+        AgentEditModel(
             displayName: payload["display_name"]?.stringValue ?? "",
             description: payload["description"]?.stringValue ?? "",
-            model: model,
-            thinkingModel: payload["thinking_model"]?.stringValue ?? "",
             tools: payload["tools"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             reasoningEffort: payload["reasoning_effort"]?.stringValue,
             temperature: payload["temperature"]?.doubleValue,
             maxTokens: payload["max_tokens"]?.intValue,
             allowedChats: payload["allowed_chats"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             prompt: payload["prompt"]?.stringValue ?? "",
-            agentModels: payload["agent_models"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             hasAvatar: payload["has_avatar"]?.boolValue ?? false
         )
     }
@@ -38,8 +31,6 @@ struct AgentEditModel: Equatable {
         var params: [String: JSONValue] = [
             "agent": .string(agentId),
             "description": .string(description),
-            "model": .string(model),
-            "thinking_model": .string(thinkingModel),
             "tools": .array(tools.map { .string($0) }),
             "allowed_chats": .array(allowedChats.map { .string($0) }),
             "prompt": .string(prompt),
@@ -67,30 +58,4 @@ struct ToolInfo: Identifiable, Equatable {
     var id: String { name }
     let name: String
     let label: String
-}
-
-struct ModelInfo: Identifiable, Equatable {
-    let id: String
-    let name: String
-    let contextWindow: Int
-
-    var provider: String {
-        let parts = id.split(separator: "/")
-        return parts.first.map(String.init) ?? id
-    }
-
-    var providerDisplay: String {
-        provider.split(separator: "-").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
-    }
-
-    static func fromList(_ payload: [String: JSONValue]) -> [ModelInfo] {
-        guard let arr = payload["models"]?.arrayValue else { return [] }
-        return arr.compactMap { item -> ModelInfo? in
-            guard let dict = item.objectValue,
-                  let id = dict["id"]?.stringValue,
-                  let name = dict["name"]?.stringValue else { return nil }
-            let ctx = dict["context_window"]?.intValue ?? 0
-            return ModelInfo(id: id, name: name, contextWindow: ctx)
-        }
-    }
 }

@@ -8,7 +8,7 @@ namespace Achates.Server.Tools;
 /// <summary>
 /// Allows an agent to create new agents at runtime.
 /// </summary>
-internal sealed class AgentCreatorTool(string agentsDir, string defaultModel, Func<string, CancellationToken, Task> loadFunc) : AgentTool
+internal sealed class AgentCreatorTool(string agentsDir, Func<string, CancellationToken, Task> loadFunc) : AgentTool
 {
     private static readonly JsonElement _schema = ObjectSchema(
         new Dictionary<string, JsonElement>
@@ -16,14 +16,13 @@ internal sealed class AgentCreatorTool(string agentsDir, string defaultModel, Fu
             ["name"] = StringSchema("Display name for the new agent."),
             ["description"] = StringSchema("Description of the new agent."),
             ["prompt"] = StringSchema("System prompt for the new agent."),
-            ["model"] = StringSchema("Model ID (e.g. 'anthropic/claude-sonnet-4'). Optional."),
             ["tools"] = ArraySchema(StringSchema("Tool name."), "List of tool names. Optional."),
         },
         required: ["name", "description", "prompt"]);
 
     public override string Name => "agent_creator";
     public override string Description =>
-        "Create a new agent. Provide a name, description, and prompt. Optionally specify a model and tools.";
+        "Create a new agent. Provide a name, description, and prompt. Optionally specify tools.";
     public override string Label => "Agent Creator";
     public override JsonElement Parameters => _schema;
 
@@ -48,14 +47,12 @@ internal sealed class AgentCreatorTool(string agentsDir, string defaultModel, Fu
         if (Directory.Exists(agentDir))
             return TextResult($"An agent '{agentId}' already exists.");
 
-        var model = GetString(arguments, "model") ?? defaultModel;
         var tools = GetStringList(arguments, "tools");
 
         var config = new AgentConfig
         {
             Description = description,
             Prompt = prompt,
-            Model = model,
             Tools = tools,
         };
 

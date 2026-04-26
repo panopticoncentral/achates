@@ -343,7 +343,7 @@ Tokens are cached at `~/.achates/withings-tokens.json` and refresh automatically
 | `chat` | Talk to other agents (discovery + ping-pong conversation) | At least 2 agents configured |
 | `cron` | Create and manage scheduled tasks | None |
 | `transcribe` | Transcribe an audio file via an audio-capable model | Optional `tools.transcribe.model` |
-| `think` | Escalate a prompt to a thinking model for complex reasoning | Per-agent `**Thinking Model:**` in AGENT.md |
+| `think` | Escalate a prompt to a thinking model for complex reasoning | `models.thinking` in config.yaml |
 | `image` | Generate images via the configured image model | `tools.image.model` |
 | `profile` | Let the agent read and update its own description/prompt/avatar | None |
 | `agent_creator` | Create new agents at runtime | None |

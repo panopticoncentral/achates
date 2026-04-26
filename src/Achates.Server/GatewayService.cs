@@ -362,7 +362,7 @@ public sealed class GatewayService(
         var achatesHome = _achatesHome!;
         var model = await ResolveModelAsync(
             agentConfig.Provider ?? config.Provider?.Name,
-            agentConfig.Model,
+            config.Models?.Base,
             ct);
 
         var prompt = ResolvePrompt(agentConfig);
@@ -373,9 +373,9 @@ public sealed class GatewayService(
         if (withingsClient is not null)
             _withingsClient = withingsClient;
 
-        // Resolve thinking model if agent has think tool + thinking model configured
+        // Resolve thinking model if agent has think tool + thinking model configured globally
         Model? thinkingModel = null;
-        if (agentConfig.Tools?.Contains("think") == true && agentConfig.ThinkingModel is { } thinkingModelId)
+        if (agentConfig.Tools?.Contains("think") == true && config.Models?.Thinking is { } thinkingModelId)
         {
             thinkingModel = await ResolveModelAsync(
                 agentConfig.Provider ?? config.Provider?.Name,
@@ -553,7 +553,6 @@ public sealed class GatewayService(
                 case "agent_creator":
                     tools.Add(new AgentCreatorTool(
                         Path.GetDirectoryName(agentDir)!,
-                        model.Id,
                         async (name, ct) => await ReloadAgentAsync(name, ct)));
                     break;
                 default:
@@ -618,7 +617,8 @@ public sealed class GatewayService(
         providerId ??= config.Provider?.Name
             ?? throw new InvalidOperationException("No provider specified.");
         if (modelId is null)
-            throw new InvalidOperationException("No model specified.");
+            throw new InvalidOperationException(
+                "No base model specified. Set models.base in ~/.achates/config.yaml.");
 
         var provider = ModelProviders.Create(providerId)
             ?? throw new InvalidOperationException($"Unknown provider: {providerId}");

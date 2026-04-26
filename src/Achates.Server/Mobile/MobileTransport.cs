@@ -774,25 +774,16 @@ public sealed class MobileTransport(
         if (config is null)
             return ResponseFrame.Failure(request.Id, "parse_error", "Failed to parse AGENT.md.");
 
-        var agentModels = _agents
-            .Where(a => a.Key != agentName)
-            .Select(a => a.Value.Model.Id)
-            .Distinct()
-            .ToArray();
-
         var payload = JsonSerializer.SerializeToElement(new
         {
             display_name = config.Title ?? agentName,
             description = config.Description ?? "",
-            model = config.Model ?? "",
-            thinking_model = config.ThinkingModel ?? "",
             tools = config.Tools ?? [],
             reasoning_effort = config.Completion?.ReasoningEffort,
             temperature = config.Completion?.Temperature,
             max_tokens = config.Completion?.MaxTokens,
             allowed_chats = config.AllowChat ?? [],
             prompt = config.Prompt ?? "",
-            agent_models = agentModels,
             has_avatar = _agents[agentName].AvatarData is not null,
         }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
@@ -811,8 +802,6 @@ public sealed class MobileTransport(
         var config = new AgentConfig
         {
             Description = GetStringParam(p, "description"),
-            Model = GetStringParam(p, "model"),
-            ThinkingModel = GetStringParam(p, "thinking_model"),
             Prompt = GetStringParam(p, "prompt"),
         };
 

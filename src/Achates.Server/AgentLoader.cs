@@ -7,7 +7,6 @@ namespace Achates.Server;
 ///   # Agent Name
 ///   Description paragraph(s).
 ///   ## Capabilities
-///   - **Model:** anthropic/claude-sonnet-4
 ///   - **Tools:** session, memory, todo
 ///   - **Allow chat:** val, claire
 ///   - **Reasoning effort:** medium
@@ -58,12 +57,6 @@ public static class AgentLoader
 
         sb.AppendLine("## Capabilities");
         sb.AppendLine();
-
-        if (!string.IsNullOrWhiteSpace(config.Model))
-            sb.AppendLine($"**Model:** {config.Model}");
-
-        if (!string.IsNullOrWhiteSpace(config.ThinkingModel))
-            sb.AppendLine($"**Thinking Model:** {config.ThinkingModel}");
 
         if (!string.IsNullOrWhiteSpace(config.Provider))
             sb.AppendLine($"**Provider:** {config.Provider}");
@@ -134,8 +127,6 @@ public static class AgentLoader
             A helpful assistant.
 
             ## Capabilities
-
-            **Model:** anthropic/claude-sonnet-4
 
             **Tools:**
               - session
@@ -305,12 +296,6 @@ public static class AgentLoader
 
         switch (key)
         {
-            case "model":
-                config.Model = value;
-                break;
-            case "thinking model":
-                config.ThinkingModel = value;
-                break;
             case "provider":
                 config.Provider = value;
                 break;

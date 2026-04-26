@@ -3,8 +3,22 @@ namespace Achates.Server;
 public sealed class AchatesConfig
 {
     public ProviderConfig? Provider { get; set; }
+    public ModelsConfig? Models { get; set; }
     public ToolsConfig? Tools { get; set; }
     public CronConfig? Cron { get; set; }
+}
+
+public sealed class ModelsConfig
+{
+    /// <summary>
+    /// Default model used by all agents.
+    /// </summary>
+    public string? Base { get; set; }
+
+    /// <summary>
+    /// Model used by the think tool for escalated reasoning.
+    /// </summary>
+    public string? Thinking { get; set; }
 }
 
 public sealed class CronConfig
@@ -32,8 +46,6 @@ public sealed class AgentConfig
     public string? Title { get; set; }
 
     public string? Description { get; set; }
-    public string? Model { get; set; }
-    public string? ThinkingModel { get; set; }
     public string? Provider { get; set; }
     public List<string>? Tools { get; set; }
     public CompletionConfig? Completion { get; set; }

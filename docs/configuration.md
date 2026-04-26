@@ -25,8 +25,6 @@ A helpful assistant.
 
 ## Capabilities
 
-**Model:** anthropic/claude-sonnet-4
-
 **Tools:**
   - session
   - memory
@@ -45,8 +43,18 @@ You are a helpful assistant.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `provider` | object | _(required)_ | LLM provider configuration (see below). |
+| `models` | object | _(required)_ | Global model selection — base and (optional) thinking model (see below). |
 | `tools` | object | _(none)_ | Shared tool configuration (see below). |
 | `cron` | object | _(none)_ | Cron session retention policy (see below). |
+
+### `models`
+
+Global model selection. All agents share these — there is no per-agent override.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `base` | string | _(required)_ | Default model used by every agent for chat completions. |
+| `thinking` | string | _(none)_ | Model used by the `think` tool. Required when any agent has `think` in its tools list. |
 
 ### `tools`
 
@@ -99,7 +107,7 @@ Withings Health API for the `health` tool. OAuth 2.0 authorization code flow —
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `model` | string | _(agent's model)_ | Model used to auto-generate session titles after the first response. |
+| `model` | string | _(base model)_ | Model used to auto-generate session titles after the first response. |
 
 #### `tools.avatar`
 
@@ -141,8 +149,6 @@ Each capability is a `**Key:** value` line. List values (tools, allowed chats) u
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `Model` | string | _(required)_ | Model ID within the provider. |
-| `Thinking Model` | string | _(none)_ | Model used by the `think` tool. Required when `think` is in the tools list. |
 | `Provider` | string | _(global)_ | Override the provider for this agent. |
 | `Tools` | list | _(none)_ | Tool names to enable. Available: `session`, `memory`, `notebook`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cost`, `cron`, `imessage`, `transcribe`, `think`, `health`, `chat`, `location`, `camera`, `image`, `profile`, `agent_creator`. |
 | `Allowed Chats` | list | _(all)_ | Allowlist of agent names this agent can chat with. Omit to allow all. Only relevant when `chat` is in tools. |
@@ -159,6 +165,10 @@ Each capability is a `**Key:** value` line. List values (tools, allowed chats) u
 provider:
   name: openrouter
   api_key: sk-...
+
+models:
+  base: anthropic/claude-sonnet-4.6
+  thinking: anthropic/claude-opus-4.7
 
 tools:
   notebook:
@@ -186,8 +196,6 @@ tools:
 Personal assistant.
 
 ## Capabilities
-
-**Model:** anthropic/claude-sonnet-4
 
 **Tools:**
   - session
@@ -227,7 +235,7 @@ You are Paul's personal assistant...
 
 | Path | Purpose |
 |------|---------|
-| `~/.achates/config.yaml` | Global configuration (provider + tools). |
+| `~/.achates/config.yaml` | Global configuration (provider, models, tools). |
 | `~/.achates/agents/{name}/AGENT.md` | Agent definition (markdown). |
 | `~/.achates/agents/{name}/sessions/{sessionId}.json` | Persisted conversation history. |
 | `~/.achates/memory.md` | Shared memory (universal user facts, all agents). |
