@@ -2,23 +2,22 @@ import SwiftUI
 
 struct MemoryListView: View {
     @Environment(AppState.self) private var appState
-    @State private var memories: [MemoryInfo] = []
-    @State private var isLoading = true
+    @State private var hasLoaded = false
 
     var body: some View {
         List {
-            if isLoading {
+            if !hasLoaded {
                 HStack {
                     Spacer()
                     ProgressView()
                     Spacer()
                 }
                 .listRowSeparator(.hidden)
-            } else if memories.isEmpty {
+            } else if appState.memories.isEmpty {
                 Text("No memory files.")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(memories) { memory in
+                ForEach(appState.memories) { memory in
                     NavigationLink {
                         MemoryEditView(memory: memory)
                     } label: {
@@ -31,16 +30,11 @@ struct MemoryListView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .task { await load() }
-        .onChange(of: appState.memoryUpdateEvent) { _, _ in
-            Task { await load() }
+        .refreshable { await appState.loadMemories() }
+        .task {
+            await appState.loadMemories()
+            hasLoaded = true
         }
-    }
-
-    private func load() async {
-        isLoading = true
-        memories = await appState.listMemories()
-        isLoading = false
     }
 }
 

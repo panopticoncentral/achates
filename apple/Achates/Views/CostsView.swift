@@ -5,8 +5,11 @@ struct CostsView: View {
     @Environment(\.dismiss) private var dismiss
     let agent: Agent
     @State private var selectedPeriod = "month"
-    @State private var summary: CostSummary?
     @State private var isLoading = false
+
+    private var summary: CostSummary? {
+        appState.costSummary(agent: agent.id, period: selectedPeriod)
+    }
 
     private let periods = ["today", "week", "month", "all"]
     private let periodLabels = ["Today", "Week", "Month", "All"]
@@ -88,11 +91,14 @@ struct CostsView: View {
         .task(id: selectedPeriod) {
             await loadSummary()
         }
+        .onChange(of: summary == nil) { _, isNowNil in
+            if isNowNil { Task { await loadSummary() } }
+        }
     }
 
     private func loadSummary() async {
         isLoading = true
-        summary = await appState.fetchCostSummary(agent: agent.id, period: selectedPeriod)
+        await appState.loadCostSummary(agent: agent.id, period: selectedPeriod)
         isLoading = false
     }
 

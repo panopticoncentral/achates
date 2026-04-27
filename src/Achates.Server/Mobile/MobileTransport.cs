@@ -172,6 +172,30 @@ public sealed class MobileTransport(
         }
     }
 
+    /// <summary>
+    /// Broadcast a full session.updated event with the metadata the session list needs
+    /// to upsert. The payload mirrors a single entry from sessions.list.
+    /// </summary>
+    public Task BroadcastSessionUpdatedAsync(string agentName, MobileSession session, CancellationToken ct = default)
+    {
+        var lastUserMessage = session.Messages.OfType<UserMessage>().LastOrDefault();
+        return BroadcastEventAsync("session.updated", new
+        {
+            agent = agentName,
+            session_id = session.Id,
+            session = new
+            {
+                id = session.Id,
+                title = session.Title,
+                preview = lastUserMessage?.Text,
+                created = session.Created.ToUnixTimeMilliseconds(),
+                updated = session.Updated.ToUnixTimeMilliseconds(),
+                job_id = session.JobId,
+                message_count = session.Messages.Count,
+            },
+        }, ct);
+    }
+
     private async Task ReadLoopAsync(MobileConnection connection, CancellationToken ct)
     {
         var buffer = new byte[8192];
@@ -500,12 +524,9 @@ public sealed class MobileTransport(
 
         await sessionStore.UpdateMetadataAsync(agentName, sessionId, title, ct);
 
-        _ = BroadcastEventAsync("session.updated", new
-        {
-            agent = agentName,
-            session_id = sessionId,
-            title,
-        }, CancellationToken.None);
+        var saved = await sessionStore.LoadAsync(agentName, sessionId, ct);
+        if (saved is not null)
+            _ = BroadcastSessionUpdatedAsync(agentName, saved, CancellationToken.None);
 
         var payload = JsonSerializer.SerializeToElement(new { renamed = true }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
@@ -1385,6 +1406,9 @@ public sealed class MobileTransport(
                         };
                         await sessionStore.SaveAsync(agentName, session, ct);
 
+                        // Notify clients so the session list refreshes immediately
+                        await BroadcastSessionUpdatedAsync(agentName, session, ct);
+
                         // Auto-title after a few exchanges so the title reflects the conversation
                         if (session.Title is null && _agents.TryGetValue(agentName, out var titleAgentDef))
                         {
@@ -1494,12 +1518,9 @@ public sealed class MobileTransport(
 
             await sessionStore.UpdateMetadataAsync(agentName, sessionId, title);
 
-            await BroadcastEventAsync("session.updated", new
-            {
-                agent = agentName,
-                session_id = sessionId,
-                title,
-            }, CancellationToken.None);
+            var saved = await sessionStore.LoadAsync(agentName, sessionId);
+            if (saved is not null)
+                await BroadcastSessionUpdatedAsync(agentName, saved);
         }
         catch (Exception ex)
         {

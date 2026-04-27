@@ -34,17 +34,6 @@ final class AppState {
     var client: WebSocketClient?
     var error: String?
 
-    /// Signal bumped whenever the server broadcasts `memory.updated`.
-    var memoryUpdateEvent: MemoryUpdateSignal?
-
-    /// Signal bumped whenever the server broadcasts `jobs.updated`.
-    var jobsUpdateEvent: UUID?
-
-    struct MemoryUpdateSignal: Equatable, Sendable {
-        let scope: String
-        let id: UUID
-    }
-
     /// Sessions for the currently selected agent
     var sessions: [SessionInfo] = []
     var hasMoreSessions = false
@@ -52,6 +41,24 @@ final class AppState {
     /// Messages for the currently open session
     var messages: [ChatMessage] = []
     var currentSessionId: String?
+
+    /// Memory files across all agents (loaded on demand by MemoryListView).
+    var memories: [MemoryInfo] = []
+
+    /// Scheduled jobs across all agents (loaded on demand by JobsView).
+    var jobs: [CronJobInfo] = []
+
+    /// Bumped after `memories` is reloaded in response to a server `memory.updated`
+    /// event. Carries the affected scope so detail views can detect concurrent edits.
+    var memoryUpdateEvent: MemoryUpdateSignal?
+
+    /// Bumped after `jobs` is reloaded in response to a server `jobs.updated` event.
+    var jobsUpdateEvent: UUID?
+
+    struct MemoryUpdateSignal: Equatable, Sendable {
+        let scope: String
+        let id: UUID
+    }
 
     init() {
         if let urlString = UserDefaults.standard.string(forKey: "achates_server_url"),
@@ -252,6 +259,20 @@ final class AppState {
         }
     }
 
+    /// Upsert a session into the visible list. Updates fields if it already exists,
+    /// inserts at the top otherwise. Re-sorts by `updated` desc so the list always
+    /// reflects most-recent activity first. Only mutates state for the agent the
+    /// list currently shows.
+    func upsertSession(agentId: String, info: SessionInfo) {
+        guard agentId == currentAgent?.id else { return }
+        if let index = sessions.firstIndex(where: { $0.id == info.id }) {
+            sessions[index] = info
+        } else {
+            sessions.append(info)
+        }
+        sessions.sort { $0.updated > $1.updated }
+    }
+
     // MARK: - Agent management
 
     func loadAgentConfig(_ agent: Agent) async throws -> AgentEditModel {
@@ -327,20 +348,34 @@ final class AppState {
         }
     }
 
-    func fetchCostSummary(agent: String, period: String) async -> CostSummary? {
+    /// Cached cost summaries keyed by "agent:period". Filled by `loadCostSummary`.
+    var costSummaries: [String: CostSummary] = [:]
+
+    func costSummary(agent: String, period: String) -> CostSummary? {
+        costSummaries["\(agent):\(period)"]
+    }
+
+    func loadCostSummary(agent: String, period: String) async {
         guard let payload = try? await client?.sendRequest(method: "costs.summary", params: [
             "agent": .string(agent),
             "period": .string(period),
-        ]) else { return nil }
-        return CostSummary.from(payload)
+        ]),
+              let summary = CostSummary.from(payload) else { return }
+        costSummaries["\(agent):\(period)"] = summary
+    }
+
+    /// Invalidate cached cost summaries so the next read refetches from the server.
+    /// Called when a chat turn finishes (the cost ledger was just updated).
+    func invalidateCostSummaries() {
+        costSummaries.removeAll()
     }
 
     // MARK: - Memory
 
-    func listMemories() async -> [MemoryInfo] {
+    func loadMemories() async {
         guard let payload = try? await client?.sendRequest(method: "memory.list")
-        else { return [] }
-        return MemoryInfo.fromList(payload)
+        else { return }
+        memories = MemoryInfo.fromList(payload)
     }
 
     func loadMemory(scope: String) async -> String {
@@ -359,10 +394,10 @@ final class AppState {
 
     // MARK: - Scheduled jobs
 
-    func listJobs() async -> [CronJobInfo] {
+    func loadJobs() async {
         guard let payload = try? await client?.sendRequest(method: "jobs.list")
-        else { return [] }
-        return CronJobInfo.fromList(payload)
+        else { return }
+        jobs = CronJobInfo.fromList(payload)
     }
 
     func setJobEnabled(agent: String, jobId: String, enabled: Bool) async throws {
@@ -383,11 +418,17 @@ final class AppState {
     // MARK: - Event handlers (called from WebSocketClient)
 
     func handleMemoryUpdated(scope: String) {
-        memoryUpdateEvent = MemoryUpdateSignal(scope: scope, id: UUID())
+        Task {
+            await loadMemories()
+            memoryUpdateEvent = MemoryUpdateSignal(scope: scope, id: UUID())
+        }
     }
 
     func handleJobsUpdated() {
-        jobsUpdateEvent = UUID()
+        Task {
+            await loadJobs()
+            jobsUpdateEvent = UUID()
+        }
     }
 
     func handleAgentRenamed(oldId: String?, newId: String?) async {
@@ -404,6 +445,44 @@ final class AppState {
         if let current = currentAgent,
            let updated = agents.first(where: { $0.id == current.id }) {
             currentAgent = updated
+        }
+    }
+
+    func handleScenePhaseChange(_ phase: ScenePhase) {
+        guard phase == .active, serverURL != nil else { return }
+        // iOS commonly suspends or kills the websocket on background; on foreground
+        // make sure we're connected and that the visible view reflects current server state.
+        if connectionStatus != .connected {
+            connectToServer()
+        } else {
+            Task { await resyncCurrentView() }
+        }
+    }
+
+    /// After a (re)connect or app foreground, re-fetch what the user is currently looking
+    /// at. Events broadcast while the socket was down are gone — only an explicit pull
+    /// guarantees the UI matches the server.
+    func resyncCurrentView() async {
+        guard let agent = currentAgent else { return }
+        await loadSessions(for: agent)
+        if let sessionId = currentSessionId,
+           sessions.contains(where: { $0.id == sessionId }) {
+            await reloadCurrentSessionMessages(agent: agent, sessionId: sessionId)
+        }
+    }
+
+    private func reloadCurrentSessionMessages(agent: Agent, sessionId: String) async {
+        guard let client else { return }
+        do {
+            let payload = try await client.sendRequest(method: "sessions.get", params: [
+                "agent": .string(agent.id),
+                "session_id": .string(sessionId),
+            ])
+            if let payload, !isStreaming {
+                messages = parseSessionMessages(payload, serverURL: serverURL)
+            }
+        } catch {
+            // Best-effort resync; surface as transient error only if user is on the chat
         }
     }
 

@@ -353,7 +353,7 @@ public sealed class CronService : IAsyncDisposable
             await _sessionStore.SaveAsync(agentName, session, ct);
 
             // Also notify the active connection in real time
-            await DeliverAsync(job, agentName, sessionId, ct);
+            await DeliverAsync(job, agentName, session, ct);
         }
 
         return responseText;
@@ -398,16 +398,19 @@ public sealed class CronService : IAsyncDisposable
         return tools;
     }
 
-    private async Task DeliverAsync(CronJob job, string agentName, string sessionId, CancellationToken ct)
+    private async Task DeliverAsync(CronJob job, string agentName, MobileSession session, CancellationToken ct)
     {
         // Invalidate cache so next agents.list picks up the new session
         _transport.InvalidateAgentCache(agentName);
+
+        // Push the new session into every client's session list
+        await _transport.BroadcastSessionUpdatedAsync(agentName, session, ct);
 
         // Broadcast to all connected clients; result is also persisted as a session
         await _transport.BroadcastEventAsync("cron.result", new
         {
             agent = agentName,
-            session_id = sessionId,
+            session_id = session.Id,
             job_id = job.Id,
             job_name = job.Name,
         }, ct);
@@ -416,7 +419,7 @@ public sealed class CronService : IAsyncDisposable
         await _transport.BroadcastEventAsync("done", new
         {
             agent = agentName,
-            session_id = sessionId,
+            session_id = session.Id,
         }, ct);
     }
 

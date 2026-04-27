@@ -143,8 +143,8 @@ struct JobDetailView: View {
     }
 
     private func refresh() async {
-        let jobs = await appState.listJobs()
-        if let updated = jobs.first(where: { $0.id == liveJob.id }) {
+        await appState.loadJobs()
+        if let updated = appState.jobs.first(where: { $0.id == liveJob.id }) {
             liveJob = updated
         } else {
             // Job was deleted (e.g. by another client) — leave the screen.

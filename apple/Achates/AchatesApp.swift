@@ -4,6 +4,7 @@ import UserNotifications
 @main
 struct AchatesApp: App {
     @State private var appState = AppState()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -15,6 +16,9 @@ struct AchatesApp: App {
                 .task {
                     _ = try? await UNUserNotificationCenter.current()
                         .requestAuthorization(options: [.badge])
+                }
+                .onChange(of: scenePhase) { _, newPhase in
+                    appState.handleScenePhaseChange(newPhase)
                 }
         }
         #if os(macOS)

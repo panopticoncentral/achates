@@ -2,11 +2,10 @@ import SwiftUI
 
 struct JobsView: View {
     @Environment(AppState.self) private var appState
-    @State private var jobs: [CronJobInfo] = []
-    @State private var isLoading = true
+    @State private var hasLoaded = false
 
     private var sortedJobs: [CronJobInfo] {
-        jobs.sorted { lhs, rhs in
+        appState.jobs.sorted { lhs, rhs in
             switch (lhs.state.nextRunAt, rhs.state.nextRunAt) {
             case let (l?, r?): return l < r
             case (nil, _?): return false
@@ -18,10 +17,10 @@ struct JobsView: View {
 
     var body: some View {
         List {
-            if isLoading {
+            if !hasLoaded {
                 HStack { Spacer(); ProgressView(); Spacer() }
                     .listRowSeparator(.hidden)
-            } else if jobs.isEmpty {
+            } else if appState.jobs.isEmpty {
                 Text("No scheduled jobs.")
                     .foregroundStyle(.secondary)
             } else {
@@ -38,17 +37,11 @@ struct JobsView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .refreshable { await load() }
-        .task { await load() }
-        .onChange(of: appState.jobsUpdateEvent) { _, _ in
-            Task { await load() }
+        .refreshable { await appState.loadJobs() }
+        .task {
+            await appState.loadJobs()
+            hasLoaded = true
         }
-    }
-
-    private func load() async {
-        isLoading = true
-        jobs = await appState.listJobs()
-        isLoading = false
     }
 }
 

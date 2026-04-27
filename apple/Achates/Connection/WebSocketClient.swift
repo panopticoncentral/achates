@@ -14,7 +14,6 @@ final class WebSocketClient {
 
     private let pendingRequests = PendingRequestStore()
     private let webSocketHolder = WebSocketTaskHolder()
-    private let lastSeqHolder = AtomicInt()
     private let reconnectAttemptsHolder = AtomicInt()
     private let shouldReconnectHolder = AtomicBool(true)
 
@@ -33,12 +32,6 @@ final class WebSocketClient {
         var components = URLComponents(url: wsURL, resolvingAgainstBaseURL: false)!
         if components.scheme == "http" { components.scheme = "ws" }
         else if components.scheme == "https" { components.scheme = "wss" }
-        var queryItems = components.queryItems ?? []
-        let lastSeq = lastSeqHolder.get()
-        if lastSeq > 0 {
-            queryItems.append(URLQueryItem(name: "last_seq", value: String(lastSeq)))
-        }
-        components.queryItems = queryItems
 
         let session = URLSession(configuration: .default)
         let task = session.webSocketTask(with: components.url!)
@@ -152,6 +145,11 @@ final class WebSocketClient {
                 }
                 appState.updateAppBadge()
             }
+
+            // Step 3: Re-sync the user's view. Events fired while we were
+            // disconnected are not replayed by the server, so re-fetch what's
+            // currently on screen.
+            await appState.resyncCurrentView()
         } catch {
             print("Connect handshake failed: \(error)")
             appState.connectionStatus = .disconnected
@@ -197,9 +195,6 @@ final class WebSocketClient {
             }
 
         case .event(let evt):
-            if let seq = evt.seq {
-                lastSeqHolder.set(seq)
-            }
             handleEvent(evt)
 
         case .request(let req):
@@ -210,8 +205,18 @@ final class WebSocketClient {
     private func handleEvent(_ evt: EventFrame) {
         let payload = evt.payload ?? [:]
 
+        // Streaming events are broadcast to all clients. Only apply them to the
+        // currently-visible session — otherwise a cron job (or another tab/session)
+        // streaming on the same connection would corrupt the user's open chat.
+        let matchesCurrentSession: Bool = {
+            guard let agentId = payload["agent"]?.stringValue,
+                  let sessionId = payload["session_id"]?.stringValue else { return false }
+            return agentId == appState.currentAgent?.id && sessionId == appState.currentSessionId
+        }()
+
         switch evt.event {
         case "text.delta":
+            guard matchesCurrentSession else { break }
             let delta = payload["delta"]?.stringValue ?? ""
             appState.appendTextDelta(delta)
 
@@ -219,15 +224,18 @@ final class WebSocketClient {
             break
 
         case "thinking.delta":
+            guard matchesCurrentSession else { break }
             let delta = payload["delta"]?.stringValue ?? ""
             let thinkingId = payload["id"]?.stringValue ?? "default"
             appState.appendThinkingDelta(delta, thinkingId: thinkingId)
 
         case "thinking.end":
+            guard matchesCurrentSession else { break }
             let thinkingId = payload["id"]?.stringValue ?? "default"
             appState.collapseThinking(thinkingId: thinkingId)
 
         case "image.block":
+            guard matchesCurrentSession else { break }
             if let b64 = payload["data"]?.stringValue,
                let data = Data(base64Encoded: b64) {
                 let mimeType = payload["mime_type"]?.stringValue ?? "image/jpeg"
@@ -235,17 +243,20 @@ final class WebSocketClient {
             }
 
         case "tool.start":
+            guard matchesCurrentSession else { break }
             let toolId = payload["tool_call_id"]?.stringValue ?? UUID().uuidString
             let name = payload["tool_name"]?.stringValue ?? "unknown"
             appState.addToolCall(toolId: toolId, name: name)
 
         case "tool.end":
+            guard matchesCurrentSession else { break }
             let toolId = payload["tool_call_id"]?.stringValue ?? ""
             let result = payload["result"]?.stringValue
             let success = !(payload["is_error"]?.boolValue ?? false)
             appState.completeToolCall(toolId: toolId, result: result, success: success)
 
         case "message.end":
+            guard matchesCurrentSession else { break }
             var messageUsage: MessageUsage?
             if let usageDict = payload["usage"]?.objectValue,
                let input = usageDict["input"]?.intValue,
@@ -256,22 +267,33 @@ final class WebSocketClient {
             appState.finalizeStreamingMessage(usage: messageUsage)
 
         case "done":
-            appState.isStreaming = false
-            appState.streamingMessageId = nil
-            appState.markCurrentAgentAsRead()
+            // Only clear the streaming spinner when the done is for what we're showing;
+            // otherwise a cron's done would yank the spinner off a real in-flight chat.
+            if matchesCurrentSession {
+                appState.isStreaming = false
+                appState.streamingMessageId = nil
+                appState.markCurrentAgentAsRead()
+            }
+            // The cost ledger just changed — drop any cached summaries so the
+            // next read goes back to the server.
+            appState.invalidateCostSummaries()
             Task { await appState.refreshAgents() }
 
         case "session.updated":
-            let sessionId = payload["session_id"]?.stringValue
-            let title = payload["title"]?.stringValue
-            if let sessionId, let title {
+            guard let agentId = payload["agent"]?.stringValue else { break }
+            if let sessionDict = payload["session"]?.objectValue,
+               let info = SessionInfo.from(dict: sessionDict) {
+                appState.upsertSession(agentId: agentId, info: info)
+            } else if let sessionId = payload["session_id"]?.stringValue,
+                      let title = payload["title"]?.stringValue {
+                // Backwards-compatible title-only payload
                 appState.updateSessionTitle(sessionId: sessionId, title: title)
             }
 
         case "cron.result":
-            if let agent = appState.currentAgent {
-                Task { await appState.loadSessions(for: agent) }
-            }
+            // session.updated is now broadcast alongside cron.result, so the list
+            // already has the new session. Nothing else to do here today.
+            break
 
         case "agents.changed":
             Task { await appState.refreshAgents() }

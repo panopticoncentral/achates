@@ -11,28 +11,27 @@ struct SessionInfo: Identifiable, Sendable, Equatable {
     static func fromList(_ payload: [String: JSONValue]) -> [SessionInfo] {
         guard let arr = payload["sessions"]?.arrayValue else { return [] }
         return arr.compactMap { value -> SessionInfo? in
-            guard let dict = value.objectValue,
-                  let id = dict["id"]?.stringValue else { return nil }
-            let created: Date
-            if let ms = dict["created"]?.intValue ?? dict["created"]?.doubleValue.map({ Int($0) }) {
-                created = Date(timeIntervalSince1970: Double(ms) / 1000.0)
-            } else {
-                created = Date()
-            }
-            let updated: Date
-            if let ms = dict["updated"]?.intValue ?? dict["updated"]?.doubleValue.map({ Int($0) }) {
-                updated = Date(timeIntervalSince1970: Double(ms) / 1000.0)
-            } else {
-                updated = Date()
-            }
-            return SessionInfo(
-                id: id,
-                title: dict["title"]?.stringValue,
-                preview: dict["preview"]?.stringValue,
-                created: created,
-                updated: updated
-            )
+            guard let dict = value.objectValue else { return nil }
+            return SessionInfo.from(dict: dict)
         }
+    }
+
+    static func from(dict: [String: JSONValue]) -> SessionInfo? {
+        guard let id = dict["id"]?.stringValue else { return nil }
+        return SessionInfo(
+            id: id,
+            title: dict["title"]?.stringValue,
+            preview: dict["preview"]?.stringValue,
+            created: parseDate(dict["created"]),
+            updated: parseDate(dict["updated"])
+        )
+    }
+
+    private static func parseDate(_ value: JSONValue?) -> Date {
+        if let ms = value?.intValue ?? value?.doubleValue.map({ Int($0) }) {
+            return Date(timeIntervalSince1970: Double(ms) / 1000.0)
+        }
+        return Date()
     }
 }
 
