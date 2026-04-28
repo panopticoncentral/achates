@@ -147,12 +147,8 @@ final class WebSocketClient {
             appState.connectionStatus = .connected
 
             // Step 2: Fetch agent list
-            let agentsPayload = try await sendRequest(method: "agents.list")
-            if let agentsList = agentsPayload?["agents"]?.arrayValue {
-                appState.agents = agentsList.compactMap { val -> Agent? in
-                    guard let dict = val.objectValue else { return nil }
-                    return Agent.from(dict)
-                }
+            if let agentsPayload = try await sendRequest(method: "agents.list") {
+                appState.agents = Agent.fromList(agentsPayload)
                 appState.updateAppBadge()
             }
 

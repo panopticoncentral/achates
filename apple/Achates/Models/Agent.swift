@@ -68,9 +68,14 @@ struct Agent: Identifiable, Sendable, Equatable {
 
     static func fromList(_ payload: [String: JSONValue]) -> [Agent] {
         guard let agentArray = payload["agents"]?.arrayValue else { return [] }
-        return agentArray.compactMap { value -> Agent? in
+        let agents: [Agent] = agentArray.compactMap { value in
             guard let dict = value.objectValue else { return nil }
             return Agent.from(dict)
+        }
+        return agents.sorted { lhs, rhs in
+            let l = lhs.lastActivity ?? .distantPast
+            let r = rhs.lastActivity ?? .distantPast
+            return l > r
         }
     }
 }
