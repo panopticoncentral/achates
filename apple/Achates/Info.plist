@@ -11,6 +11,10 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Take photos to attach to messages.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose photos to attach to messages.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

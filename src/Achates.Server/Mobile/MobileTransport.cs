@@ -684,8 +684,15 @@ public sealed class MobileTransport(
         var agentName = GetStringParam(request.Params, "agent");
         var text = GetStringParam(request.Params, "text");
         var sessionId = GetStringParam(request.Params, "session_id");
-        if (agentName is null || text is null || sessionId is null)
-            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent', 'text', or 'session_id' parameter.");
+        if (agentName is null || sessionId is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'session_id' parameter.");
+
+        var attachments = AttachmentParser.Parse(request.Params, out var attachmentError);
+        if (attachmentError is not null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", attachmentError);
+
+        if (string.IsNullOrEmpty(text) && attachments!.Count == 0)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Provide 'text' or 'attachments'.");
 
         if (!_agents.TryGetValue(agentName, out var agentDef))
             return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
@@ -703,10 +710,16 @@ public sealed class MobileTransport(
             _runtimes[runtimeKey] = runtime;
         }
 
+        var userMessage = new UserMessage
+        {
+            Text = text ?? "",
+            Content = attachments!.Count > 0 ? attachments : null,
+        };
+
         // If already running, queue as follow-up
         if (runtime.IsRunning)
         {
-            runtime.FollowUp(new UserMessage { Text = text });
+            runtime.FollowUp(userMessage);
             var payload = JsonSerializer.SerializeToElement(new { session_id = sessionId, queued = true }, JsonOptions);
             return ResponseFrame.Success(request.Id, payload);
         }
@@ -720,7 +733,7 @@ public sealed class MobileTransport(
         await connection.SendResponseAsync(response, ct);
 
         // Stream the agent response as events to all connected clients
-        _ = StreamAgentResponseAsync(runtime, agentName, sessionId, text, ct);
+        _ = StreamAgentResponseAsync(runtime, agentName, sessionId, userMessage, ct);
 
         return null;
     }
@@ -1263,11 +1276,11 @@ public sealed class MobileTransport(
     // --- Streaming ---
 
     private async Task StreamAgentResponseAsync(
-        AgentRuntime runtime, string agentName, string sessionId, string text, CancellationToken ct)
+        AgentRuntime runtime, string agentName, string sessionId, UserMessage userMessage, CancellationToken ct)
     {
         try
         {
-            var stream = runtime.PromptAsync(text);
+            var stream = runtime.PromptAsync(userMessage);
 
             await foreach (var evt in stream.WithCancellation(ct))
             {

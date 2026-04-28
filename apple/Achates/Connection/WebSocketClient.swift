@@ -88,18 +88,28 @@ final class WebSocketClient {
         }
     }
 
-    func sendMessage(_ text: String) async {
+    func sendMessage(_ text: String, attachments: [DraftAttachment] = []) async {
         guard let agent = appState.currentAgent,
               let sessionId = appState.currentSessionId else {
             print("Cannot send message: no agent or session selected")
             return
         }
+        var params: [String: JSONValue] = [
+            "text": .string(text),
+            "agent": .string(agent.id),
+            "session_id": .string(sessionId),
+        ]
+        if !attachments.isEmpty {
+            let items: [JSONValue] = attachments.map { att in
+                .object([
+                    "mime": .string("image/jpeg"),
+                    "data": .string(att.data.base64EncodedString()),
+                ])
+            }
+            params["attachments"] = .array(items)
+        }
         do {
-            _ = try await sendRequest(method: "chat.send", params: [
-                "text": .string(text),
-                "agent": .string(agent.id),
-                "session_id": .string(sessionId),
-            ])
+            _ = try await sendRequest(method: "chat.send", params: params)
         } catch {
             print("Failed to send message: \(error)")
         }

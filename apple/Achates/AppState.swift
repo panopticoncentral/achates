@@ -488,10 +488,19 @@ final class AppState {
 
     // MARK: - Send message
 
-    func sendMessage(_ text: String) async {
+    func sendMessage(_ text: String, attachments: [DraftAttachment] = []) async {
         guard client != nil, currentAgent != nil, currentSessionId != nil else { return }
 
-        let userMessage = ChatMessage(role: .user, text: text)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var blocks: [ContentBlock] = []
+        if !trimmed.isEmpty {
+            blocks.append(.text(id: UUID().uuidString, trimmed))
+        }
+        for attachment in attachments {
+            blocks.append(.image(id: UUID().uuidString, data: attachment.data, mimeType: "image/jpeg"))
+        }
+
+        let userMessage = ChatMessage(role: .user, blocks: blocks)
         messages.append(userMessage)
         isStreaming = true
 
@@ -500,7 +509,7 @@ final class AppState {
         let assistantMessage = ChatMessage(id: assistantId, role: .assistant, blocks: [])
         messages.append(assistantMessage)
 
-        await client?.sendMessage(text)
+        await client?.sendMessage(trimmed, attachments: attachments)
     }
 
     func cancelStreaming() async {

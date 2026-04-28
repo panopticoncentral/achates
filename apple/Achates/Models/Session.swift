@@ -57,7 +57,24 @@ func parseMessage(_ value: JSONValue, serverURL: URL?) -> ChatMessage? {
     case "user":
         if dict["hidden"]?.boolValue == true { return nil }
         let text = dict["text"]?.stringValue ?? ""
-        return ChatMessage(id: id, role: .user, text: text, timestamp: timestamp)
+        var blocks: [ContentBlock] = []
+        if !text.isEmpty {
+            blocks.append(.text(id: UUID().uuidString, text))
+        }
+        if let content = dict["content"]?.arrayValue {
+            for item in content {
+                guard let itemDict = item.objectValue,
+                      let itemType = itemDict["type"]?.stringValue,
+                      itemType == "image",
+                      let block = parseImageBlock(itemDict, serverURL: serverURL)
+                else { continue }
+                blocks.append(block)
+            }
+        }
+        if blocks.isEmpty {
+            blocks.append(.text(id: UUID().uuidString, ""))
+        }
+        return ChatMessage(id: id, role: .user, blocks: blocks, timestamp: timestamp)
     case "assistant":
         var blocks: [ContentBlock] = []
         if let content = dict["content"]?.arrayValue {

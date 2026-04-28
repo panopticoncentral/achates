@@ -124,8 +124,8 @@ struct ChatView: View {
                     }
                 }
 
-            ComposerView(speechService: speechService) { text in
-                Task { await appState.sendMessage(text) }
+            ComposerView(speechService: speechService) { text, attachments in
+                Task { await appState.sendMessage(text, attachments: attachments) }
             } onCancel: {
                 Task { await appState.cancelStreaming() }
             }

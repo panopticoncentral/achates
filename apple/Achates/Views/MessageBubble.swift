@@ -112,7 +112,7 @@ struct MessageBubble: View {
                 .frame(maxWidth: 260)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .onTapGesture { fullscreenImageData = data }
-                .accessibilityLabel("Image from assistant")
+                .accessibilityLabel(message.role == .user ? "Image from you" : "Image from assistant")
                 .accessibilityAddTraits(.isImage)
         }
         #else
@@ -123,7 +123,7 @@ struct MessageBubble: View {
                 .frame(maxWidth: 260)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .onTapGesture { fullscreenImageData = data }
-                .accessibilityLabel("Image from assistant")
+                .accessibilityLabel(message.role == .user ? "Image from you" : "Image from assistant")
                 .accessibilityAddTraits(.isImage)
         }
         #endif
