@@ -23,6 +23,11 @@ final class WebSocketClient {
     }
 
     func connect(url: URL, agent: String) {
+        // Idempotent: a second connect() while a socket is already in flight would
+        // leave two receive loops alive and double-deliver every streaming event.
+        // The reconnect path in handleDisconnect() nils out the holder before
+        // calling us, so it still proceeds.
+        guard webSocketHolder.get() == nil else { return }
         shouldReconnectHolder.set(true)
         reconnectAttemptsHolder.set(0)
         appState.connectionStatus = .connecting
