@@ -122,6 +122,19 @@ final class AppState {
 
     // MARK: - Session management
 
+    /// Switch the currently selected agent. Clears session-view state
+    /// (current session id and messages) when the agent actually changes
+    /// so a previously-open chat from a different agent doesn't linger
+    /// in the detail panel. Then loads the new agent's session list.
+    func selectAgent(_ agent: Agent) async {
+        if currentAgent?.id != agent.id {
+            currentSessionId = nil
+            messages = []
+        }
+        currentAgent = agent
+        await loadSessions(for: agent)
+    }
+
     func loadSessions(for agent: Agent) async {
         guard client != nil else { return }
 

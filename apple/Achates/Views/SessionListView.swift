@@ -69,8 +69,7 @@ struct SessionListView: View {
             #endif
         }
         .task {
-            appState.currentAgent = agent
-            await appState.loadSessions(for: agent)
+            await appState.selectAgent(agent)
         }
         .alert("Rename Conversation", isPresented: .init(
             get: { sessionToRename != nil },

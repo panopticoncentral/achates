@@ -97,8 +97,7 @@ struct AgentListView: View {
             get: { appState.currentAgent?.id },
             set: { id in
                 if let agent = appState.agents.first(where: { $0.id == id }) {
-                    appState.currentAgent = agent
-                    Task { await appState.loadSessions(for: agent) }
+                    Task { await appState.selectAgent(agent) }
                 }
             }
         )
