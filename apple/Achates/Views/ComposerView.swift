@@ -118,13 +118,25 @@ struct ComposerView: View {
         HStack(alignment: .bottom, spacing: 8) {
             attachmentButton
 
+            #if os(macOS)
+            MacComposerTextView(
+                text: $text,
+                placeholder: "Message",
+                maxHeight: 240,
+                onSend: send
+            )
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(.systemGray6))
+            )
+            .focused($isFocused)
+            #else
             TextField("Message", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
-                #if os(macOS)
-                .lineLimit(1...12)
-                #else
                 .lineLimit(1...6)
-                #endif
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(
@@ -133,6 +145,7 @@ struct ComposerView: View {
                 )
                 .focused($isFocused)
                 .onSubmit { send() }
+            #endif
 
             trailingButton
         }
@@ -147,7 +160,7 @@ struct ComposerView: View {
             showSourceDialog = true
         } label: {
             Image(systemName: "plus.circle.fill")
-                .font(.system(size: 28))
+                .font(.system(size: 32))
                 .foregroundStyle(attachments.count >= maxAttachments ? Color.gray : Color.blue)
                 .frame(width: 36, height: 36)
         }
@@ -160,7 +173,7 @@ struct ComposerView: View {
             Button("Document...") { showDocumentPicker = true }
         } label: {
             Image(systemName: "plus.circle.fill")
-                .font(.system(size: 28))
+                .font(.system(size: 32))
                 .foregroundStyle(attachments.count >= maxAttachments ? Color.gray : Color.blue)
                 .frame(width: 36, height: 36)
         }
@@ -363,3 +376,143 @@ private struct AttachmentThumbnail: View {
         )
     }
 }
+
+#if os(macOS)
+struct MacComposerTextView: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+    let maxHeight: CGFloat
+    let onSend: () -> Void
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.autohidesScrollers = true
+
+        let textView = ComposerNSTextView()
+        textView.delegate = context.coordinator
+        textView.allowsUndo = true
+        textView.isRichText = false
+        textView.isEditable = true
+        textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textView.drawsBackground = false
+        textView.backgroundColor = .clear
+        textView.textColor = .labelColor
+        textView.insertionPointColor = .labelColor
+        textView.textContainerInset = NSSize(width: 4, height: 6)
+        textView.minSize = .zero
+        textView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        if let container = textView.textContainer {
+            container.widthTracksTextView = true
+            container.heightTracksTextView = false
+            container.containerSize = NSSize(
+                width: 100,
+                height: CGFloat.greatestFiniteMagnitude
+            )
+        }
+        textView.string = text
+        textView.placeholderString = placeholder
+        textView.onSend = onSend
+
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? ComposerNSTextView else { return }
+        if textView.string != text {
+            textView.string = text
+        }
+        if textView.placeholderString != placeholder {
+            textView.placeholderString = placeholder
+        }
+        textView.onSend = onSend
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
+        guard let textView = nsView.documentView as? ComposerNSTextView else { return nil }
+
+        let proposedWidth: CGFloat
+        if let w = proposal.width, w.isFinite, w > 0 {
+            proposedWidth = w
+        } else {
+            proposedWidth = max(nsView.bounds.width, 200)
+        }
+
+        let insetWidth = textView.textContainerInset.width * 2
+        let lineFragmentPadding = textView.textContainer?.lineFragmentPadding ?? 5
+        let measureWidth = max(1, proposedWidth - insetWidth - 2 * lineFragmentPadding)
+
+        let textToMeasure = textView.string.isEmpty ? " " : textView.string
+        let attrString = NSAttributedString(
+            string: textToMeasure,
+            attributes: [.font: textView.font ?? .systemFont(ofSize: NSFont.systemFontSize)]
+        )
+        let rect = attrString.boundingRect(
+            with: NSSize(width: measureWidth, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let totalHeight = rect.height + 2 * textView.textContainerInset.height + 4
+        let constrainedHeight = min(max(totalHeight.rounded(.up), 24), maxHeight)
+        return CGSize(width: proposedWidth, height: constrainedHeight)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: MacComposerTextView
+        init(parent: MacComposerTextView) { self.parent = parent }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
+        }
+    }
+}
+
+private final class ComposerNSTextView: NSTextView {
+    var onSend: (() -> Void)?
+    var placeholderString: String = "" {
+        didSet {
+            if oldValue != placeholderString { needsDisplay = true }
+        }
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // Return key (keyCode 36); Enter on numeric keypad (76) is treated the same
+        if event.keyCode == 36 || event.keyCode == 76 {
+            if event.modifierFlags.contains(.shift) {
+                insertText("\n", replacementRange: selectedRange())
+            } else {
+                onSend?()
+            }
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard string.isEmpty, !placeholderString.isEmpty else { return }
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font ?? .systemFont(ofSize: NSFont.systemFontSize),
+            .foregroundColor: NSColor.placeholderTextColor
+        ]
+        let origin = NSPoint(x: textContainerInset.width + 5, y: textContainerInset.height)
+        placeholderString.draw(at: origin, withAttributes: attrs)
+    }
+}
+#endif
