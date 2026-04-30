@@ -6,14 +6,18 @@ namespace Achates.Server.Mobile;
 internal static class AttachmentParser
 {
     private const int MaxAttachments = 4;
-    private const int MaxBytesPerAttachment = 8 * 1024 * 1024; // 8 MB decoded
-    private static readonly HashSet<string> AllowedMimeTypes = new(StringComparer.OrdinalIgnoreCase)
+    private const int MaxImageBytes = 8 * 1024 * 1024;   // 8 MB decoded
+    private const int MaxPdfBytes = 32 * 1024 * 1024;    // 32 MB decoded
+
+    private static readonly HashSet<string> AllowedImageMimes = new(StringComparer.OrdinalIgnoreCase)
     {
         "image/jpeg",
         "image/png",
         "image/webp",
         "image/heic",
     };
+
+    private const string PdfMime = "application/pdf";
 
     /// <summary>
     /// Parses the optional <c>attachments</c> array from a chat.send params object.
@@ -67,7 +71,9 @@ internal static class AttachmentParser
             }
 
             var mime = mimeProp.GetString()!;
-            if (!AllowedMimeTypes.Contains(mime))
+            var isImage = AllowedImageMimes.Contains(mime);
+            var isPdf = string.Equals(mime, PdfMime, StringComparison.OrdinalIgnoreCase);
+            if (!isImage && !isPdf)
             {
                 error = $"Unsupported attachment mime type '{mime}'.";
                 return null;
@@ -85,17 +91,38 @@ internal static class AttachmentParser
                 return null;
             }
 
-            if (decoded.Length > MaxBytesPerAttachment)
+            var maxBytes = isPdf ? MaxPdfBytes : MaxImageBytes;
+            if (decoded.Length > maxBytes)
             {
-                error = "Attachment too large (max 8 MB).";
+                var maxMb = maxBytes / (1024 * 1024);
+                error = $"Attachment too large (max {maxMb} MB for {mime}).";
                 return null;
             }
 
-            result.Add(new CompletionImageContent
+            string? fileName = null;
+            if (element.TryGetProperty("filename", out var fnProp) &&
+                fnProp.ValueKind == JsonValueKind.String)
             {
-                Data = data,
-                MimeType = mime,
-            });
+                fileName = fnProp.GetString();
+            }
+
+            if (isPdf)
+            {
+                result.Add(new CompletionFileContent
+                {
+                    Data = data,
+                    MimeType = mime,
+                    FileName = fileName ?? "document.pdf",
+                });
+            }
+            else
+            {
+                result.Add(new CompletionImageContent
+                {
+                    Data = data,
+                    MimeType = mime,
+                });
+            }
         }
 
         return result;

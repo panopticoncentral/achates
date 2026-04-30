@@ -697,6 +697,16 @@ public sealed class MobileTransport(
         if (!_agents.TryGetValue(agentName, out var agentDef))
             return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
 
+        if (attachments!.OfType<CompletionFileContent>().Any() &&
+            !agentDef.Model.Input.HasFlag(ModelModalities.File))
+        {
+            var who = agentDef.DisplayName ?? agentName;
+            return ResponseFrame.Failure(
+                request.Id,
+                "unsupported_attachment",
+                $"{who}'s model ({agentDef.Model.Id}) doesn't support file input. Switch to a model with file/PDF support (e.g. Claude, Gemini, GPT-4o).");
+        }
+
         var runtimeKey = $"{agentName}:{sessionId}";
 
         // Get or create the runtime for this session

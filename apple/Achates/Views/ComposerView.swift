@@ -1,10 +1,10 @@
 import SwiftUI
+import UniformTypeIdentifiers
 #if os(iOS)
 import UIKit
 import PhotosUI
 #else
 import AppKit
-import UniformTypeIdentifiers
 #endif
 
 struct ComposerView: View {
@@ -12,6 +12,7 @@ struct ComposerView: View {
     @Bindable var speechService: SpeechService
     @State private var text = ""
     @State private var attachments: [DraftAttachment] = []
+    @State private var showDocumentPicker = false
     @FocusState private var isFocused: Bool
 
     #if os(iOS)
@@ -25,6 +26,7 @@ struct ComposerView: View {
     let onCancel: () -> Void
 
     private let maxAttachments = 4
+    private static let maxPdfBytes = 32 * 1024 * 1024
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,11 +42,12 @@ struct ComposerView: View {
         }
         .background(.bar)
         #if os(iOS)
-        .confirmationDialog("Add Photo", isPresented: $showSourceDialog, titleVisibility: .hidden) {
+        .confirmationDialog("Add Attachment", isPresented: $showSourceDialog, titleVisibility: .hidden) {
             if CameraPicker.isAvailable {
                 Button("Take Photo") { showCamera = true }
             }
             Button("Choose from Library") { showLibrary = true }
+            Button("Choose Document") { showDocumentPicker = true }
             Button("Cancel", role: .cancel) {}
         }
         .fullScreenCover(isPresented: $showCamera) {
@@ -68,6 +71,16 @@ struct ComposerView: View {
             Task { await loadPickerItems(items) }
         }
         #endif
+        .fileImporter(
+            isPresented: $showDocumentPicker,
+            allowedContentTypes: [.pdf],
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls): addDocuments(urls)
+            case .failure(let error): print("Document picker failed: \(error)")
+            }
+        }
     }
 
     private var recordingBanner: some View {
@@ -140,19 +153,22 @@ struct ComposerView: View {
         }
         .buttonStyle(.plain)
         .disabled(attachments.count >= maxAttachments)
-        .accessibilityLabel("Add photo")
+        .accessibilityLabel("Add attachment")
         #else
-        Button {
-            openMacFilePicker()
+        Menu {
+            Button("Photo...") { openMacPhotoPicker() }
+            Button("Document...") { showDocumentPicker = true }
         } label: {
             Image(systemName: "plus.circle.fill")
                 .font(.system(size: 28))
                 .foregroundStyle(attachments.count >= maxAttachments ? Color.gray : Color.blue)
                 .frame(width: 36, height: 36)
         }
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
         .disabled(attachments.count >= maxAttachments)
-        .accessibilityLabel("Add photo")
+        .accessibilityLabel("Add attachment")
         #endif
     }
 
@@ -225,7 +241,29 @@ struct ComposerView: View {
     private func addAttachment(from data: Data) {
         guard attachments.count < maxAttachments,
               let result = ImageProcessor.normalize(data) else { return }
-        attachments.append(DraftAttachment(data: result.data, thumbnail: result.thumbnail))
+        attachments.append(DraftAttachment(
+            data: result.data,
+            mime: "image/jpeg",
+            thumbnail: result.thumbnail
+        ))
+    }
+
+    private func addDocuments(_ urls: [URL]) {
+        for url in urls {
+            if attachments.count >= maxAttachments { break }
+            let didStart = url.startAccessingSecurityScopedResource()
+            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { continue }
+            guard data.count <= Self.maxPdfBytes else {
+                print("Skipping \(url.lastPathComponent): \(data.count) bytes exceeds 32 MB cap")
+                continue
+            }
+            attachments.append(DraftAttachment(
+                data: data,
+                mime: "application/pdf",
+                displayName: url.lastPathComponent
+            ))
+        }
     }
 
     #if os(iOS)
@@ -242,7 +280,7 @@ struct ComposerView: View {
     #endif
 
     #if os(macOS)
-    private func openMacFilePicker() {
+    private func openMacPhotoPicker() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
@@ -267,19 +305,7 @@ private struct AttachmentThumbnail: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            #if os(iOS)
-            Image(uiImage: attachment.thumbnail)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 64, height: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            #else
-            Image(nsImage: attachment.thumbnail)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 64, height: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            #endif
+            content
 
             Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")
@@ -294,5 +320,46 @@ private struct AttachmentThumbnail: View {
             .accessibilityLabel("Remove attachment")
         }
         .padding(4)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if attachment.isImage, let thumb = attachment.thumbnail {
+            #if os(iOS)
+            Image(uiImage: thumb)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            #else
+            Image(nsImage: thumb)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            #endif
+        } else {
+            documentChip
+        }
+    }
+
+    private var documentChip: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "doc.fill")
+                .font(.system(size: 22))
+                .foregroundStyle(.white)
+            Text(attachment.displayName ?? "Document")
+                .font(.caption2)
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 4)
+        }
+        .frame(width: 88, height: 64)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.accentColor.opacity(0.85))
+        )
     }
 }

@@ -132,4 +132,74 @@ public sealed class AttachmentParserTests
         Assert.Null(result);
         Assert.NotNull(error);
     }
+
+    [Fact]
+    public void Pdf_attachment_parses_to_file_content()
+    {
+        var data = Convert.ToBase64String(new byte[] { 0x25, 0x50, 0x44, 0x46 }); // %PDF
+        var p = Parse($$"""{"attachments":[{"mime":"application/pdf","data":"{{data}}","filename":"report.pdf"}]}""");
+        var result = AttachmentParser.Parse(p, out var error);
+        Assert.Null(error);
+        Assert.NotNull(result);
+        var single = Assert.Single(result!);
+        var file = Assert.IsType<CompletionFileContent>(single);
+        Assert.Equal("application/pdf", file.MimeType);
+        Assert.Equal(data, file.Data);
+        Assert.Equal("report.pdf", file.FileName);
+    }
+
+    [Fact]
+    public void Pdf_without_filename_uses_default()
+    {
+        var data = Convert.ToBase64String(new byte[] { 0x25, 0x50, 0x44, 0x46 });
+        var p = Parse($$"""{"attachments":[{"mime":"application/pdf","data":"{{data}}"}]}""");
+        var result = AttachmentParser.Parse(p, out var error);
+        Assert.Null(error);
+        var file = Assert.IsType<CompletionFileContent>(Assert.Single(result!));
+        Assert.Equal("document.pdf", file.FileName);
+    }
+
+    [Fact]
+    public void Pdf_under_32mb_parses()
+    {
+        // 16 MB — well under the 32 MB PDF cap, but well over the 8 MB image cap.
+        var bytes = new byte[16 * 1024 * 1024];
+        var data = Convert.ToBase64String(bytes);
+        var p = Parse($$"""{"attachments":[{"mime":"application/pdf","data":"{{data}}"}]}""");
+        var result = AttachmentParser.Parse(p, out var error);
+        Assert.Null(error);
+        Assert.NotNull(result);
+        Assert.IsType<CompletionFileContent>(Assert.Single(result!));
+    }
+
+    [Fact]
+    public void Pdf_over_32mb_returns_error()
+    {
+        var bytes = new byte[33 * 1024 * 1024];
+        var data = Convert.ToBase64String(bytes);
+        var p = Parse($$"""{"attachments":[{"mime":"application/pdf","data":"{{data}}"}]}""");
+        var result = AttachmentParser.Parse(p, out var error);
+        Assert.Null(result);
+        Assert.NotNull(error);
+        Assert.Contains("too large", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Mixed_image_and_pdf_attachments_parse()
+    {
+        var imgData = Convert.ToBase64String(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 });
+        var pdfData = Convert.ToBase64String(new byte[] { 0x25, 0x50, 0x44, 0x46 });
+        var p = Parse($$"""
+        {"attachments":[
+            {"mime":"image/jpeg","data":"{{imgData}}"},
+            {"mime":"application/pdf","data":"{{pdfData}}","filename":"a.pdf"}
+        ]}
+        """);
+        var result = AttachmentParser.Parse(p, out var error);
+        Assert.Null(error);
+        Assert.NotNull(result);
+        Assert.Equal(2, result!.Count);
+        Assert.IsType<CompletionImageContent>(result[0]);
+        Assert.IsType<CompletionFileContent>(result[1]);
+    }
 }

@@ -106,10 +106,14 @@ final class WebSocketClient {
         ]
         if !attachments.isEmpty {
             let items: [JSONValue] = attachments.map { att in
-                .object([
-                    "mime": .string("image/jpeg"),
+                var fields: [String: JSONValue] = [
+                    "mime": .string(att.mime),
                     "data": .string(att.data.base64EncodedString()),
-                ])
+                ]
+                if let name = att.displayName {
+                    fields["filename"] = .string(name)
+                }
+                return .object(fields)
             }
             params["attachments"] = .array(items)
         }
