@@ -111,7 +111,8 @@ public sealed class CronService : IAsyncDisposable
         var job = jobs.FirstOrDefault(j => j.Id == jobId);
         if (job is null) return null;
 
-        return await ExecuteJobAsync(agentName, entry.Agent, entry.Store, job, ct);
+        var (result, _) = await ExecuteJobAsync(agentName, entry.Agent, entry.Store, job, ct);
+        return result;
     }
 
     public async ValueTask DisposeAsync()
@@ -153,9 +154,17 @@ public sealed class CronService : IAsyncDisposable
 
                     try
                     {
-                        var result = await ExecuteJobAsync(agentName, agent, store, job, ct);
-                        await UpdateJobStateAfterRunAsync(store, job, "ok", null, ct);
-                        _logger.LogInformation("Cron job '{Name}' ({Id}) completed", job.Name, job.Id);
+                        var (result, skipped) = await ExecuteJobAsync(agentName, agent, store, job, ct);
+                        if (skipped)
+                        {
+                            await UpdateJobStateAfterRunAsync(store, job, "skipped", null, ct, advanceLastRunAt: false);
+                            _logger.LogInformation("Cron job '{Name}' ({Id}) skipped", job.Name, job.Id);
+                        }
+                        else
+                        {
+                            await UpdateJobStateAfterRunAsync(store, job, "ok", null, ct);
+                            _logger.LogInformation("Cron job '{Name}' ({Id}) completed", job.Name, job.Id);
+                        }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
@@ -256,7 +265,7 @@ public sealed class CronService : IAsyncDisposable
         return due;
     }
 
-    private async Task<string?> ExecuteJobAsync(
+    private async Task<(string? Result, bool Skipped)> ExecuteJobAsync(
         string agentName, AgentDefinition agentDef, CronStore store, CronJob job, CancellationToken ct)
     {
         _logger.LogInformation("Executing cron job '{Name}' ({Id}) for agent '{Agent}'",
@@ -268,6 +277,18 @@ public sealed class CronService : IAsyncDisposable
 
         if (job.Kind == CronJobKind.Dreamtime)
         {
+            // Skip if no sessions have been updated since the last review
+            var (latest, _) = await _sessionStore.ListAsync(agentName, limit: 1, ct: ct);
+            var since = job.State.LastRunAt;
+            var hasNew = latest.Any(s => since is null || s.Updated > since.Value);
+            if (!hasNew)
+            {
+                _logger.LogInformation(
+                    "Skipping dreamtime for agent '{Agent}' — no new sessions since {Since}",
+                    agentName, since?.ToString("o") ?? "ever");
+                return ("Skipped: no sessions to review since last dreamtime.", true);
+            }
+
             systemPrompt = agentDef.SystemPrompt + DreamtimeInstructions;
             tools = BuildDreamtimeTools(agentName, agentDef, job);
         }
@@ -356,7 +377,7 @@ public sealed class CronService : IAsyncDisposable
             await DeliverAsync(job, agentName, session, ct);
         }
 
-        return responseText;
+        return (responseText, false);
     }
 
     private static IReadOnlyList<AgentTool> BuildJobTools(AgentDefinition agentDef)
@@ -438,21 +459,23 @@ public sealed class CronService : IAsyncDisposable
     }
 
     private async Task UpdateJobStateAfterRunAsync(
-        CronStore store, CronJob job, string status, string? error, CancellationToken ct)
+        CronStore store, CronJob job, string status, string? error, CancellationToken ct,
+        bool advanceLastRunAt = true)
     {
         var now = DateTimeOffset.UtcNow;
         var nextRun = CronScheduler.ComputeNextRun(job.Schedule, now);
 
         await store.SaveJobStateAsync(job.Id, state =>
         {
-            state.LastRunAt = now;
+            if (advanceLastRunAt)
+                state.LastRunAt = now;
             state.LastStatus = status;
             state.LastError = error;
             state.NextRunAt = nextRun;
 
             if (status == "ok")
                 state.ConsecutiveErrors = 0;
-            else
+            else if (status != "skipped")
                 state.ConsecutiveErrors++;
         }, ct);
 
