@@ -14,6 +14,9 @@ struct ComposerView: View {
     @State private var attachments: [DraftAttachment] = []
     @State private var showDocumentPicker = false
     @FocusState private var isFocused: Bool
+    #if os(macOS)
+    @State private var composerHeight: CGFloat = 33
+    #endif
 
     #if os(iOS)
     @State private var showSourceDialog = false
@@ -121,11 +124,14 @@ struct ComposerView: View {
             #if os(macOS)
             MacComposerTextView(
                 text: $text,
+                measuredHeight: $composerHeight,
                 placeholder: "Message",
+                minHeight: 33,
                 maxHeight: 240,
                 onSend: send
             )
             .frame(maxWidth: .infinity)
+            .frame(height: composerHeight)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(
@@ -232,6 +238,9 @@ struct ComposerView: View {
         onSend(trimmed, attachments)
         text = ""
         attachments = []
+        #if os(macOS)
+        composerHeight = 33
+        #endif
     }
 
     private func toggleRecording() {
@@ -378,9 +387,20 @@ private struct AttachmentThumbnail: View {
 }
 
 #if os(macOS)
+// SwiftUI controls the height of this view via a `@Binding<CGFloat>` that the
+// coordinator updates in response to text changes and bounds changes. Crucially,
+// this view does NOT implement `sizeThatFits` — height is reported asynchronously
+// (via `DispatchQueue.main.async`), which decouples the height computation from
+// the layout pass that produced the bounds. Reporting size synchronously from
+// `sizeThatFits` previously caused a constraint update loop on macOS Tahoe:
+// frame change → `NSHostingView.invalidateSafeAreaCornerInsets` → another layout
+// pass → another (slightly different) `sizeThatFits` result → repeat, eventually
+// tripping the window's "more update passes than views" assertion.
 struct MacComposerTextView: NSViewRepresentable {
     @Binding var text: String
+    @Binding var measuredHeight: CGFloat
     let placeholder: String
+    let minHeight: CGFloat
     let maxHeight: CGFloat
     let onSend: () -> Void
 
@@ -391,6 +411,8 @@ struct MacComposerTextView: NSViewRepresentable {
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.postsFrameChangedNotifications = true
 
         let textView = ComposerNSTextView()
         textView.delegate = context.coordinator
@@ -424,6 +446,7 @@ struct MacComposerTextView: NSViewRepresentable {
         textView.onSend = onSend
 
         scrollView.documentView = textView
+        context.coordinator.observe(scrollView: scrollView)
         return scrollView
     }
 
@@ -431,6 +454,8 @@ struct MacComposerTextView: NSViewRepresentable {
         guard let textView = nsView.documentView as? ComposerNSTextView else { return }
         if textView.string != text {
             textView.string = text
+            // Programmatic edits don't fire textDidChange — re-measure manually.
+            context.coordinator.scheduleMeasure()
         }
         if textView.placeholderString != placeholder {
             textView.placeholderString = placeholder
@@ -438,43 +463,66 @@ struct MacComposerTextView: NSViewRepresentable {
         textView.onSend = onSend
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
-        guard let textView = nsView.documentView as? ComposerNSTextView else { return nil }
-
-        let proposedWidth: CGFloat
-        if let w = proposal.width, w.isFinite, w > 0 {
-            proposedWidth = w
-        } else {
-            proposedWidth = max(nsView.bounds.width, 200)
-        }
-
-        let insetWidth = textView.textContainerInset.width * 2
-        let lineFragmentPadding = textView.textContainer?.lineFragmentPadding ?? 5
-        let measureWidth = max(1, proposedWidth - insetWidth - 2 * lineFragmentPadding)
-
-        let textToMeasure = textView.string.isEmpty ? " " : textView.string
-        let attrString = NSAttributedString(
-            string: textToMeasure,
-            attributes: [.font: textView.font ?? .systemFont(ofSize: NSFont.systemFontSize)]
-        )
-        let rect = attrString.boundingRect(
-            with: NSSize(width: measureWidth, height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading]
-        )
-        let totalHeight = rect.height + 2 * textView.textContainerInset.height + 4
-        let constrainedHeight = min(max(totalHeight.rounded(.up), 24), maxHeight)
-        return CGSize(width: proposedWidth, height: constrainedHeight)
-    }
-
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MacComposerTextView
-        init(parent: MacComposerTextView) { self.parent = parent }
+        weak var scrollView: NSScrollView?
+
+        init(parent: MacComposerTextView) {
+            self.parent = parent
+            super.init()
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        func observe(scrollView: NSScrollView) {
+            self.scrollView = scrollView
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(scrollViewFrameChanged(_:)),
+                name: NSView.frameDidChangeNotification,
+                object: scrollView
+            )
+        }
+
+        @objc private func scrollViewFrameChanged(_ note: Notification) {
+            scheduleMeasure()
+        }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
+            scheduleMeasure()
+        }
+
+        // Always update height off the current layout pass, never inside it.
+        // The async hop is what breaks the AppKit/SwiftUI feedback loop.
+        func scheduleMeasure() {
+            DispatchQueue.main.async { [weak self] in
+                self?.measureNow()
+            }
+        }
+
+        private func measureNow() {
+            guard let scrollView,
+                  let textView = scrollView.documentView as? ComposerNSTextView,
+                  let layoutManager = textView.layoutManager,
+                  let textContainer = textView.textContainer
+            else { return }
+
+            layoutManager.ensureLayout(for: textContainer)
+            let usedRect = layoutManager.usedRect(for: textContainer)
+            let totalHeight = usedRect.height + 2 * textView.textContainerInset.height + 4
+            let clamped = min(max(totalHeight.rounded(.up), parent.minHeight), parent.maxHeight)
+
+            // Guard against redundant writes so a height-driven frame change
+            // (which fires frameDidChangeNotification again) settles immediately.
+            if abs(parent.measuredHeight - clamped) >= 0.5 {
+                parent.measuredHeight = clamped
+            }
         }
     }
 }
