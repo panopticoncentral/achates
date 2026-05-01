@@ -12,6 +12,7 @@ struct AgentEditModel: Equatable {
     var hasAvatar: Bool
     var newAvatarData: Data?
     var removeAvatar: Bool = false
+    var dreamtime: Date?
 
     static func from(_ payload: [String: JSONValue]) -> AgentEditModel? {
         AgentEditModel(
@@ -23,7 +24,8 @@ struct AgentEditModel: Equatable {
             maxTokens: payload["max_tokens"]?.intValue,
             allowedChats: payload["allowed_chats"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             prompt: payload["prompt"]?.stringValue ?? "",
-            hasAvatar: payload["has_avatar"]?.boolValue ?? false
+            hasAvatar: payload["has_avatar"]?.boolValue ?? false,
+            dreamtime: payload["dreamtime"]?.stringValue.flatMap(parseDreamtime)
         )
     }
 
@@ -50,9 +52,22 @@ struct AgentEditModel: Equatable {
         if removeAvatar {
             params["avatar_remove"] = .bool(true)
         }
+        if let d = dreamtime {
+            params["dreamtime"] = .string(formatDreamtime(d))
+        }
         return params
     }
 }
+
+private let dreamtimeFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "HH:mm"
+    f.locale = Locale(identifier: "en_US_POSIX")
+    return f
+}()
+
+private func parseDreamtime(_ s: String) -> Date? { dreamtimeFormatter.date(from: s) }
+private func formatDreamtime(_ d: Date) -> String { dreamtimeFormatter.string(from: d) }
 
 struct ToolInfo: Identifiable, Equatable {
     var id: String { name }

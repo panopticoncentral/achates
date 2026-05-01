@@ -829,6 +829,7 @@ public sealed class MobileTransport(
             allowed_chats = config.AllowChat ?? [],
             prompt = config.Prompt ?? "",
             has_avatar = _agents[agentName].AvatarData is not null,
+            dreamtime = config.Dreamtime?.ToString("HH:mm"),
         }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
@@ -877,6 +878,12 @@ public sealed class MobileTransport(
         {
             config.Completion ??= new CompletionConfig();
             config.Completion.MaxTokens = mtProp.GetInt32();
+        }
+
+        if (p.TryGetProperty("dreamtime", out var dtProp) && dtProp.ValueKind == JsonValueKind.String)
+        {
+            if (TimeOnly.TryParseExact(dtProp.GetString(), "HH:mm", out var time))
+                config.Dreamtime = time;
         }
 
         var displayName = char.ToUpper(agentName[0]) + agentName[1..];

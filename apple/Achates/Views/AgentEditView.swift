@@ -145,6 +145,19 @@ struct AgentEditView: View {
                 }
             }
 
+            Section {
+                Toggle("Dreamtime", isOn: dreamtimeEnabledBinding)
+                if config?.dreamtime != nil {
+                    DatePicker(
+                        "Time",
+                        selection: dreamtimeBinding,
+                        displayedComponents: .hourAndMinute
+                    )
+                }
+            } footer: {
+                Text("Each night at this time, the agent reviews recent sessions and updates its memory.")
+            }
+
             Section("Tools") {
                 DisclosureGroup(isExpanded: $showToolsEditor) {
                     ForEach(availableTools) { tool in
@@ -230,6 +243,35 @@ struct AgentEditView: View {
                 guard var c = config else { return }
                 if newValue.isEmpty { c.maxTokens = nil }
                 else if let v = Int(newValue) { c.maxTokens = v }
+                config = c
+            }
+        )
+    }
+
+    private var dreamtimeEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { config?.dreamtime != nil },
+            set: { enabled in
+                guard var c = config else { return }
+                if enabled {
+                    var comps = DateComponents()
+                    comps.hour = 3
+                    comps.minute = 0
+                    c.dreamtime = Calendar.current.date(from: comps) ?? Date()
+                } else {
+                    c.dreamtime = nil
+                }
+                config = c
+            }
+        )
+    }
+
+    private var dreamtimeBinding: Binding<Date> {
+        Binding(
+            get: { config?.dreamtime ?? Date() },
+            set: { newValue in
+                guard var c = config else { return }
+                c.dreamtime = newValue
                 config = c
             }
         )
