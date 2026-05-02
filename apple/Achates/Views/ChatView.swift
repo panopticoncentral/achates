@@ -154,14 +154,16 @@ struct ChatView: View {
                             Text(liveAgent.displayName)
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(.primary)
-                            Text(connectionLabel)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+                            if let label = connectionLabel {
+                                Text(label)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(liveAgent.displayName), \(connectionLabel)")
+                .accessibilityLabel(connectionLabel.map { "\(liveAgent.displayName), \($0)" } ?? liveAgent.displayName)
             }
             #else
             ToolbarItem(placement: .principal) {
@@ -174,14 +176,16 @@ struct ChatView: View {
                             Text(liveAgent.displayName)
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(.primary)
-                            Text(connectionLabel)
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
+                            if let label = connectionLabel {
+                                Text(label)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(liveAgent.displayName), \(connectionLabel)")
+                .accessibilityLabel(connectionLabel.map { "\(liveAgent.displayName), \($0)" } ?? liveAgent.displayName)
             }
             #endif
 
@@ -267,9 +271,9 @@ struct ChatView: View {
         return last.blocks.count * 10000 + last.textContent.count
     }
 
-    private var connectionLabel: String {
+    private var connectionLabel: String? {
         switch appState.connectionStatus {
-        case .connected: return "Active now"
+        case .connected: return nil
         case .connecting, .reconnecting: return "Connecting..."
         case .disconnected: return "Offline"
         }
