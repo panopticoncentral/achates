@@ -26,7 +26,7 @@ This uses **device code flow** — you sign in once in a browser, and Achates ca
 1. Go to **API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated permissions**
 2. Add these permissions:
    - `Mail.Read`
-   - `Calendars.Read`
+   - `Calendars.ReadWrite`
    - `Contacts.Read`
 3. Click **Add permissions**
 
@@ -60,7 +60,7 @@ https://microsoft.com/devicelogin and enter the code ABCD1234
 
 If re-authentication is needed later (e.g. token expired), the sign-in message is also sent through your chat.
 
-Open the URL, enter the code, and sign in with your Microsoft account. You'll see a consent screen listing "Read your mail", "Read your calendars", and "Read your contacts". Accept it.
+Open the URL, enter the code, and sign in with your Microsoft account. You'll see a consent screen listing "Read your mail", "Have full access to your calendars", and "Read your contacts". Accept it.
 
 The token is cached at `~/.achates/graph-token-cache.bin` and reused automatically on future runs. You won't need to sign in again unless the refresh token expires (typically 90 days of inactivity).
 
@@ -95,7 +95,7 @@ This uses **client credentials flow** — fully automatic, no interactive sign-i
 1. Go to **API permissions** → **Add a permission** → **Microsoft Graph** → **Application permissions**
 2. Add these permissions:
    - `Mail.Read` — read mail in all mailboxes
-   - `Calendars.Read` — read calendars in all mailboxes
+   - `Calendars.ReadWrite` — read and create events in all mailboxes
    - `Contacts.Read` — read contacts in all mailboxes
 3. Click **Add permissions**
 4. Click **Grant admin consent for [your tenant]** and confirm
@@ -334,7 +334,7 @@ Tokens are cached at `~/.achates/withings-tokens.json` and refresh automatically
 | `notebook` | Read/write markdown files in a configured folder | `tools.notebook.root` path |
 | `notes` | Access Apple Notes (macOS only) — `folders`, `list`, `read`, `create` | Notes automation permission on first use |
 | `mail` | Read Outlook email | `tools.graph` account(s) |
-| `calendar` | View Outlook calendar | `tools.graph` account(s) |
+| `calendar` | View Outlook calendar and create events | `tools.graph` account(s) |
 | `web_search` | Search the web via Brave Search | `BRAVE_API_KEY` or `tools.web_search.brave_api_key` |
 | `web_fetch` | Fetch and extract web page content | None |
 | `cost` | Query usage costs (summary, recent, breakdown) | None |

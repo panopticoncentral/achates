@@ -8,7 +8,7 @@ using static Achates.Providers.Util.JsonSchemaHelpers;
 namespace Achates.Server.Tools;
 
 /// <summary>
-/// Reads Outlook calendar via Microsoft Graph API.
+/// Reads and creates Outlook calendar events via Microsoft Graph API.
 /// </summary>
 internal sealed class CalendarTool(IReadOnlyDictionary<string, GraphClient> graphClients) : AgentTool
 {
@@ -17,7 +17,7 @@ internal sealed class CalendarTool(IReadOnlyDictionary<string, GraphClient> grap
         required: ["action"]);
 
     public override string Name => "calendar";
-    public override string Description => "View Outlook calendar: upcoming events, event details, or check availability.";
+    public override string Description => "View Outlook calendar (upcoming events, event details, availability) or create a new event.";
     public override string Label => "Calendar";
     public override JsonElement Parameters => _schema;
 
@@ -35,6 +35,7 @@ internal sealed class CalendarTool(IReadOnlyDictionary<string, GraphClient> grap
             "upcoming" => await UpcomingAsync(graph, arguments, cancellationToken),
             "read" => await ReadAsync(graph, arguments, cancellationToken),
             "availability" => await AvailabilityAsync(graph, arguments, cancellationToken),
+            "create" => await CreateAsync(graph, arguments, cancellationToken),
             _ => TextResult($"Unknown action: {action}"),
         };
     }
@@ -96,6 +97,59 @@ internal sealed class CalendarTool(IReadOnlyDictionary<string, GraphClient> grap
             "calendar/getSchedule", body, cancellationToken);
 
         return FormatAvailability(result, start, end);
+    }
+
+    private async Task<AgentToolResult> CreateAsync(
+        GraphClient graph, Dictionary<string, object?> arguments, CancellationToken cancellationToken)
+    {
+        var subject = GetString(arguments, "subject");
+        var start = GetString(arguments, "start");
+        var end = GetString(arguments, "end");
+
+        if (string.IsNullOrWhiteSpace(subject) ||
+            string.IsNullOrWhiteSpace(start) ||
+            string.IsNullOrWhiteSpace(end))
+        {
+            return TextResult("subject, start, and end are required for 'create'.");
+        }
+
+        var timeZone = GetString(arguments, "time_zone");
+        if (string.IsNullOrWhiteSpace(timeZone)) timeZone = "UTC";
+
+        var isAllDay = GetBool(arguments, "is_all_day", false);
+        var location = GetString(arguments, "location");
+        var bodyText = GetString(arguments, "body");
+
+        var requestBody = new Dictionary<string, object>
+        {
+            ["subject"] = subject,
+            ["start"] = new { dateTime = start, timeZone },
+            ["end"] = new { dateTime = end, timeZone },
+            ["isAllDay"] = isAllDay,
+        };
+
+        if (!string.IsNullOrWhiteSpace(location))
+            requestBody["location"] = new { displayName = location };
+
+        if (!string.IsNullOrWhiteSpace(bodyText))
+            requestBody["body"] = new { contentType = "text", content = bodyText };
+
+        GraphEvent created;
+        try
+        {
+            created = await graph.PostAsync<GraphEvent>("events", requestBody, cancellationToken);
+        }
+        catch (HttpRequestException ex)
+        {
+            return TextResult($"Failed to create event: {ex.Message}");
+        }
+
+        var startDt = ParseGraphDateTime(created.Start);
+        var when = isAllDay
+            ? startDt?.ToString("dddd, MMMM d, yyyy") + " (all day)"
+            : startDt?.ToString("dddd, MMMM d, yyyy h:mm tt");
+
+        return TextResult($"Created event \"{created.Subject}\" on {when} (id: `{created.Id}`).");
     }
 
     private static AgentToolResult FormatEventList(List<GraphEvent> events, int days)
@@ -245,17 +299,35 @@ internal sealed class CalendarTool(IReadOnlyDictionary<string, GraphClient> grap
         return val is int i ? i : defaultValue;
     }
 
+    private static bool GetBool(Dictionary<string, object?> args, string key, bool defaultValue)
+    {
+        if (!args.TryGetValue(key, out var val) || val is null) return defaultValue;
+        if (val is JsonElement je)
+            return je.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                _ => defaultValue,
+            };
+        return val is bool b ? b : defaultValue;
+    }
+
     private static Dictionary<string, JsonElement> BuildSchemaProperties(
         IReadOnlyDictionary<string, GraphClient> clients)
     {
         var props = new Dictionary<string, JsonElement>
         {
-            ["action"] = StringEnum(["upcoming", "read", "availability"], "Action to perform.", "upcoming"),
+            ["action"] = StringEnum(["upcoming", "read", "availability", "create"], "Action to perform.", "upcoming"),
             ["event_id"] = StringSchema("Event ID. Required for 'read'."),
             ["days"] = NumberSchema("Number of days to look ahead for 'upcoming'. Default 7."),
             ["count"] = NumberSchema("Max events to return for 'upcoming'. Default 20."),
-            ["start"] = StringSchema("Start datetime (ISO 8601). Required for 'availability'."),
-            ["end"] = StringSchema("End datetime (ISO 8601). Required for 'availability'."),
+            ["start"] = StringSchema("Start datetime (ISO 8601, no offset, e.g. '2026-05-02T15:00:00'). Required for 'availability' and 'create'."),
+            ["end"] = StringSchema("End datetime (ISO 8601, no offset). Required for 'availability' and 'create'."),
+            ["subject"] = StringSchema("Event title. Required for 'create'."),
+            ["time_zone"] = StringSchema("IANA time zone for start/end (e.g. 'America/Los_Angeles'). Defaults to UTC. Used by 'create'."),
+            ["location"] = StringSchema("Location display name. Optional for 'create'."),
+            ["body"] = StringSchema("Event description / notes (plain text). Optional for 'create'."),
+            ["is_all_day"] = BooleanSchema("If true, treat start/end as all-day (must be midnight in the supplied time zone). Default false. Used by 'create'."),
         };
 
         if (clients.Count > 1)
