@@ -24,10 +24,10 @@ internal sealed class CronTool(
             ["name"] = StringSchema("Job name. Required for 'add'."),
             ["message"] = StringSchema("The prompt/instruction the agent will execute on schedule. Required for 'add'."),
             ["schedule_kind"] = StringEnum(["at", "every", "cron"],
-                "Schedule type. Required for 'add'."),
-            ["schedule_at"] = StringSchema("ISO 8601 timestamp for one-shot schedule (e.g. '2026-03-15T10:00:00'). Required when schedule_kind is 'at'."),
-            ["schedule_interval_minutes"] = NumberSchema("Interval in minutes for recurring schedule. Required when schedule_kind is 'every'."),
-            ["schedule_cron"] = StringSchema("Cron expression (e.g. '0 9 * * *' for daily at 9am). Required when schedule_kind is 'cron'."),
+                "Schedule type. Required for 'add'. On 'update', optional if exactly one of schedule_at, schedule_cron, or schedule_interval_minutes is provided — the kind is inferred from which field you set."),
+            ["schedule_at"] = StringSchema("ISO 8601 timestamp for one-shot schedule (e.g. '2026-03-15T10:00:00'). Required when schedule_kind is 'at'. On 'update', providing this field changes the schedule to a one-shot at the given time."),
+            ["schedule_interval_minutes"] = NumberSchema("Interval in minutes for recurring schedule. Required when schedule_kind is 'every'. On 'update', providing this field changes the schedule to a recurring interval."),
+            ["schedule_cron"] = StringSchema("Cron expression (e.g. '0 9 * * *' for daily at 9am). Required when schedule_kind is 'cron'. On 'update', providing this field changes the schedule to the given cron expression."),
             ["schedule_timezone"] = StringSchema("IANA timezone for cron/at schedules (e.g. 'America/New_York'). Defaults to local timezone."),
             ["job_id"] = StringSchema("Job ID. Required for 'update', 'remove', 'run'."),
             ["enabled"] = BooleanSchema("Enable or disable a job. Used with 'update'."),
@@ -138,6 +138,16 @@ internal sealed class CronTool(
         if (target?.Kind == CronJobKind.Dreamtime)
             return TextResult("Dreamtime is managed by the system. Change it in AGENT.md.");
 
+        string? scheduleKind;
+        try
+        {
+            scheduleKind = ResolveUpdateScheduleKind(args);
+        }
+        catch (ArgumentException ex)
+        {
+            return TextResult($"Error: {ex.Message}");
+        }
+
         var updated = await store.UpdateAsync(jobId, job =>
         {
             if (GetString(args, "name") is { Length: > 0 } newName)
@@ -147,9 +157,9 @@ internal sealed class CronTool(
             if (args.ContainsKey("enabled"))
                 job.Enabled = GetBool(args, "enabled") ?? job.Enabled;
 
-            if (GetString(args, "schedule_kind") is { Length: > 0 } kind)
+            if (scheduleKind is not null)
             {
-                job.Schedule = ParseSchedule(kind, args);
+                job.Schedule = ParseSchedule(scheduleKind, args);
                 job.State.NextRunAt = CronScheduler.ComputeNextRun(job.Schedule, DateTimeOffset.UtcNow);
             }
         }, ct);
@@ -191,6 +201,30 @@ internal sealed class CronTool(
             return TextResult($"Job '{jobId}' not found.");
 
         return TextResult($"Job executed. Result:\n\n{Truncate(result, 500)}");
+    }
+
+    private static string? ResolveUpdateScheduleKind(Dictionary<string, object?> args)
+    {
+        var explicitKind = GetString(args, "schedule_kind");
+        var hasAt = GetString(args, "schedule_at") is { Length: > 0 };
+        var hasCron = GetString(args, "schedule_cron") is { Length: > 0 };
+        var hasEvery = args.ContainsKey("schedule_interval_minutes")
+            && GetDouble(args, "schedule_interval_minutes") is not null;
+
+        if (explicitKind is { Length: > 0 })
+            return explicitKind;
+
+        var inferred = (hasAt, hasCron, hasEvery) switch
+        {
+            (true, false, false) => "at",
+            (false, true, false) => "cron",
+            (false, false, true) => "every",
+            (false, false, false) => null,
+            _ => throw new ArgumentException(
+                "Multiple schedule fields provided; set 'schedule_kind' to disambiguate."),
+        };
+
+        return inferred;
     }
 
     private CronSchedule ParseSchedule(string kind, Dictionary<string, object?> args)
