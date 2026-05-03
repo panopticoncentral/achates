@@ -4,7 +4,6 @@ struct ChatView: View {
     @Environment(AppState.self) private var appState
     let agent: Agent
     @State private var speechService = SpeechService()
-    @State private var showAgentEditor = false
     @State private var isAtBottom = true
 
     /// Live agent data from AppState, falls back to the navigation snapshot.
@@ -145,64 +144,38 @@ struct ChatView: View {
         .toolbar {
             #if os(iOS)
             ToolbarItem(placement: .principal) {
-                Button {
-                    showAgentEditor = true
-                } label: {
-                    HStack(spacing: 8) {
-                        AgentAvatar(agent: liveAgent, size: 32)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(liveAgent.displayName)
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.primary)
-                            if let label = connectionLabel {
-                                Text(label)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                            }
+                HStack(spacing: 8) {
+                    AgentAvatar(agent: liveAgent, size: 32)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(liveAgent.displayName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        if let label = connectionLabel {
+                            Text(label)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
-                .buttonStyle(.plain)
                 .accessibilityLabel(connectionLabel.map { "\(liveAgent.displayName), \($0)" } ?? liveAgent.displayName)
             }
             #else
             ToolbarItem(placement: .principal) {
-                Button {
-                    showAgentEditor = true
-                } label: {
-                    HStack(spacing: 8) {
-                        AgentAvatar(agent: liveAgent, size: 24)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(liveAgent.displayName)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.primary)
-                            if let label = connectionLabel {
-                                Text(label)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.secondary)
-                            }
+                HStack(spacing: 8) {
+                    AgentAvatar(agent: liveAgent, size: 24)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(liveAgent.displayName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        if let label = connectionLabel {
+                            Text(label)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
-                .buttonStyle(.plain)
                 .accessibilityLabel(connectionLabel.map { "\(liveAgent.displayName), \($0)" } ?? liveAgent.displayName)
             }
-            #endif
-
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    showAgentEditor = true
-                } label: {
-                    Image(systemName: "pencil.circle")
-                }
-            }
-        }
-        .sheet(isPresented: $showAgentEditor) {
-            NavigationStack {
-                AgentEditView(agent: liveAgent)
-            }
-            #if os(macOS)
-            .frame(minWidth: 500, minHeight: 600)
             #endif
         }
     }
