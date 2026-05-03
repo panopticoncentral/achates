@@ -45,6 +45,19 @@ public sealed class MobileTransport(
     public Providers.Models.Model? TitleModel { get; set; }
 
     /// <summary>
+    /// Global default base model id (from <c>config.Models.Base</c>), surfaced to the client
+    /// in <c>agent.get</c> so the agent edit UI can show a "Default (...)" placeholder for
+    /// agents that don't override it. Set by <see cref="GatewayService"/> at startup.
+    /// </summary>
+    public string? DefaultModelId { get; set; }
+
+    /// <summary>
+    /// Global default thinking model id (from <c>config.Models.Thinking</c>). Same role as
+    /// <see cref="DefaultModelId"/> but for the think tool.
+    /// </summary>
+    public string? DefaultThinkingModelId { get; set; }
+
+    /// <summary>
     /// Delegate to reload an agent definition from disk. Set by GatewayService after construction.
     /// </summary>
     public Func<string, CancellationToken, Task<AgentDefinition>>? AgentReloadFunc { get; set; }
@@ -830,6 +843,10 @@ public sealed class MobileTransport(
             prompt = config.Prompt ?? "",
             has_avatar = _agents[agentName].AvatarData is not null,
             dreamtime = config.Dreamtime?.ToString("HH:mm"),
+            model = config.Model,
+            thinking_model = config.ThinkingModel,
+            default_model = DefaultModelId,
+            default_thinking_model = DefaultThinkingModelId,
         }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
@@ -884,6 +901,21 @@ public sealed class MobileTransport(
         {
             if (TimeOnly.TryParseExact(dtProp.GetString(), "HH:mm", out var time))
                 config.Dreamtime = time;
+        }
+
+        // Per-agent model overrides. Empty string clears the override, falling back to the
+        // global default. Missing property leaves the existing value alone — except we are
+        // reconstructing AgentConfig from scratch here, so absence already means cleared.
+        if (p.TryGetProperty("model", out var modelProp) && modelProp.ValueKind == JsonValueKind.String)
+        {
+            var v = modelProp.GetString();
+            config.Model = string.IsNullOrWhiteSpace(v) ? null : v;
+        }
+
+        if (p.TryGetProperty("thinking_model", out var tmProp) && tmProp.ValueKind == JsonValueKind.String)
+        {
+            var v = tmProp.GetString();
+            config.ThinkingModel = string.IsNullOrWhiteSpace(v) ? null : v;
         }
 
         var displayName = char.ToUpper(agentName[0]) + agentName[1..];

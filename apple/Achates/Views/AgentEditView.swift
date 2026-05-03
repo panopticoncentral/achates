@@ -118,6 +118,28 @@ struct AgentEditView: View {
             }
 
             Section("Generation") {
+                NavigationLink {
+                    ModelBrowseView(
+                        selectedModel: binding(\.model),
+                        title: "Model",
+                        defaultModel: config?.defaultModel
+                    )
+                } label: {
+                    modelRow(label: "Model", current: config?.model, fallback: config?.defaultModel)
+                }
+
+                if config?.tools.contains("think") == true {
+                    NavigationLink {
+                        ModelBrowseView(
+                            selectedModel: binding(\.thinkingModel),
+                            title: "Thinking Model",
+                            defaultModel: config?.defaultThinkingModel
+                        )
+                    } label: {
+                        modelRow(label: "Thinking Model", current: config?.thinkingModel, fallback: config?.defaultThinkingModel)
+                    }
+                }
+
                 reasoningEffortPicker
 
                 HStack {
@@ -196,6 +218,24 @@ struct AgentEditView: View {
         #else
         .formStyle(.grouped)
         #endif
+    }
+
+    @ViewBuilder
+    private func modelRow(label: String, current: String?, fallback: String?) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            if let current {
+                Text(shortModelName(current))
+                    .foregroundStyle(.secondary)
+            } else if let fallback {
+                Text("Default (\(shortModelName(fallback)))")
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("None")
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     @ViewBuilder

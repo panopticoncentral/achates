@@ -117,6 +117,8 @@ public sealed class GatewayService(
         _mobileTransport.AgentRenameFunc = RenameAgentAsync;
         _mobileTransport.ModelsListFunc = ct => GetAllModelsAsync(ct: ct);
         _mobileTransport.GenerateAvatarFunc = GenerateAvatarAsync;
+        _mobileTransport.DefaultModelId = config.Models?.Base;
+        _mobileTransport.DefaultThinkingModelId = config.Models?.Thinking;
 
         // Resolve title model for auto-titling sessions
         var titleModelId = config.Tools?.Title?.Model;
@@ -360,10 +362,13 @@ public sealed class GatewayService(
     private async Task<AgentDefinition> ResolveAgentAsync(string name, AgentConfig agentConfig, CancellationToken ct)
     {
         var achatesHome = _achatesHome!;
-        var model = await ResolveModelAsync(
-            agentConfig.Provider ?? config.Provider?.Name,
-            config.Models?.Base,
-            ct);
+        var providerId = agentConfig.Provider ?? config.Provider?.Name;
+
+        // Per-agent base model wins; fall back to the global default.
+        var baseModelId = !string.IsNullOrWhiteSpace(agentConfig.Model)
+            ? agentConfig.Model
+            : config.Models?.Base;
+        var model = await ResolveModelAsync(providerId, baseModelId, ct);
 
         var prompt = ResolvePrompt(agentConfig);
 
@@ -373,15 +378,19 @@ public sealed class GatewayService(
         if (withingsClient is not null)
             _withingsClient = withingsClient;
 
-        // Resolve thinking model if agent has think tool + thinking model configured globally
+        // Per-agent thinking model wins; fall back to the global default. Only consulted when the
+        // agent enables the think tool — without one configured anywhere, the tool is skipped.
         Model? thinkingModel = null;
-        if (agentConfig.Tools?.Contains("think") == true && config.Models?.Thinking is { } thinkingModelId)
+        if (agentConfig.Tools?.Contains("think") == true)
         {
-            thinkingModel = await ResolveModelAsync(
-                agentConfig.Provider ?? config.Provider?.Name,
-                thinkingModelId,
-                ct);
-            logger.LogInformation("Thinking model resolved: {Model}", thinkingModel.Id);
+            var thinkingModelId = !string.IsNullOrWhiteSpace(agentConfig.ThinkingModel)
+                ? agentConfig.ThinkingModel
+                : config.Models?.Thinking;
+            if (!string.IsNullOrWhiteSpace(thinkingModelId))
+            {
+                thinkingModel = await ResolveModelAsync(providerId, thinkingModelId, ct);
+                logger.LogInformation("Thinking model resolved: {Model}", thinkingModel.Id);
+            }
         }
 
         // Resolve transcription model if any agent uses the transcribe tool
@@ -484,6 +493,9 @@ public sealed class GatewayService(
                 case "cron":
                 case "chat":
                     // Per-session tools — added in MobileTransport.CreateRuntime
+                    break;
+                case "session_review":
+                    // Dreamtime-only — injected by CronService.BuildDreamtimeTools
                     break;
                 case "mail":
                     if (graphClients.Count == 0)
@@ -616,9 +628,9 @@ public sealed class GatewayService(
     {
         providerId ??= config.Provider?.Name
             ?? throw new InvalidOperationException("No provider specified.");
-        if (modelId is null)
+        if (string.IsNullOrWhiteSpace(modelId))
             throw new InvalidOperationException(
-                "No base model specified. Set models.base in ~/.achates/config.yaml.");
+                "No model specified. Set **Model:** in the agent's AGENT.md or models.base in ~/.achates/config.yaml.");
 
         var provider = ModelProviders.Create(providerId)
             ?? throw new InvalidOperationException($"Unknown provider: {providerId}");

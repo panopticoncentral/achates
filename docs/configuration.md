@@ -43,18 +43,18 @@ You are a helpful assistant.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `provider` | object | _(required)_ | LLM provider configuration (see below). |
-| `models` | object | _(required)_ | Global model selection — base and (optional) thinking model (see below). |
+| `models` | object | _(none)_ | Default base/thinking model fallbacks. Per-agent values in AGENT.md override these (see below). |
 | `tools` | object | _(none)_ | Shared tool configuration (see below). |
 | `cron` | object | _(none)_ | Cron session retention policy (see below). |
 
 ### `models`
 
-Global model selection. All agents share these — there is no per-agent override.
+Defaults used when an agent's AGENT.md doesn't declare its own `**Model:**` / `**Thinking Model:**`. Setting them per-agent is preferred; the global block exists so a freshly scaffolded agent has something to fall back to.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `base` | string | _(required)_ | Default model used by every agent for chat completions. |
-| `thinking` | string | _(none)_ | Model used by the `think` tool. Required when any agent has `think` in its tools list. |
+| `base` | string | _(none)_ | Fallback base model when an agent doesn't declare `**Model:**`. At least one source (per-agent or global) must be set or the agent fails to load. |
+| `thinking` | string | _(none)_ | Fallback thinking model when an agent doesn't declare `**Thinking Model:**`. Without one from either source, agents with the `think` tool simply skip the tool. |
 
 ### `tools`
 
@@ -150,6 +150,8 @@ Each capability is a `**Key:** value` line. List values (tools, allowed chats) u
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `Provider` | string | _(global)_ | Override the provider for this agent. |
+| `Model` | string | _(`models.base`)_ | Base model id for this agent. Falls back to `models.base` in config.yaml. |
+| `Thinking Model` | string | _(`models.thinking`)_ | Thinking model id used by the `think` tool. Falls back to `models.thinking`. Only consulted when `think` is enabled. |
 | `Tools` | list | _(none)_ | Tool names to enable. Available: `session`, `memory`, `notebook`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cost`, `cron`, `imessage`, `transcribe`, `think`, `health`, `chat`, `location`, `camera`, `image`, `profile`, `agent_creator`. |
 | `Allowed Chats` | list | _(all)_ | Allowlist of agent names this agent can chat with. Omit to allow all. Only relevant when `chat` is in tools. |
 | `Reasoning Effort` | string | `medium` | Reasoning effort level. Only sent if the model supports it. |
@@ -196,6 +198,10 @@ tools:
 Personal assistant.
 
 ## Capabilities
+
+**Model:** anthropic/claude-sonnet-4.6
+
+**Thinking Model:** anthropic/claude-opus-4.7
 
 **Tools:**
   - session

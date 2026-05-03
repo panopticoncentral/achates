@@ -40,7 +40,7 @@ Providers <- Agent <- Server
 
 ### Core Concepts
 
-- **Agent** — Named entity with identity (name, description), prompt, tools, and persistent memory. Defined in `~/.achates/agents/{name}/AGENT.md` (YAML frontmatter + markdown prompt), resolved at startup into `AgentDefinition`. The base model and thinking model are global (under `models:` in `config.yaml`); all agents share them.
+- **Agent** — Named entity with identity (name, description), prompt, tools, and persistent memory. Defined in `~/.achates/agents/{name}/AGENT.md` (YAML frontmatter + markdown prompt), resolved at startup into `AgentDefinition`. Each agent may declare its own base model and thinking model via `**Model:**` and `**Thinking Model:**` capabilities; if absent they fall back to `models.base` / `models.thinking` in `config.yaml`.
 
 ### Provider Layer (`Achates.Providers`)
 - `IModelProvider` — interface with `GetModelsAsync()`, `GetCompletions()` (streaming), and `GenerateImageAsync()` (single image from prompt)
@@ -67,7 +67,7 @@ Providers <- Agent <- Server
 
 ### Server (`Achates.Server`)
 - `AgentLoader` — discovers agents by scanning `~/.achates/agents/*/AGENT.md`. Parses pure markdown: H1 title, description text, `## Capabilities` (`**Key:** value` lines with optional sub-bullet lists → `AgentConfig` fields), `## Prompt` (system prompt). Creates a default agent if none found. `NormalizeId(displayName)` derives a filesystem-safe agent ID from a display name (lowercase, spaces to hyphens, strip non-alphanumeric, collapse hyphens, max 64 chars).
-- `AgentDefinition` — resolved agent with Model (from global `models.base`), ThinkingModel (from global `models.thinking`, populated only when the agent has the `think` tool), SystemPrompt, Tools, CompletionOptions, MemoryPath, CostLedger, CronStore, GraphClient, AvatarData. Avatar is loaded from `avatar.jpg` (or `.png`) in the agent directory; sent as base64 in `agents.list` responses.
+- `AgentDefinition` — resolved agent with Model (per-agent `**Model:**` if set, else `models.base`), ThinkingModel (per-agent `**Thinking Model:**` if set, else `models.thinking`; populated only when the agent has the `think` tool and a model is available from either source), SystemPrompt, Tools, CompletionOptions, MemoryPath, CostLedger, CronStore, GraphClient, AvatarData. Avatar is loaded from `avatar.jpg` (or `.png`) in the agent directory; sent as base64 in `agents.list` responses.
 - `MemoryTool` — layered persistent memory with two scopes. **Shared memory** at `~/.achates/memory.md` stores universal user facts (name, family, preferences) accessible to all agents. **Agent memory** at `~/.achates/agents/{agentName}/memory.md` stores agent-specific notes. `scope` parameter (`shared` or `agent`) controls which file to target; `read` without a scope returns both. Survives session boundaries.
 - `NotebookTool` — a user-configured folder of markdown files for long-term notes, todos, drafts, and ideas. Actions: `list`, `read`, `write` (replaces whole file), `mkdir`. `read`/`write` restricted to `.md`; every path resolved against the root and rejected if it escapes. Root comes from `tools.notebook.root` in config. Singleton; requires `notebook` in agent's tools list.
 - `MailTool` — reads Outlook email via Microsoft Graph API. Actions: list, read, search, folders. `folders` lists mail folders (top-level or children of a parent folder ID), enabling folder navigation. `list` accepts folder by well-known name or ID. Accepts multiple graph accounts; `account` parameter appears when >1 configured.
@@ -79,7 +79,7 @@ Providers <- Agent <- Server
 - `NotesTool` — reads and writes Apple Notes on macOS via AppleScript (`osascript`). Actions: `folders` (list every folder across all accounts as `Account / Folder`), `list` (note titles in a named folder), `read` (fetch a note by exact title; HTML body converted to markdown), `create` (make a new note; markdown body converted to HTML via Markdig). No update/rename actions — `create` errors if a note with that title already exists. Folder is a per-call parameter; tool will also error if the same folder name exists in multiple accounts. Singleton; requires `notes` in agent's tools list and Notes automation permission (prompted on first use).
 - `IMessageTool` — reads local macOS iMessage database (`~/Library/Messages/chat.db`) via SQLite (read-only). Actions: chats (list recent conversations), read (messages from a chat by ID), search (full-text search). Surfaces voice messages with their audio file paths (joins `attachment` table, filters by audio mime types). Resolves phone numbers and emails to contact names via `ContactResolver` (fetches from Microsoft Graph API contacts, cached 30 minutes; requires graph config). Singleton; requires Full Disk Access for the host process.
 - `TranscribeTool` — transcribes audio files to text using an audio-capable model. Parameters: file (absolute path). Reads the file, base64 encodes it, sends to the configured transcription model via `CompletionAudioInputContent`. Singleton; requires `transcribe` in agent's tools list. Model configured via `tools.transcribe.model` (default: `google/gemini-2.5-flash`). Useful for transcribing iMessage voice messages surfaced by `IMessageTool`.
-- `ThinkTool` — escalates to a thinking model for complex reasoning. Parameters: prompt (the problem to reason about). Sends the prompt to the global thinking model and returns the response. Singleton; requires `think` in agent's tools list and `models.thinking` set in `config.yaml`.
+- `ThinkTool` — escalates to a thinking model for complex reasoning. Parameters: prompt (the problem to reason about). Sends the prompt to the agent's resolved thinking model (per-agent `**Thinking Model:**` if set, else `models.thinking`) and returns the response. Singleton; requires `think` in agent's tools list and a thinking model from either source.
 - `SessionReviewTool` — read-only session browser for dreamtime. Actions: list (sessions since last dreamtime), read (full transcript). Injected only during dreamtime execution; not available in normal sessions.
 - `ChatTool` — inter-agent communication. Actions: agents (list available agents with descriptions and tools), chat (start a ping-pong conversation with another agent). Per-session; requires `chat` in agent's tools list. Creates isolated `AgentRuntime` instances for both agents (target gets all its tools except chat to prevent cascade). Supports up to 5 back-and-forth turns; either agent can end early with `<<DONE>>`. `allow_chat` in agent config restricts which agents can be contacted (null/empty = all). Costs recorded to each agent's ledger with channel `chat`. `AgentInfo` registry built at startup provides agent discovery metadata.
 - `LocationTool` — gets the user's current GPS location via the mobile device. Requires `DeviceCommandBridge` and an active mobile connection with `location` capability. Invokes `device.location` with 15s timeout. Singleton; requires `location` in agent's tools list.
@@ -134,8 +134,8 @@ provider:
   api_key: sk-...  # or set OPENROUTER_API_KEY env var
 
 models:
-  base: anthropic/claude-sonnet-4.6        # default model used by all agents
-  thinking: anthropic/claude-opus-4.7      # model used by the think tool (optional)
+  base: anthropic/claude-sonnet-4.6        # default base model — fallback when an agent doesn't override
+  thinking: anthropic/claude-opus-4.7      # default thinking model — fallback for agents with the think tool
 
 tools:
   notebook:
@@ -183,6 +183,10 @@ Personal assistant.
 
 ## Capabilities
 
+**Model:** anthropic/claude-sonnet-4.6
+
+**Thinking Model:** anthropic/claude-opus-4.7
+
 **Tools:**
   - session
   - memory
@@ -202,7 +206,7 @@ Personal assistant.
 You are a personal assistant...
 ```
 
-Capabilities keys: `Provider`, `Tools`, `Allowed Chats`, `Reasoning Effort`, `Temperature`, `Max Tokens`, `Dreamtime`. List values use sub-bullets; scalar values go inline after the key. The base and thinking models are global — set them under `models:` in `config.yaml`, not per-agent.
+Capabilities keys: `Provider`, `Model`, `Thinking Model`, `Tools`, `Allowed Chats`, `Reasoning Effort`, `Temperature`, `Max Tokens`, `Dreamtime`. List values use sub-bullets; scalar values go inline after the key. `Model` and `Thinking Model` are optional — when omitted, the agent uses `models.base` / `models.thinking` from `config.yaml` as a fallback.
 
 If no agents are found, a default agent is scaffolded at `~/.achates/agents/default/AGENT.md`.
 

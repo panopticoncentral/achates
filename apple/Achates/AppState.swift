@@ -29,6 +29,7 @@ final class AppState {
     var serverURL: URL?
     var agents: [Agent] = []
     var currentAgent: Agent?
+    var navigationPath = NavigationPath()
     var isStreaming = false
     var streamingMessageId: String?
     var client: WebSocketClient?
@@ -359,6 +360,13 @@ final class AppState {
             let label = obj["label"]?.stringValue ?? name
             return ToolInfo(name: name, label: label)
         }
+    }
+
+    func loadAvailableModels() async throws -> [ModelInfo] {
+        guard let payload = try await client?.sendRequest(method: "models.list") else {
+            throw AgentEditError.notConnected
+        }
+        return ModelInfo.fromList(payload)
     }
 
     /// Cached cost summaries keyed by "agent:period". Filled by `loadCostSummary`.

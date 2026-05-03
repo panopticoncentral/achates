@@ -13,6 +13,10 @@ struct AgentEditModel: Equatable {
     var newAvatarData: Data?
     var removeAvatar: Bool = false
     var dreamtime: Date?
+    var model: String?
+    var thinkingModel: String?
+    var defaultModel: String?
+    var defaultThinkingModel: String?
 
     static func from(_ payload: [String: JSONValue]) -> AgentEditModel? {
         AgentEditModel(
@@ -25,7 +29,11 @@ struct AgentEditModel: Equatable {
             allowedChats: payload["allowed_chats"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             prompt: payload["prompt"]?.stringValue ?? "",
             hasAvatar: payload["has_avatar"]?.boolValue ?? false,
-            dreamtime: payload["dreamtime"]?.stringValue.flatMap(parseDreamtime)
+            dreamtime: payload["dreamtime"]?.stringValue.flatMap(parseDreamtime),
+            model: nonEmpty(payload["model"]?.stringValue),
+            thinkingModel: nonEmpty(payload["thinking_model"]?.stringValue),
+            defaultModel: nonEmpty(payload["default_model"]?.stringValue),
+            defaultThinkingModel: nonEmpty(payload["default_thinking_model"]?.stringValue)
         )
     }
 
@@ -36,6 +44,10 @@ struct AgentEditModel: Equatable {
             "tools": .array(tools.map { .string($0) }),
             "allowed_chats": .array(allowedChats.map { .string($0) }),
             "prompt": .string(prompt),
+            // Always send model/thinking_model so the server can clear an override
+            // (empty string == revert to global default).
+            "model": .string(model ?? ""),
+            "thinking_model": .string(thinkingModel ?? ""),
         ]
         if let re = reasoningEffort {
             params["reasoning_effort"] = .string(re)
@@ -57,6 +69,11 @@ struct AgentEditModel: Equatable {
         }
         return params
     }
+}
+
+private func nonEmpty(_ s: String?) -> String? {
+    guard let s, !s.isEmpty else { return nil }
+    return s
 }
 
 private let dreamtimeFormatter: DateFormatter = {

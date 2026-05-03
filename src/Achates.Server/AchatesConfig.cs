@@ -47,6 +47,20 @@ public sealed class AgentConfig
 
     public string? Description { get; set; }
     public string? Provider { get; set; }
+
+    /// <summary>
+    /// Per-agent base model id (e.g. "anthropic/claude-sonnet-4.6"). Overrides the
+    /// global <see cref="ModelsConfig.Base"/>. Null/empty falls back to the global.
+    /// </summary>
+    public string? Model { get; set; }
+
+    /// <summary>
+    /// Per-agent thinking model id used by the think tool. Overrides the global
+    /// <see cref="ModelsConfig.Thinking"/>. Null/empty falls back to the global.
+    /// Only consulted when the agent has the <c>think</c> tool.
+    /// </summary>
+    public string? ThinkingModel { get; set; }
+
     public List<string>? Tools { get; set; }
     public CompletionConfig? Completion { get; set; }
 

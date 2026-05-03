@@ -20,8 +20,12 @@ struct SessionListView: View {
                     Button("Start a Conversation") {
                         Task {
                             if let sessionId = await appState.createSession(for: agent) {
+                                #if os(iOS)
+                                appState.navigationPath.append(SessionSelection(agent: agent, sessionId: sessionId))
+                                #else
                                 appState.currentSessionId = sessionId
                                 appState.messages = []
+                                #endif
                             }
                         }
                     }
@@ -49,8 +53,12 @@ struct SessionListView: View {
                     Button {
                         Task {
                             if let sessionId = await appState.createSession(for: agent) {
+                                #if os(iOS)
+                                appState.navigationPath.append(SessionSelection(agent: agent, sessionId: sessionId))
+                                #else
                                 appState.currentSessionId = sessionId
                                 appState.messages = []
+                                #endif
                             }
                         }
                     } label: {

@@ -4,6 +4,7 @@ struct ContentView: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
+        @Bindable var appState = appState
         Group {
             if appState.serverURL == nil {
                 SettingsView()
@@ -11,7 +12,7 @@ struct ContentView: View {
                 #if os(macOS)
                 macOSNavigation
                 #else
-                NavigationStack {
+                NavigationStack(path: $appState.navigationPath) {
                     AgentListView()
                         .navigationDestination(for: Agent.self) { agent in
                             SessionListView(agent: agent)

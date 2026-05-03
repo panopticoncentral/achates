@@ -7,11 +7,16 @@ namespace Achates.Server;
 ///   # Agent Name
 ///   Description paragraph(s).
 ///   ## Capabilities
+///   - **Model:** anthropic/claude-sonnet-4.6
+///   - **Thinking Model:** anthropic/claude-opus-4-7
 ///   - **Tools:** session, memory, todo
 ///   - **Allow chat:** val, claire
 ///   - **Reasoning effort:** medium
 ///   ## Prompt
 ///   System prompt content...
+///
+/// Model and Thinking Model are optional — when absent they fall back to
+/// <c>models.base</c> / <c>models.thinking</c> in <c>~/.achates/config.yaml</c>.
 /// </summary>
 public static class AgentLoader
 {
@@ -57,6 +62,12 @@ public static class AgentLoader
 
         sb.AppendLine("## Capabilities");
         sb.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(config.Model))
+            sb.AppendLine($"**Model:** {config.Model}");
+
+        if (!string.IsNullOrWhiteSpace(config.ThinkingModel))
+            sb.AppendLine($"**Thinking Model:** {config.ThinkingModel}");
 
         if (!string.IsNullOrWhiteSpace(config.Provider))
             sb.AppendLine($"**Provider:** {config.Provider}");
@@ -298,6 +309,12 @@ public static class AgentLoader
         {
             case "provider":
                 config.Provider = value;
+                break;
+            case "model":
+                config.Model = string.IsNullOrWhiteSpace(value) ? null : value;
+                break;
+            case "thinking model":
+                config.ThinkingModel = string.IsNullOrWhiteSpace(value) ? null : value;
                 break;
             case "tools":
                 config.Tools = ResolveList();
