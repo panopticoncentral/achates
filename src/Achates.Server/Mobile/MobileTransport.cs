@@ -78,6 +78,11 @@ public sealed class MobileTransport(
     public Func<string, string, string, CancellationToken, Task>? AgentRenameFunc { get; set; }
 
     /// <summary>
+    /// Delegate to delete an agent. Set by GatewayService after construction.
+    /// </summary>
+    public Func<string, CancellationToken, Task>? AgentDeleteFunc { get; set; }
+
+    /// <summary>
     /// Replace an agent definition and evict any cached runtimes for that agent.
     /// </summary>
     public void UpdateAgent(string name, AgentDefinition definition)
@@ -123,6 +128,26 @@ public sealed class MobileTransport(
         _agents[newName] = definition;
         stateCache.Invalidate(oldName);
         stateCache.Invalidate(newName);
+    }
+
+    /// <summary>
+    /// Drop an agent from the in-memory map and invalidate its cached state.
+    /// Call EvictRuntimes first to abort any running conversations.
+    /// </summary>
+    public void RemoveAgent(string name)
+    {
+        _agents.TryRemove(name, out _);
+        stateCache.Invalidate(name);
+    }
+
+    /// <summary>
+    /// Add a freshly resolved agent definition (used when a new default is scaffolded
+    /// after deleting the last existing agent).
+    /// </summary>
+    public void AddAgent(string name, AgentDefinition definition)
+    {
+        _agents[name] = definition;
+        stateCache.Invalidate(name);
     }
 
     /// <summary>
@@ -286,6 +311,7 @@ public sealed class MobileTransport(
                 "agent.get" => await HandleAgentGetAsync(request),
                 "agent.update" => await HandleAgentUpdateAsync(request, ct),
                 "agent.rename" => await HandleAgentRenameAsync(request, ct),
+                "agent.delete" => await HandleAgentDeleteAsync(request, ct),
                 "agent.generate_avatar" => await HandleAgentGenerateAvatarAsync(request, ct),
                 "tools.list" => HandleToolsList(request),
                 "models.list" => await HandleModelsListAsync(request, ct),
@@ -1014,6 +1040,38 @@ public sealed class MobileTransport(
         }, ct);
 
         var payload = JsonSerializer.SerializeToElement(new { ok = true, id = newId, name = displayName }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleAgentDeleteAsync(RequestFrame request, CancellationToken ct)
+    {
+        if (AgentDeleteFunc is null)
+            return ResponseFrame.Failure(request.Id, "not_available", "Agent delete not available.");
+
+        var agentName = GetStringParam(request.Params, "agent");
+        if (agentName is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' parameter.");
+
+        if (!_agents.ContainsKey(agentName))
+            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
+
+        try
+        {
+            await AgentDeleteFunc(agentName, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete agent '{Name}'", agentName);
+            return ResponseFrame.Failure(request.Id, "error", $"Delete failed: {ex.Message}");
+        }
+
+        await BroadcastEventAsync("agents.changed", new
+        {
+            agent = agentName,
+            reason = "agent_deleted",
+        }, ct);
+
+        var payload = JsonSerializer.SerializeToElement(new { ok = true }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
 

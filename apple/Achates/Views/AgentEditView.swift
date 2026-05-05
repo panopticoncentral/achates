@@ -15,6 +15,8 @@ struct AgentEditView: View {
     @State private var showAvatarSheet = false
     @State private var availableTools: [ToolInfo] = []
     @State private var showToolsEditor = false
+    @State private var showDeleteConfirm = false
+    @State private var isDeleting = false
 
     var body: some View {
         Group {
@@ -57,6 +59,14 @@ struct AgentEditView: View {
             Button("OK") {}
         } message: {
             Text(errorMessage ?? "Unknown error")
+        }
+        .alert("Delete Agent", isPresented: $showDeleteConfirm) {
+            Button("Delete", role: .destructive) {
+                Task { await deleteAgent() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Delete \(agent.displayName)? All conversations, memory, and settings for this agent will be permanently removed. This cannot be undone.")
         }
         .sheet(isPresented: $showAvatarSheet) {
             if config != nil {
@@ -211,6 +221,23 @@ struct AgentEditView: View {
                         }
                     }
                 }
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isDeleting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("Delete Agent")
+                        }
+                        Spacer()
+                    }
+                }
+                .disabled(isSaving || isDeleting)
             }
         }
         #if os(iOS)
@@ -437,6 +464,18 @@ struct AgentEditView: View {
             showError = true
         }
         isSaving = false
+    }
+
+    private func deleteAgent() async {
+        isDeleting = true
+        defer { isDeleting = false }
+        do {
+            try await appState.deleteAgent(agent)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+            showError = true
+        }
     }
 
 }

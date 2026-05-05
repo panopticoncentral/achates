@@ -328,6 +328,22 @@ final class AppState {
         await refreshAgents()
     }
 
+    func deleteAgent(_ agent: Agent) async throws {
+        guard let client else { throw AgentEditError.notConnected }
+        _ = try await client.sendRequest(method: "agent.delete", params: [
+            "agent": .string(agent.id),
+        ])
+        // Server broadcasts agents.changed, which triggers refreshAgents() in WebSocketClient.
+        // Clear the current selection locally so the UI doesn't keep pointing at the deleted agent
+        // before the broadcast lands.
+        if currentAgent?.id == agent.id {
+            currentAgent = nil
+            currentSessionId = nil
+            sessions = []
+            messages = []
+        }
+    }
+
     func generateAvatar(_ agent: Agent, prompt: String, referenceImage: Data? = nil) async throws -> Data {
         var params: [String: JSONValue] = [
             "agent": .string(agent.id),
@@ -466,6 +482,9 @@ final class AppState {
         if let current = currentAgent,
            let updated = agents.first(where: { $0.id == current.id }) {
             currentAgent = updated
+        } else {
+            // currentAgent was deleted (or never set); fall back to the first available agent.
+            currentAgent = agents.first
         }
     }
 

@@ -115,6 +115,7 @@ public sealed class GatewayService(
         _mobileTransport = new MobileTransport(agents, _mobileSessionStore, _agentStateCache, loggerFactory);
         _mobileTransport.AgentReloadFunc = ReloadAgentAsync;
         _mobileTransport.AgentRenameFunc = RenameAgentAsync;
+        _mobileTransport.AgentDeleteFunc = DeleteAgentAsync;
         _mobileTransport.ModelsListFunc = ct => GetAllModelsAsync(ct: ct);
         _mobileTransport.GenerateAvatarFunc = GenerateAvatarAsync;
         _mobileTransport.DefaultModelId = config.Models?.Base;
@@ -284,6 +285,81 @@ public sealed class GatewayService(
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Failed to reload agent '{Name}' after rename", name);
+            }
+        }
+    }
+
+    public async Task DeleteAgentAsync(string name, CancellationToken ct)
+    {
+        var achatesHome = _achatesHome!;
+        var agentsDir = Path.Combine(achatesHome, "agents");
+        var agentDir = Path.Combine(agentsDir, name);
+
+        if (!_agents.ContainsKey(name))
+            throw new InvalidOperationException($"Agent '{name}' not found.");
+
+        // 1. Abort active runtimes before touching disk
+        _mobileTransport?.EvictRuntimes(name);
+
+        // 2. Strip the deleted agent from any other agent's allowed_chats
+        var updatedAgents = new List<string>();
+        foreach (var dir in Directory.GetDirectories(agentsDir))
+        {
+            var otherName = Path.GetFileName(dir);
+            if (otherName == name) continue;
+
+            var otherFile = Path.Combine(dir, "AGENT.md");
+            if (!File.Exists(otherFile)) continue;
+
+            var otherContent = await File.ReadAllTextAsync(otherFile, ct);
+            var otherConfig = AgentLoader.Parse(otherContent);
+            if (otherConfig?.AllowChat is null || !otherConfig.AllowChat.Contains(name))
+                continue;
+
+            otherConfig.AllowChat = otherConfig.AllowChat.Where(c => c != name).ToList();
+
+            var otherLines = otherContent.Split('\n');
+            var otherDisplayName = otherLines.FirstOrDefault(l => l.StartsWith("# "))?[2..].Trim()
+                ?? char.ToUpper(otherName[0]) + otherName[1..];
+
+            var markdown = AgentLoader.Serialize(otherDisplayName, otherConfig);
+            await File.WriteAllTextAsync(otherFile, markdown, ct);
+            updatedAgents.Add(otherName);
+        }
+
+        // 3. Drop from in-memory state
+        _agents.Remove(name);
+        _mobileTransport?.RemoveAgent(name);
+        _cronService?.RemoveAgent(name);
+
+        // 4. Wipe the agent directory (sessions, memory, costs, cron, avatar, images, etc.)
+        if (Directory.Exists(agentDir))
+            Directory.Delete(agentDir, recursive: true);
+
+        logger.LogInformation("Agent '{Name}' deleted", name);
+
+        // 5. Reload any agents whose allowed_chats changed
+        foreach (var otherName in updatedAgents)
+        {
+            try { await ReloadAgentAsync(otherName, ct); }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to reload agent '{Name}' after delete", otherName);
+            }
+        }
+
+        // 6. If no agents remain, scaffold a default so the system is usable
+        if (_agents.Count == 0)
+        {
+            AgentLoader.CreateDefault(achatesHome);
+            var newConfigs = AgentLoader.LoadAgents(achatesHome);
+            foreach (var (newName, newConfig) in newConfigs)
+            {
+                var newDef = await ResolveAgentAsync(newName, newConfig, ct);
+                _agents[newName] = newDef;
+                _mobileTransport?.AddAgent(newName, newDef);
+                await ReconcileDreamtimeAsync(newName, newDef, logger);
+                logger.LogInformation("Scaffolded default agent '{Name}' after deleting last agent", newName);
             }
         }
     }

@@ -100,6 +100,16 @@ public sealed class CronService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Drop an agent from the cron service. The agent's cron.json is deleted by the caller
+    /// as part of wiping the agent directory.
+    /// </summary>
+    public void RemoveAgent(string name)
+    {
+        if (_agents.Remove(name))
+            Poke();
+    }
+
+    /// <summary>
     /// Run a specific job immediately. Returns the result text.
     /// </summary>
     public async Task<string?> RunJobAsync(string agentName, string jobId, CancellationToken ct = default)
