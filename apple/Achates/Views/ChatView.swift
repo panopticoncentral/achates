@@ -88,11 +88,17 @@ struct ChatView: View {
                         .padding(.vertical, 8)
                     }
                     .onChange(of: appState.messages.count) { _, _ in
-                        // New message added — always scroll to bottom
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        // New message added — always scroll to bottom.
+                        // Defer one tick so the LazyVStack lays out the new
+                        // bubbles before the animation captures its target.
+                        guard let lastId = appState.messages.last?.id else { return }
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(16))
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo(lastId, anchor: .bottom)
+                            }
+                            isAtBottom = true
                         }
-                        isAtBottom = true
                     }
                     .onChange(of: streamingTextLength) { _, _ in
                         // Streaming delta — only scroll if user was already at bottom
