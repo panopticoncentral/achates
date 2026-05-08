@@ -6,21 +6,48 @@ using static Achates.Providers.Util.JsonSchemaHelpers;
 namespace Achates.Server.Tools;
 
 /// <summary>
-/// Generates images using a configured image-capable model. Saves to the agent's images directory.
+/// Generates images using one of a configured set of image-capable models.
+/// Saves to the agent's images directory.
 /// </summary>
-internal sealed class ImageTool(
-    string agentName,
-    string agentDir,
-    string modelId,
-    Func<string, string, IReadOnlyList<byte[]>?, CancellationToken, Task<byte[]?>> generateFunc) : AgentTool
+internal sealed class ImageTool : AgentTool
 {
-    private static readonly JsonElement _schema = ObjectSchema(
-        new Dictionary<string, JsonElement>
+    private readonly string _agentName;
+    private readonly string _agentDir;
+    private readonly IReadOnlyList<string> _modelIds;
+    private readonly Func<string, string, IReadOnlyList<byte[]>?, CancellationToken, Task<byte[]?>> _generateFunc;
+    private readonly JsonElement _schema;
+
+    public ImageTool(
+        string agentName,
+        string agentDir,
+        IReadOnlyList<string> modelIds,
+        Func<string, string, IReadOnlyList<byte[]>?, CancellationToken, Task<byte[]?>> generateFunc)
+    {
+        if (modelIds.Count == 0)
+            throw new ArgumentException("At least one model id is required.", nameof(modelIds));
+
+        _agentName = agentName;
+        _agentDir = agentDir;
+        _modelIds = modelIds;
+        _generateFunc = generateFunc;
+
+        var properties = new Dictionary<string, JsonElement>
         {
             ["prompt"] = StringSchema("The image generation prompt. Include style, composition, dimensions, and any other instructions."),
             ["images"] = ArraySchema(StringSchema(), "Base64-encoded reference images for refinement, style transfer, or composition guidance."),
-        },
-        required: ["prompt"]);
+        };
+        var required = new List<string> { "prompt" };
+
+        if (modelIds.Count > 1)
+        {
+            properties["model"] = StringEnum(
+                modelIds,
+                $"Which model to use for this generation. Defaults to {modelIds[0]} if omitted.",
+                defaultValue: modelIds[0]);
+        }
+
+        _schema = ObjectSchema(properties, required: required);
+    }
 
     public override string Name => "image";
     public override string Description => "Generate an image from a text prompt, optionally guided by reference images.";
@@ -36,6 +63,18 @@ internal sealed class ImageTool(
         var prompt = GetString(arguments, "prompt");
         if (string.IsNullOrWhiteSpace(prompt))
             return TextResult("prompt is required.");
+
+        var modelId = _modelIds[0];
+        if (_modelIds.Count > 1)
+        {
+            var requested = GetString(arguments, "model");
+            if (!string.IsNullOrWhiteSpace(requested))
+            {
+                if (!_modelIds.Contains(requested))
+                    return TextResult($"Unknown model '{requested}'. Available: {string.Join(", ", _modelIds)}.");
+                modelId = requested;
+            }
+        }
 
         List<byte[]>? referenceImages = null;
         if (arguments.TryGetValue("images", out var imagesVal) && imagesVal is JsonElement { ValueKind: JsonValueKind.Array } imagesArray)
@@ -55,7 +94,7 @@ internal sealed class ImageTool(
         byte[]? imageBytes;
         try
         {
-            imageBytes = await generateFunc(modelId, prompt, referenceImages, cancellationToken);
+            imageBytes = await _generateFunc(modelId, prompt, referenceImages, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -65,13 +104,13 @@ internal sealed class ImageTool(
         if (imageBytes is null)
             return TextResult("The model did not return an image.");
 
-        var imagesDir = Path.Combine(agentDir, "images");
+        var imagesDir = Path.Combine(_agentDir, "images");
         Directory.CreateDirectory(imagesDir);
         var fileName = $"{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..8]}.jpg";
         var filePath = Path.Combine(imagesDir, fileName);
         await File.WriteAllBytesAsync(filePath, imageBytes, cancellationToken);
 
-        var imageUrl = $"/agents/{Uri.EscapeDataString(agentName)}/images/{Uri.EscapeDataString(fileName)}";
+        var imageUrl = $"/agents/{Uri.EscapeDataString(_agentName)}/images/{Uri.EscapeDataString(fileName)}";
 
         return new AgentToolResult
         {

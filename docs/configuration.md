@@ -119,7 +119,13 @@ Withings Health API for the `health` tool. OAuth 2.0 authorization code flow —
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `model` | string | _(none)_ | Image-capable model used by the `image` tool. Required when an agent enables `image`; the tool is skipped on startup if unset. |
+| `models` | list of strings | _(none)_ | Image-capable models the `image` tool can choose from. When more than one is configured, the tool exposes a required `model` enum parameter so the agent picks per call. The first entry is the default. |
+| `model` | string | _(none)_ | Legacy single-model form. Equivalent to a one-element `models` list. Ignored when `models` is non-empty. |
+| `api_key` | string | _(falls back to `provider.api_key`)_ | Optional override key used for image generation only (the `image` tool and avatar generation). Lets you route image traffic through a separate key — useful when the main key has a ZDR / privacy restriction that excludes image-only providers like Black Forest Labs. |
+
+At least one of `models` or `model` is required when an agent enables the `image` tool; otherwise the tool is skipped on startup.
+
+**Discovering image models on OpenRouter.** The `/api/v1/models` catalog endpoint only returns chat-completions-style image models (Google's Nano Banana family, OpenAI's GPT-5-Image family). The per-image-priced models — Black Forest Labs Flux, Recraft, Sourceful Riverflow, ByteDance Seedream, etc. — are not listed there but are usable via the same chat-completions endpoint with `modalities: ["image"]`. Browse them at [openrouter.ai/models?modality=text->image](https://openrouter.ai/models?modality=text-%3Eimage). Verified slugs include `black-forest-labs/flux.2-{pro,max,flex,klein-4b}`, `recraft/recraft-v{3,4,4-pro}`, `sourceful/riverflow-v2-{pro,fast,max-preview,standard-preview,fast-preview}`, `bytedance-seed/seedream-4.5`. Note: image-only providers are typically not ZDR-eligible — use `tools.image.api_key` to route through a non-ZDR key when the main provider key has ZDR enabled.
 
 ### `cron`
 

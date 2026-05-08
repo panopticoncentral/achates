@@ -84,7 +84,7 @@ Providers <- Agent <- Server
 - `ChatTool` — inter-agent communication. Actions: agents (list available agents with descriptions and tools), chat (start a ping-pong conversation with another agent). Per-session; requires `chat` in agent's tools list. Creates isolated `AgentRuntime` instances for both agents (target gets all its tools except chat to prevent cascade). Supports up to 5 back-and-forth turns; either agent can end early with `<<DONE>>`. `allow_chat` in agent config restricts which agents can be contacted (null/empty = all). Costs recorded to each agent's ledger with channel `chat`. `AgentInfo` registry built at startup provides agent discovery metadata.
 - `LocationTool` — gets the user's current GPS location via the mobile device. Requires `DeviceCommandBridge` and an active mobile connection with `location` capability. Invokes `device.location` with 15s timeout. Singleton; requires `location` in agent's tools list.
 - `CameraTool` — captures a photo from the user's mobile device camera. Parameters: facing (back/front). Returns `CompletionImageContent` with base64 JPEG. Requires `DeviceCommandBridge` and an active mobile connection with `camera` capability. Singleton; requires `camera` in agent's tools list.
-- `ImageTool` — generates an image using a single configured image-capable model. Params: prompt (required), images (optional base64 references). Saves JPEG to `~/.achates/agents/{agentName}/images/{timestamp}-{id}.jpg`. Returns only text to the model (file path); image data is passed via `Details` (`ImageDetails` record) for live UI delivery and `ImageUrl` for session persistence. Images served via `GET /agents/{name}/images/{file}` endpoint. Per-agent; requires `image` in agent's tools list and `tools.image.model` in config (no default — tool is skipped if unset).
+- `ImageTool` — generates an image using one of a configured set of image-capable models. Params: prompt (required), images (optional base64 references), model (required enum when more than one model is configured; defaults to the first entry when omitted). Saves JPEG to `~/.achates/agents/{agentName}/images/{timestamp}-{id}.jpg`. Returns only text to the model (file path); image data is passed via `Details` (`ImageDetails` record) for live UI delivery and `ImageUrl` for session persistence. Images served via `GET /agents/{name}/images/{file}` endpoint. Per-agent; requires `image` in agent's tools list and `tools.image.models` (list) in config — the legacy `tools.image.model` (string) is still accepted as a one-element list. Tool is skipped if neither is set. Image generation (this tool and avatar) uses `tools.image.api_key` when set, otherwise falls back to `provider.api_key` — handy for routing image traffic through a non-ZDR key.
 - `ProfileTool` — allows the agent to read and update its own profile. Actions: get (returns current description, prompt, and avatar), update (changes description, prompt, and/or avatar — only provide fields to change). Avatar is compressed to 512x512 JPEG. Writes changes to AGENT.md and triggers agent reload. Per-agent; requires `profile` in agent's tools list.
 - `AgentCreatorTool` — creates new agents at runtime. Parameters: name (display name, required), description (required), prompt (required), tools (optional list). Writes AGENT.md via `AgentLoader.Serialize`, creates agent directory, triggers reload so the agent is immediately live. New agents inherit the global model from `config.yaml`. Per-agent; requires `agent_creator` in agent's tools list.
 - `HealthTool` — queries health data from Withings API. Actions: weight (body composition), blood_pressure, sleep, activity, workouts (discrete sessions: run, cycle, swim, etc.), authorize. Singleton; requires `withings` config with client_id and client_secret. OAuth 2.0 authorization code flow with browser redirect to `/withings/callback`.
@@ -159,7 +159,27 @@ tools:
   avatar:
     model: google/gemini-2.5-flash-image  # image-capable model for avatar generation (default)
   image:
-    model: google/gemini-2.5-flash-image  # image-capable model for the image tool (no default)
+    # List of image-capable models the agent can choose from (no default).
+    # First entry is the default when the model param is omitted.
+    # The legacy `model: <id>` form is still accepted as a one-element list.
+    #
+    # NOTE on discovery: OpenRouter's /api/v1/models endpoint only returns
+    # the chat-completions-style image models (Google Nano Banana line, OpenAI
+    # GPT-5-Image line). The per-image-priced models (BFL Flux, Recraft,
+    # Sourceful Riverflow, ByteDance Seedream, etc.) do *not* appear in the
+    # catalog API and must be discovered from openrouter.ai/models?modality=text-%3Eimage.
+    # All of them call through the same chat-completions endpoint with
+    # `modalities: ["image"]` and return base64 data URLs in `message.images`.
+    models:
+      - google/gemini-3.1-flash-image-preview   # fast default, cheap, strong general quality
+      - black-forest-labs/flux.2-pro            # photoreal, most permissive content policy
+      - recraft/recraft-v4                      # typography / signage / infographics
+      - openai/gpt-5-image                      # reasoning-driven compositions
+    # Optional: separate key for image generation only. Falls back to
+    # provider.api_key when unset. Useful for routing image traffic through
+    # a non-ZDR key (image-only providers like BFL aren't ZDR-eligible) while
+    # keeping chat traffic privacy-restricted.
+    # api_key: sk-or-...
   withings:
     client_id: <withings-client-id>
     client_secret: <withings-client-secret>  # or set WITHINGS_CLIENT_SECRET env var

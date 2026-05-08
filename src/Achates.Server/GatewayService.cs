@@ -193,7 +193,12 @@ public sealed class GatewayService(
         var provider = ModelProviders.Create(providerId)
             ?? throw new InvalidOperationException($"Unknown provider: {providerId}");
 
-        var apiKey = config.Provider?.ApiKey
+        // Prefer the image-specific override key if set, otherwise fall back to
+        // the main provider key (or its env var). This lets users route image
+        // traffic through a separate, non-ZDR key.
+        var imageKey = config.Tools?.Image?.ApiKey;
+        var apiKey = (string.IsNullOrWhiteSpace(imageKey) ? null : imageKey)
+            ?? config.Provider?.ApiKey
             ?? Environment.GetEnvironmentVariable(provider.EnvironmentKey)
             ?? throw new InvalidOperationException("API key not found.");
 
@@ -630,10 +635,10 @@ public sealed class GatewayService(
                     tools.Add(new CameraTool(_deviceBridge));
                     break;
                 case "image":
-                    var imageModelId = toolsConfig?.Image?.Model;
-                    if (string.IsNullOrWhiteSpace(imageModelId))
-                    { logger.LogWarning("Agent '{Agent}': image tool skipped — no image model configured (set tools.image.model)", agentName); break; }
-                    tools.Add(new ImageTool(agentName, agentDir, imageModelId, GenerateImageAsync));
+                    var imageModelIds = toolsConfig?.Image?.ResolveModels() ?? [];
+                    if (imageModelIds.Count == 0)
+                    { logger.LogWarning("Agent '{Agent}': image tool skipped — no image model configured (set tools.image.models)", agentName); break; }
+                    tools.Add(new ImageTool(agentName, agentDir, imageModelIds, GenerateImageAsync));
                     break;
                 case "profile":
                     tools.Add(new ProfileTool(agentDir, ct => ReloadAgentAsync(agentName, ct)));

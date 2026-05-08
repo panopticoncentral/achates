@@ -102,7 +102,39 @@ public sealed class AvatarConfig
 
 public sealed class ImageConfig
 {
+    /// <summary>
+    /// Single image model id. Legacy single-model form.
+    /// Use <see cref="Models"/> to expose a choice to the agent.
+    /// </summary>
     public string? Model { get; set; }
+
+    /// <summary>
+    /// List of image model ids the agent can choose from. When set (and
+    /// non-empty), takes precedence over <see cref="Model"/>.
+    /// </summary>
+    public List<string>? Models { get; set; }
+
+    /// <summary>
+    /// Optional override API key used for image generation (both the
+    /// <c>image</c> tool and avatar generation). Falls back to
+    /// <see cref="ProviderConfig.ApiKey"/> when null/empty. Useful for routing
+    /// image traffic through a separate (non-ZDR) key while keeping chat
+    /// traffic on a privacy-restricted key.
+    /// </summary>
+    public string? ApiKey { get; set; }
+
+    /// <summary>
+    /// Effective list of model ids: <see cref="Models"/> if non-empty,
+    /// otherwise a single-element list from <see cref="Model"/>, otherwise empty.
+    /// </summary>
+    public IReadOnlyList<string> ResolveModels()
+    {
+        if (Models is { Count: > 0 })
+            return [.. Models.Where(m => !string.IsNullOrWhiteSpace(m))];
+        if (!string.IsNullOrWhiteSpace(Model))
+            return [Model];
+        return [];
+    }
 }
 
 public sealed class TranscribeConfig
