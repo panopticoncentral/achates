@@ -322,6 +322,7 @@ public sealed class MobileTransport(
                 "jobs.list" => await HandleJobsListAsync(request, ct),
                 "jobs.update" => await HandleJobsUpdateAsync(request, ct),
                 "jobs.delete" => await HandleJobsDeleteAsync(request, ct),
+                "jobs.run" => await HandleJobsRunAsync(request, ct),
                 _ => ResponseFrame.Failure(request.Id, "unknown_method", $"Unknown method: {request.Method}"),
             };
 
@@ -1356,6 +1357,39 @@ public sealed class MobileTransport(
         return ResponseFrame.Success(request.Id, payload);
     }
 
+    private async Task<ResponseFrame> HandleJobsRunAsync(RequestFrame request, CancellationToken ct)
+    {
+        var agentName = GetStringParam(request.Params, "agent");
+        var jobId = GetStringParam(request.Params, "id");
+        if (agentName is null || jobId is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'id' parameter.");
+
+        if (!_agents.TryGetValue(agentName, out var agentDef) || agentDef.CronStore is not { } store)
+            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' has no cron store.");
+
+        if (CronService is not { } cron)
+            return ResponseFrame.Failure(request.Id, "unavailable", "Cron service is not available.");
+
+        var existing = await store.LoadAsync(ct);
+        if (!existing.Any(j => j.Id == jobId))
+            return ResponseFrame.Failure(request.Id, "not_found", $"Job '{jobId}' not found.");
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await cron.RunJobAsync(agentName, jobId, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Manual run of job {JobId} for agent {Agent} failed", jobId, agentName);
+            }
+        }, CancellationToken.None);
+
+        var payload = JsonSerializer.SerializeToElement(new { ok = true }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
     private static object ScheduleToDto(CronSchedule schedule) => schedule switch
     {
         CronSchedule.At at => new { type = "at", time = at.Time.ToUnixTimeMilliseconds() },
@@ -1681,7 +1715,7 @@ public sealed class MobileTransport(
         return new AgentRuntime(new AgentOptions
         {
             Model = agentDef.Model,
-            SystemPrompt = agentDef.SystemPrompt,
+            SystemPrompt = SystemPrompt.CurrentDateTimeBlock() + agentDef.SystemPrompt,
             Tools = tools,
             CompletionOptions = agentDef.CompletionOptions,
             Messages = messages,

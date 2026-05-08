@@ -452,6 +452,13 @@ final class AppState {
         ])
     }
 
+    func runJob(agent: String, jobId: String) async throws {
+        _ = try await client?.sendRequest(method: "jobs.run", params: [
+            "agent": .string(agent),
+            "id": .string(jobId),
+        ])
+    }
+
     // MARK: - Event handlers (called from WebSocketClient)
 
     func handleMemoryUpdated(scope: String) {

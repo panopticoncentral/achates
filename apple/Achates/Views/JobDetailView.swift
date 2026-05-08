@@ -56,6 +56,17 @@ struct JobDetailView: View {
             }
 
             Section {
+                Button {
+                    Task { await runNow() }
+                } label: {
+                    if isBusy {
+                        ProgressView()
+                    } else {
+                        Text("Run Now")
+                    }
+                }
+                .disabled(isBusy)
+
                 Toggle("Enabled", isOn: Binding(
                     get: { liveJob.enabled },
                     set: { toggleEnabled($0) }
@@ -114,6 +125,17 @@ struct JobDetailView: View {
         f.dateStyle = .short
         f.timeStyle = .short
         return f.string(from: date)
+    }
+
+    private func runNow() async {
+        isBusy = true
+        do {
+            try await appState.runJob(agent: liveJob.agent, jobId: liveJob.jobId)
+        } catch {
+            errorMessage = error.localizedDescription
+            showError = true
+        }
+        isBusy = false
     }
 
     private func toggleEnabled(_ newValue: Bool) {
