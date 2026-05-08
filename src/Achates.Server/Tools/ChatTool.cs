@@ -120,11 +120,13 @@ internal sealed class ChatTool(
             + $"end your response with {DoneSignal} on its own line. "
             + $"Do not use {DoneSignal} if you still have questions or need more information.";
 
-        // Create isolated runtimes for both agents
+        // Create isolated runtimes for both agents.
+        // Date block is computed fresh; cached agentDef.SystemPrompt is date-free.
+        var dateBlock = SystemPrompt.CurrentDateTimeBlock();
         var selfRuntime = new AgentRuntime(new AgentOptions
         {
             Model = selfInfo.AgentDef.Model,
-            SystemPrompt = selfInfo.AgentDef.SystemPrompt + chatPreamble
+            SystemPrompt = dateBlock + selfInfo.AgentDef.SystemPrompt + chatPreamble
                 + $"\nYou are chatting with agent '{targetName}' ({targetInfo.Description ?? "no description"}).",
             Tools = selfTools,
             CompletionOptions = selfInfo.AgentDef.CompletionOptions,
@@ -133,7 +135,7 @@ internal sealed class ChatTool(
         var targetRuntime = new AgentRuntime(new AgentOptions
         {
             Model = targetInfo.AgentDef.Model,
-            SystemPrompt = targetInfo.AgentDef.SystemPrompt + chatPreamble
+            SystemPrompt = dateBlock + targetInfo.AgentDef.SystemPrompt + chatPreamble
                 + $"\nYou are being consulted by agent '{selfAgentName}' ({selfInfo.Description ?? "no description"}).",
             Tools = targetTools,
             CompletionOptions = targetInfo.AgentDef.CompletionOptions,

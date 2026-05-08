@@ -45,16 +45,6 @@ public static class SystemPrompt
 
         lines.Add("");
 
-        // Inject timezone and date for time-aware reasoning without a tool call.
-        // Only timezone is included (not clock time) to keep prompt caching stable.
-        var tz = TimeZoneInfo.Local;
-        var today = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
-        lines.Add("## Current Date & Time");
-        lines.Add($"Date: {today:dddd, MMMM d, yyyy}");
-        lines.Add($"Timezone: {tz.Id}");
-        lines.Add("If you need the exact current time, use the session tool.");
-        lines.Add("");
-
         if (tools is { Count: > 0 })
         {
             lines.Add("## Tools");
@@ -210,5 +200,24 @@ public static class SystemPrompt
         lines.Add("Use markdown formatting when it improves readability.");
 
         return string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// Date/timezone block computed against the current wall clock. Prepended to
+    /// <see cref="AgentDefinition.SystemPrompt"/> at AgentRuntime construction so
+    /// each turn sees today's date — the cached prompt itself is date-free.
+    /// Clock time is intentionally omitted; agents that need it use the session tool.
+    /// </summary>
+    public static string CurrentDateTimeBlock()
+    {
+        var tz = TimeZoneInfo.Local;
+        var today = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
+        return $"""
+            ## Current Date & Time
+            Date: {today:dddd, MMMM d, yyyy}
+            Timezone: {tz.Id}
+            If you need the exact current time, use the session tool.
+
+            """;
     }
 }

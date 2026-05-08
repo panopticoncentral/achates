@@ -281,8 +281,9 @@ public sealed class CronService : IAsyncDisposable
         _logger.LogInformation("Executing cron job '{Name}' ({Id}) for agent '{Agent}'",
             job.Name, job.Id, agentName);
 
-        // Build tool list and system prompt — dreamtime jobs get special treatment
-        var systemPrompt = agentDef.SystemPrompt;
+        // Build tool list and system prompt — dreamtime jobs get special treatment.
+        // The date block is computed fresh per run; agentDef.SystemPrompt is date-free.
+        var systemPrompt = SystemPrompt.CurrentDateTimeBlock() + agentDef.SystemPrompt;
         var tools = BuildJobTools(agentDef);
 
         if (job.Kind == CronJobKind.Dreamtime)
@@ -299,7 +300,7 @@ public sealed class CronService : IAsyncDisposable
                 return ("Skipped: no sessions to review since last dreamtime.", true);
             }
 
-            systemPrompt = agentDef.SystemPrompt + DreamtimeInstructions;
+            systemPrompt = SystemPrompt.CurrentDateTimeBlock() + agentDef.SystemPrompt + DreamtimeInstructions;
             tools = BuildDreamtimeTools(agentName, agentDef, job);
         }
 
