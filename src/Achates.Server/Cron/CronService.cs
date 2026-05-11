@@ -2,6 +2,7 @@ using Achates.Agent;
 using Achates.Agent.Events;
 using Achates.Agent.Messages;
 using Achates.Agent.Tools;
+using Achates.Providers.Completions;
 using Achates.Providers.Completions.Events;
 using Achates.Server.Mobile;
 using Achates.Server.Tools;
@@ -121,7 +122,7 @@ public sealed class CronService : IAsyncDisposable
         var job = jobs.FirstOrDefault(j => j.Id == jobId);
         if (job is null) return null;
 
-        var (result, _) = await ExecuteJobAsync(agentName, entry.Agent, entry.Store, job, ct);
+        var (result, _, _) = await ExecuteJobAsync(agentName, entry.Agent, entry.Store, job, ct);
         return result;
     }
 
@@ -164,11 +165,18 @@ public sealed class CronService : IAsyncDisposable
 
                     try
                     {
-                        var (result, skipped) = await ExecuteJobAsync(agentName, agent, store, job, ct);
+                        var (_, skipped, runError) = await ExecuteJobAsync(agentName, agent, store, job, ct);
                         if (skipped)
                         {
                             await UpdateJobStateAfterRunAsync(store, job, "skipped", null, ct, advanceLastRunAt: false);
                             _logger.LogInformation("Cron job '{Name}' ({Id}) skipped", job.Name, job.Id);
+                        }
+                        else if (runError is not null)
+                        {
+                            // The agent ran but a completion ended in error (e.g. network drop mid-stream).
+                            // Don't advance LastRunAt so dreamtime can re-review the same sessions next run.
+                            await UpdateJobStateAfterRunAsync(store, job, "error", runError, ct, advanceLastRunAt: false);
+                            _logger.LogWarning("Cron job '{Name}' ({Id}) ended with error: {Error}", job.Name, job.Id, runError);
                         }
                         else
                         {
@@ -178,7 +186,7 @@ public sealed class CronService : IAsyncDisposable
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        await UpdateJobStateAfterRunAsync(store, job, "error", ex.Message, ct);
+                        await UpdateJobStateAfterRunAsync(store, job, "error", ex.Message, ct, advanceLastRunAt: false);
                         _logger.LogError(ex, "Cron job '{Name}' ({Id}) failed", job.Name, job.Id);
                     }
                 }
@@ -275,7 +283,7 @@ public sealed class CronService : IAsyncDisposable
         return due;
     }
 
-    private async Task<(string? Result, bool Skipped)> ExecuteJobAsync(
+    private async Task<(string? Result, bool Skipped, string? Error)> ExecuteJobAsync(
         string agentName, AgentDefinition agentDef, CronStore store, CronJob job, CancellationToken ct)
     {
         _logger.LogInformation("Executing cron job '{Name}' ({Id}) for agent '{Agent}'",
@@ -297,7 +305,7 @@ public sealed class CronService : IAsyncDisposable
                 _logger.LogInformation(
                     "Skipping dreamtime for agent '{Agent}' — no new sessions since {Since}",
                     agentName, since?.ToString("o") ?? "ever");
-                return ("Skipped: no sessions to review since last dreamtime.", true);
+                return ("Skipped: no sessions to review since last dreamtime.", true, null);
             }
 
             systemPrompt = SystemPrompt.CurrentDateTimeBlock() + agentDef.SystemPrompt + DreamtimeInstructions;
@@ -320,6 +328,7 @@ public sealed class CronService : IAsyncDisposable
 
         var responseText = "";
         var turnCount = 0;
+        string? streamError = null;
         using var turnCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
         try
@@ -334,6 +343,11 @@ public sealed class CronService : IAsyncDisposable
 
                     case MessageEndEvent { Message: Agent.Messages.AssistantMessage assistantMsg }:
                         turnCount++;
+
+                        if (assistantMsg.Error is { Length: > 0 } err)
+                            streamError = err;
+                        else if (assistantMsg.StopReason == CompletionStopReason.Error)
+                            streamError = $"Completion ended with stop reason '{assistantMsg.StopReason}'.";
 
                         // Record cost
                         if (agentDef.CostLedger is { } costLedger)
@@ -388,7 +402,7 @@ public sealed class CronService : IAsyncDisposable
             await DeliverAsync(job, agentName, session, ct);
         }
 
-        return (responseText, false);
+        return (responseText, false, streamError);
     }
 
     private static IReadOnlyList<AgentTool> BuildJobTools(AgentDefinition agentDef)

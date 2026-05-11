@@ -753,10 +753,11 @@ public sealed class MobileTransport(
         if (!_runtimes.TryGetValue(runtimeKey, out var runtime))
         {
             var existing = await sessionStore.LoadAsync(agentName, sessionId, ct);
+            var extraTools = await BuildResumeExtraToolsAsync(agentName, agentDef, existing, ct);
             if (existing is not null && existing.Messages.Count > 0)
-                runtime = CreateRuntime(agentDef, agentName, existing.Messages);
+                runtime = CreateRuntime(agentDef, agentName, existing.Messages, extraTools);
             else
-                runtime = CreateRuntime(agentDef, agentName);
+                runtime = CreateRuntime(agentDef, agentName, extraTools: extraTools);
             _runtimes[runtimeKey] = runtime;
         }
 
@@ -1549,13 +1550,16 @@ public sealed class MobileTransport(
                         break;
 
                     case AgentEndEvent:
-                        // Preserve Created timestamp and title if session already exists on disk
+                        // Preserve Created timestamp, title, and JobId if session already exists on disk.
+                        // JobId matters for cron-originated sessions (e.g. dreamtime) so they remain
+                        // traceable and the reaper's per-job retention still applies after the user replies.
                         var existing = await sessionStore.LoadAsync(agentName, sessionId, ct);
                         var session = new MobileSession
                         {
                             Id = sessionId,
                             Title = existing?.Title,
                             Created = existing?.Created ?? DateTimeOffset.UtcNow,
+                            JobId = existing?.JobId,
                             Messages = [.. runtime.Messages],
                         };
                         await sessionStore.SaveAsync(agentName, session, ct);
@@ -1702,7 +1706,8 @@ public sealed class MobileTransport(
     private static readonly string SharedMemoryPath = Path.Combine(AchatesHome, "memory.md");
 
     private AgentRuntime CreateRuntime(AgentDefinition agentDef, string agentName,
-        IReadOnlyList<AgentMessage>? messages = null)
+        IReadOnlyList<AgentMessage>? messages = null,
+        IReadOnlyList<AgentTool>? extraTools = null)
     {
         var tools = new List<AgentTool>(agentDef.Tools);
 
@@ -1712,6 +1717,9 @@ public sealed class MobileTransport(
         if (agentDef.CronStore is { } cronStore && CronService is { } cron)
             tools.Add(new CronTool(cronStore, agentName, cron));
 
+        if (extraTools is not null)
+            tools.AddRange(extraTools);
+
         return new AgentRuntime(new AgentOptions
         {
             Model = agentDef.Model,
@@ -1720,6 +1728,28 @@ public sealed class MobileTransport(
             CompletionOptions = agentDef.CompletionOptions,
             Messages = messages,
         });
+    }
+
+    /// <summary>
+    /// When resuming a session that originated from a cron job, restore any tools the
+    /// original cron run had so the agent's tool list matches its own history. Today the
+    /// only such tool is <see cref="SessionReviewTool"/>, injected for dreamtime sessions.
+    /// Without this, the agent looks at its prior tool calls, sees the tool isn't in its
+    /// current list, and concludes (wrongly) that those calls were hallucinations.
+    /// </summary>
+    private async Task<IReadOnlyList<AgentTool>?> BuildResumeExtraToolsAsync(
+        string agentName, AgentDefinition agentDef, MobileSession? existing, CancellationToken ct)
+    {
+        if (existing?.JobId is not { } jobId) return null;
+        if (agentDef.CronStore is not { } cronStore) return null;
+
+        var jobs = await cronStore.LoadAsync(ct);
+        var job = jobs.FirstOrDefault(j => j.Id == jobId);
+        if (job is null || job.Kind != CronJobKind.Dreamtime) return null;
+
+        // No `since` filter on resume — the agent can re-list all sessions and reason
+        // about what's relevant. The cron run's filter is only useful at fresh-fire time.
+        return [new SessionReviewTool(sessionStore, agentName, since: null)];
     }
 
     private static string? GetStringParam(JsonElement element, string name)
