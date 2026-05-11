@@ -82,7 +82,13 @@ struct AgentEditView: View {
                 )
             }
         }
-        .task { await load() }
+        .task {
+            // iOS 26 NavigationStack can re-fire .task after a pushed destination
+            // pops. Guard so we don't reload from the server and stomp the user's
+            // in-progress edits.
+            guard config == nil else { return }
+            await load()
+        }
     }
 
     @ViewBuilder
