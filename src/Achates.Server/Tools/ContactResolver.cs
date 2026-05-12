@@ -4,25 +4,36 @@ using Achates.Server.Graph;
 namespace Achates.Server.Tools;
 
 /// <summary>
-/// Resolves phone numbers and email addresses to contact names by fetching contacts
-/// from Microsoft Graph API. Results are cached in memory and refreshed periodically.
+/// Loads the user's Outlook contacts from Microsoft Graph and caches them in memory.
+/// Exposes both a handle-to-name lookup (for IMessageTool) and the full contact list
+/// (for ContactsTool).
 /// </summary>
 internal sealed class ContactResolver(IReadOnlyDictionary<string, GraphClient> graphClients)
 {
+    public sealed record Contact(
+        string Account,
+        string Id,
+        string DisplayName,
+        IReadOnlyList<string> Emails,
+        IReadOnlyList<string> Phones);
+
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(30);
 
-    private Dictionary<string, string>? _contacts;
+    private Dictionary<string, string>? _handleIndex;
+    private List<Contact>? _all;
     private DateTime _loadedAt;
 
     /// <summary>
-    /// Ensure contacts are loaded from Graph API. Call once before using Resolve().
+    /// Ensure contacts are loaded from Graph API. Call once before using Resolve(), All, or Search().
     /// </summary>
     public async Task EnsureLoadedAsync(CancellationToken cancellationToken = default)
     {
-        if (_contacts is not null && DateTime.UtcNow - _loadedAt < CacheDuration)
+        if (_handleIndex is not null && DateTime.UtcNow - _loadedAt < CacheDuration)
             return;
 
-        _contacts = await LoadContactsAsync(cancellationToken);
+        var (index, all) = await LoadContactsAsync(cancellationToken);
+        _handleIndex = index;
+        _all = all;
         _loadedAt = DateTime.UtcNow;
     }
 
@@ -36,25 +47,54 @@ internal sealed class ContactResolver(IReadOnlyDictionary<string, GraphClient> g
         if (string.IsNullOrWhiteSpace(handleId))
             return "Unknown";
 
-        if (_contacts is not { Count: > 0 })
+        if (_handleIndex is not { Count: > 0 })
             return handleId;
 
         var normalized = handleId.Contains('@')
             ? handleId.ToLowerInvariant()
             : NormalizePhone(handleId);
 
-        return _contacts.TryGetValue(normalized, out var name) ? name : handleId;
+        return _handleIndex.TryGetValue(normalized, out var name) ? name : handleId;
     }
 
-    private async Task<Dictionary<string, string>> LoadContactsAsync(CancellationToken cancellationToken)
-    {
-        var contacts = new Dictionary<string, string>();
+    /// <summary>
+    /// Full list of cached contacts. Call EnsureLoadedAsync() before access.
+    /// </summary>
+    public IReadOnlyList<Contact> All => _all ?? (IReadOnlyList<Contact>)[];
 
-        foreach (var (_, client) in graphClients)
+    /// <summary>
+    /// Case-insensitive substring search across display name, emails, and (digit-normalized) phones.
+    /// Returns up to <paramref name="limit"/> matches in display-name order.
+    /// </summary>
+    public IEnumerable<Contact> Search(string query, int limit)
+    {
+        if (string.IsNullOrWhiteSpace(query) || _all is null)
+            return [];
+
+        var q = query.Trim().ToLowerInvariant();
+        var qDigits = NormalizePhone(query);
+        var matchPhone = qDigits.Length >= 3;
+
+        return _all
+            .Where(c =>
+                c.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                c.Emails.Any(e => e.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                (matchPhone && c.Phones.Any(p => NormalizePhone(p).Contains(qDigits))))
+            .OrderBy(c => c.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .Take(limit);
+    }
+
+    private async Task<(Dictionary<string, string> Index, List<Contact> All)> LoadContactsAsync(
+        CancellationToken cancellationToken)
+    {
+        var index = new Dictionary<string, string>();
+        var all = new List<Contact>();
+
+        foreach (var (account, client) in graphClients)
         {
             try
             {
-                await LoadFromGraphAsync(client, contacts, cancellationToken);
+                await LoadFromGraphAsync(account, client, index, all, cancellationToken);
             }
             catch (HttpRequestException)
             {
@@ -62,13 +102,14 @@ internal sealed class ContactResolver(IReadOnlyDictionary<string, GraphClient> g
             }
         }
 
-        return contacts;
+        return (index, all);
     }
 
     private static async Task LoadFromGraphAsync(
-        GraphClient client, Dictionary<string, string> contacts, CancellationToken cancellationToken)
+        string account, GraphClient client, Dictionary<string, string> index,
+        List<Contact> all, CancellationToken cancellationToken)
     {
-        var path = "contacts?$select=givenName,surname,emailAddresses,phones&$top=999";
+        var path = "contacts?$select=id,givenName,surname,displayName,emailAddresses,phones&$top=999";
 
         while (path is not null)
         {
@@ -78,42 +119,42 @@ internal sealed class ContactResolver(IReadOnlyDictionary<string, GraphClient> g
             {
                 foreach (var contact in items.EnumerateArray())
                 {
-                    var givenName = contact.TryGetProperty("givenName", out var gn) && gn.ValueKind == JsonValueKind.String
-                        ? gn.GetString() : null;
-                    var surname = contact.TryGetProperty("surname", out var sn) && sn.ValueKind == JsonValueKind.String
-                        ? sn.GetString() : null;
-
-                    var name = BuildName(givenName, surname);
-                    if (name is null)
+                    var givenName = GetStringProp(contact, "givenName");
+                    var surname = GetStringProp(contact, "surname");
+                    var displayName = GetStringProp(contact, "displayName")
+                        ?? BuildName(givenName, surname);
+                    if (displayName is null)
                         continue;
 
-                    // Index email addresses
-                    if (contact.TryGetProperty("emailAddresses", out var emails))
+                    var id = GetStringProp(contact, "id");
+                    if (id is null)
+                        continue;
+
+                    var emails = new List<string>();
+                    if (contact.TryGetProperty("emailAddresses", out var emailEls))
                     {
-                        foreach (var email in emails.EnumerateArray())
+                        foreach (var email in emailEls.EnumerateArray())
                         {
-                            if (email.TryGetProperty("address", out var addr) && addr.ValueKind == JsonValueKind.String)
-                            {
-                                var address = addr.GetString();
-                                if (address is not null)
-                                    contacts.TryAdd(address.ToLowerInvariant(), name);
-                            }
+                            var address = GetStringProp(email, "address");
+                            if (address is null) continue;
+                            emails.Add(address);
+                            index.TryAdd(address.ToLowerInvariant(), displayName);
                         }
                     }
 
-                    // Index phone numbers
-                    if (contact.TryGetProperty("phones", out var phones))
+                    var phones = new List<string>();
+                    if (contact.TryGetProperty("phones", out var phoneEls))
                     {
-                        foreach (var phone in phones.EnumerateArray())
+                        foreach (var phone in phoneEls.EnumerateArray())
                         {
-                            if (phone.TryGetProperty("number", out var num) && num.ValueKind == JsonValueKind.String)
-                            {
-                                var number = num.GetString();
-                                if (number is not null)
-                                    contacts.TryAdd(NormalizePhone(number), name);
-                            }
+                            var number = GetStringProp(phone, "number");
+                            if (number is null) continue;
+                            phones.Add(number);
+                            index.TryAdd(NormalizePhone(number), displayName);
                         }
                     }
+
+                    all.Add(new Contact(account, id, displayName, emails, phones));
                 }
             }
 
@@ -142,6 +183,9 @@ internal sealed class ContactResolver(IReadOnlyDictionary<string, GraphClient> g
             }
         }
     }
+
+    private static string? GetStringProp(JsonElement el, string name) =>
+        el.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
     private static string? BuildName(string? firstName, string? lastName)
     {

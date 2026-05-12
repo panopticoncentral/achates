@@ -565,6 +565,9 @@ public sealed class GatewayService(
             return [];
 
         var tools = new List<AgentTool>();
+        ContactResolver? contactResolver = null;
+        ContactResolver GetContactResolver() => contactResolver ??= new ContactResolver(graphClients);
+
         foreach (var toolName in agentConfig.Tools ?? [])
         {
             switch (toolName)
@@ -597,6 +600,11 @@ public sealed class GatewayService(
                     { logger.LogWarning("Agent '{Agent}': calendar tool skipped — no graph configuration", agentName); break; }
                     tools.Add(new CalendarTool(graphClients));
                     break;
+                case "contacts":
+                    if (graphClients.Count == 0)
+                    { logger.LogWarning("Agent '{Agent}': contacts tool skipped — no graph configuration", agentName); break; }
+                    tools.Add(new ContactsTool(graphClients, GetContactResolver()));
+                    break;
                 case "web_search":
                     var braveKey = toolsConfig?.WebSearch?.BraveApiKey
                         ?? Environment.GetEnvironmentVariable("BRAVE_API_KEY");
@@ -611,7 +619,7 @@ public sealed class GatewayService(
                     var messagesDb = Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                         "Library", "Messages", "chat.db");
-                    tools.Add(new IMessageTool(messagesDb, new ContactResolver(graphClients)));
+                    tools.Add(new IMessageTool(messagesDb, GetContactResolver()));
                     break;
                 case "health":
                     if (withingsClient is null)
