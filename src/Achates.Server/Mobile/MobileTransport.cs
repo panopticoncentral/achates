@@ -613,54 +613,59 @@ public sealed class MobileTransport(
     private async Task<(string? message, string? activity)> GetLastMessagePreviewAsync(
         string agentName, CancellationToken ct)
     {
-        var (sessions, _) = await sessionStore.ListAsync(agentName, limit: 1, ct: ct);
-        if (sessions.Count == 0) return (null, null);
+        // Look at a window of recent sessions and skip empty ones so a freshly
+        // created session doesn't erase the agent's activity timestamp.
+        var (sessions, _) = await sessionStore.ListAsync(agentName, limit: 10, ct: ct);
 
-        var info = sessions[0];
-        var session = await sessionStore.LoadAsync(agentName, info.Id, ct);
-        if (session is null) return (null, null);
-
-        // Walk messages in reverse to find the last user or assistant message
-        for (var i = session.Messages.Count - 1; i >= 0; i--)
+        foreach (var info in sessions)
         {
-            var msg = session.Messages[i];
-            string? text = null;
+            if (info.MessageCount == 0) continue;
 
-            switch (msg)
+            var session = await sessionStore.LoadAsync(agentName, info.Id, ct);
+            if (session is null) continue;
+
+            // Walk messages in reverse to find the last user or assistant message
+            for (var i = session.Messages.Count - 1; i >= 0; i--)
             {
-                case UserMessage { Hidden: false } user:
-                    text = user.Text;
-                    break;
+                var msg = session.Messages[i];
+                string? text = null;
 
-                case AssistantMessage assistant:
-                    text = string.Join(" ", assistant.Content
-                        .OfType<CompletionTextContent>()
-                        .Select(c => c.Text)
-                        .Where(t => !System.Text.RegularExpressions.Regex.IsMatch(t.Trim(), @"^!\[.*?\]\(.*?\)\s*$")));
-                    break;
+                switch (msg)
+                {
+                    case UserMessage { Hidden: false } user:
+                        text = user.Text;
+                        break;
 
-                default:
+                    case AssistantMessage assistant:
+                        text = string.Join(" ", assistant.Content
+                            .OfType<CompletionTextContent>()
+                            .Select(c => c.Text)
+                            .Where(t => !System.Text.RegularExpressions.Regex.IsMatch(t.Trim(), @"^!\[.*?\]\(.*?\)\s*$")));
+                        break;
+
+                    default:
+                        continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(text))
                     continue;
+
+                // Clean up: replace newlines with spaces, collapse whitespace
+                text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+
+                // Truncate at word boundary
+                if (text.Length > 100)
+                {
+                    var truncated = text[..100];
+                    var lastSpace = truncated.LastIndexOf(' ');
+                    text = (lastSpace > 50 ? truncated[..lastSpace] : truncated) + "...";
+                }
+
+                var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(msg.Timestamp)
+                    .ToString("o");
+
+                return (text, timestamp);
             }
-
-            if (string.IsNullOrWhiteSpace(text))
-                continue;
-
-            // Clean up: replace newlines with spaces, collapse whitespace
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
-
-            // Truncate at word boundary
-            if (text.Length > 100)
-            {
-                var truncated = text[..100];
-                var lastSpace = truncated.LastIndexOf(' ');
-                text = (lastSpace > 50 ? truncated[..lastSpace] : truncated) + "...";
-            }
-
-            var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(msg.Timestamp)
-                .ToString("o");
-
-            return (text, timestamp);
         }
 
         return (null, null);
