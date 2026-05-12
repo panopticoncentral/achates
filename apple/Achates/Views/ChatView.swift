@@ -5,6 +5,7 @@ struct ChatView: View {
     let agent: Agent
     @State private var speechService = SpeechService()
     @State private var isAtBottom = true
+    @State private var pendingEdit: ComposerView.PendingEdit?
 
     /// Live agent data from AppState, falls back to the navigation snapshot.
     private var liveAgent: Agent {
@@ -62,17 +63,21 @@ struct ChatView: View {
 
                                 let position = bubblePosition(for: index, in: items)
                                 let isLast = isLastAssistantMessage(at: index, in: items)
+                                let isLastUser = isLastUserMessage(at: index, in: items)
                                 let isStreamingMsg = appState.isStreaming && appState.streamingMessageId == message.id
+                                let canResubmit = !appState.isStreaming && hasResubmittableUserMessage
                                 MessageBubble(
                                     message: message,
                                     position: position,
                                     agent: agent,
                                     isLastAssistantMessage: isLast,
+                                    isLastUserMessage: isLastUser,
                                     isStreaming: isStreamingMsg,
-                                    onRetry: isLast ? {
-                                        if let lastUserText = lastUserMessageText(in: appState.messages) {
-                                            Task { await appState.sendMessage(lastUserText) }
-                                        }
+                                    onResubmit: (canResubmit && (isLast || isLastUser)) ? {
+                                        Task { await appState.resubmitLast(text: nil, attachments: nil) }
+                                    } : nil,
+                                    onBeginEdit: (canResubmit && isLastUser) ? {
+                                        beginEditingLastUserMessage()
                                     } : nil
                                 )
                                 .id(message.id)
@@ -129,11 +134,19 @@ struct ChatView: View {
                     }
                 }
 
-            ComposerView(speechService: speechService) { text, attachments in
-                Task { await appState.sendMessage(text, attachments: attachments) }
-            } onCancel: {
-                Task { await appState.cancelStreaming() }
-            }
+            ComposerView(
+                speechService: speechService,
+                pendingEdit: $pendingEdit,
+                onSend: { text, attachments in
+                    Task { await appState.sendMessage(text, attachments: attachments) }
+                },
+                onResubmit: { text, attachments in
+                    Task { await appState.resubmitLast(text: text, attachments: attachments) }
+                },
+                onCancel: {
+                    Task { await appState.cancelStreaming() }
+                }
+            )
         }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -218,13 +231,26 @@ struct ChatView: View {
         return true
     }
 
-    private func lastUserMessageText(in items: [ChatMessage]) -> String? {
-        for item in items.reversed() {
-            if item.role == .user {
-                return item.textContent
+    private func isLastUserMessage(at index: Int, in items: [ChatMessage]) -> Bool {
+        guard items[index].role == .user else { return false }
+        for i in stride(from: items.count - 1, through: index + 1, by: -1) {
+            if items[i].role == .user {
+                return false
             }
         }
-        return nil
+        return true
+    }
+
+    private var hasResubmittableUserMessage: Bool {
+        appState.messages.contains(where: { $0.role == .user })
+    }
+
+    private func beginEditingLastUserMessage() {
+        guard let original = appState.lastUserMessage else { return }
+        pendingEdit = ComposerView.PendingEdit(
+            text: original.textContent,
+            attachments: appState.draftAttachments(from: original)
+        )
     }
 
     private var visibleMessages: [ChatMessage] {

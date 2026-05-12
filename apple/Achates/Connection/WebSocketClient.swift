@@ -105,23 +105,46 @@ final class WebSocketClient {
             "session_id": .string(sessionId),
         ]
         if !attachments.isEmpty {
-            let items: [JSONValue] = attachments.map { att in
-                var fields: [String: JSONValue] = [
-                    "mime": .string(att.mime),
-                    "data": .string(att.data.base64EncodedString()),
-                ]
-                if let name = att.displayName {
-                    fields["filename"] = .string(name)
-                }
-                return .object(fields)
-            }
-            params["attachments"] = .array(items)
+            params["attachments"] = .array(attachments.map(encodeAttachment))
         }
         do {
             _ = try await sendRequest(method: "chat.send", params: params)
         } catch {
             print("Failed to send message: \(error)")
         }
+    }
+
+    /// Resubmit the latest user prompt. Pass `text: nil` to keep the original text;
+    /// pass `attachments: nil` to keep the original attachments. An empty `attachments`
+    /// array explicitly clears them.
+    func resubmit(text: String?, attachments: [DraftAttachment]?) async throws {
+        guard let agent = appState.currentAgent,
+              let sessionId = appState.currentSessionId else {
+            print("Cannot resubmit: no agent or session selected")
+            throw FrameError.notConnected
+        }
+        var params: [String: JSONValue] = [
+            "agent": .string(agent.id),
+            "session_id": .string(sessionId),
+        ]
+        if let text {
+            params["text"] = .string(text)
+        }
+        if let attachments {
+            params["attachments"] = .array(attachments.map(encodeAttachment))
+        }
+        _ = try await sendRequest(method: "chat.resubmit", params: params)
+    }
+
+    private func encodeAttachment(_ att: DraftAttachment) -> JSONValue {
+        var fields: [String: JSONValue] = [
+            "mime": .string(att.mime),
+            "data": .string(att.data.base64EncodedString()),
+        ]
+        if let name = att.displayName {
+            fields["filename"] = .string(name)
+        }
+        return .object(fields)
     }
 
     func cancelStreaming() async {

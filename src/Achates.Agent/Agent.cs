@@ -76,6 +76,23 @@ public sealed class AgentRuntime
         _messages.Clear();
     }
 
+    /// <summary>
+    /// Remove the most recent user message and everything after it
+    /// (typically the assistant turn + any tool messages). Returns the
+    /// removed user message, or null if there isn't one yet.
+    /// Throws if the runtime is currently running.
+    /// </summary>
+    public UserMessage? TruncateLastUserTurn()
+    {
+        if (IsRunning)
+            throw new InvalidOperationException("Cannot truncate while the agent is running.");
+        var idx = _messages.FindLastIndex(m => m is UserMessage);
+        if (idx < 0) return null;
+        var removed = (UserMessage)_messages[idx];
+        _messages.RemoveRange(idx, _messages.Count - idx);
+        return removed;
+    }
+
     // --- Prompting ---
 
     /// <summary>

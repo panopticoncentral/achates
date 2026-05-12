@@ -559,6 +559,62 @@ final class AppState {
         await client?.sendMessage(trimmed, attachments: attachments)
     }
 
+    /// The most recent user message in the open session, if any.
+    var lastUserMessage: ChatMessage? {
+        messages.last(where: { $0.role == .user })
+    }
+
+    /// Reconstruct DraftAttachments from a stored user message's image blocks.
+    /// Remote-only images (no local bytes) are dropped — the user can re-attach.
+    func draftAttachments(from message: ChatMessage) -> [DraftAttachment] {
+        message.blocks.compactMap { block in
+            if case .image(_, let data, let mimeType) = block {
+                return DraftAttachment(data: data, mime: mimeType)
+            }
+            return nil
+        }
+    }
+
+    /// Rewind the latest turn — drop the last assistant response and any tool blocks,
+    /// optionally replace the user prompt's text/attachments, then stream a fresh response.
+    /// Pass `text: nil` / `attachments: nil` to preserve the original values.
+    func resubmitLast(text: String?, attachments: [DraftAttachment]?) async {
+        guard client != nil, currentAgent != nil, currentSessionId != nil else { return }
+        guard let originalIndex = messages.lastIndex(where: { $0.role == .user }) else { return }
+
+        let original = messages[originalIndex]
+        let trimmedNewText = text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveText = trimmedNewText ?? original.textContent
+        let effectiveAttachments = attachments ?? draftAttachments(from: original)
+
+        // Drop the existing user turn (and everything after it) locally.
+        messages.removeSubrange(originalIndex..<messages.count)
+
+        // Re-append the (possibly edited) user message.
+        var blocks: [ContentBlock] = []
+        if !effectiveText.isEmpty {
+            blocks.append(.text(id: UUID().uuidString, effectiveText))
+        }
+        for attachment in effectiveAttachments {
+            blocks.append(.image(id: UUID().uuidString, data: attachment.data, mimeType: "image/jpeg"))
+        }
+        messages.append(ChatMessage(role: .user, blocks: blocks))
+
+        // Start streaming placeholder.
+        isStreaming = true
+        let assistantId = UUID().uuidString
+        streamingMessageId = assistantId
+        messages.append(ChatMessage(id: assistantId, role: .assistant, blocks: []))
+
+        do {
+            try await client?.resubmit(text: text, attachments: attachments)
+        } catch {
+            isStreaming = false
+            streamingMessageId = nil
+            self.error = "Failed to resubmit: \(error)"
+        }
+    }
+
     func cancelStreaming() async {
         await client?.cancelStreaming()
     }

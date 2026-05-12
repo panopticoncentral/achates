@@ -18,8 +18,11 @@ struct MessageBubble: View {
     var position: BubblePosition = .alone
     var agent: Agent? = nil
     var isLastAssistantMessage: Bool = false
+    var isLastUserMessage: Bool = false
     var isStreaming: Bool = false
     var onRetry: (() -> Void)? = nil
+    var onResubmit: (() -> Void)? = nil
+    var onBeginEdit: (() -> Void)? = nil
     @AppStorage("show_message_costs") private var showMessageCosts = false
     @AppStorage("show_tool_activity") private var showToolActivity = false
     @State private var fullscreenImageData: Data? = nil
@@ -202,8 +205,31 @@ struct MessageBubble: View {
                 Label("Copy", systemImage: "doc.on.doc")
             }
 
+            if message.role == .user && isLastUserMessage {
+                if let onResubmit {
+                    Button {
+                        onResubmit()
+                    } label: {
+                        Label("Resubmit", systemImage: "arrow.counterclockwise")
+                    }
+                }
+                if let onBeginEdit {
+                    Button {
+                        onBeginEdit()
+                    } label: {
+                        Label("Edit & Resubmit", systemImage: "pencil")
+                    }
+                }
+            }
+
             if message.role == .assistant && isLastAssistantMessage {
-                if let onRetry {
+                if let onResubmit {
+                    Button {
+                        onResubmit()
+                    } label: {
+                        Label("Retry", systemImage: "arrow.counterclockwise")
+                    }
+                } else if let onRetry {
                     Button {
                         onRetry()
                     } label: {

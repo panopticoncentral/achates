@@ -306,6 +306,7 @@ public sealed class MobileTransport(
                 "sessions.rename" => await HandleSessionsRenameAsync(request, ct),
                 "sessions.delete_all" => await HandleSessionsDeleteAllAsync(request, ct),
                 "chat.send" => await HandleChatSendAsync(connection, request, ct),
+                "chat.resubmit" => await HandleChatResubmitAsync(connection, request, ct),
                 "chat.cancel" => HandleChatCancel(request),
                 "chat.read" => await HandleChatReadAsync(request, ct),
                 "agent.get" => await HandleAgentGetAsync(request),
@@ -790,6 +791,106 @@ public sealed class MobileTransport(
 
         // Stream the agent response as events to all connected clients
         _ = StreamAgentResponseAsync(runtime, agentName, sessionId, userMessage, ct);
+
+        return null;
+    }
+
+    private async Task<ResponseFrame?> HandleChatResubmitAsync(MobileConnection connection, RequestFrame request, CancellationToken ct)
+    {
+        var agentName = GetStringParam(request.Params, "agent");
+        var sessionId = GetStringParam(request.Params, "session_id");
+        if (agentName is null || sessionId is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'session_id' parameter.");
+
+        var hasTextParam = request.Params.ValueKind == JsonValueKind.Object &&
+                           request.Params.TryGetProperty("text", out _);
+        var newText = GetStringParam(request.Params, "text");
+
+        var hasAttachmentsParam = request.Params.ValueKind == JsonValueKind.Object &&
+                                  request.Params.TryGetProperty("attachments", out _);
+        var attachments = AttachmentParser.Parse(request.Params, out var attachmentError);
+        if (attachmentError is not null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", attachmentError);
+
+        if (!_agents.TryGetValue(agentName, out var agentDef))
+            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
+
+        if (hasAttachmentsParam &&
+            attachments!.OfType<CompletionFileContent>().Any() &&
+            !agentDef.Model.Input.HasFlag(ModelModalities.File))
+        {
+            var who = agentDef.DisplayName ?? agentName;
+            return ResponseFrame.Failure(
+                request.Id,
+                "unsupported_attachment",
+                $"{who}'s model ({agentDef.Model.Id}) doesn't support file input. Switch to a model with file/PDF support (e.g. Claude, Gemini, GPT-4o).");
+        }
+
+        var runtimeKey = $"{agentName}:{sessionId}";
+
+        // Resubmit only makes sense for an existing session. Load from disk if not cached.
+        if (!_runtimes.TryGetValue(runtimeKey, out var runtime))
+        {
+            var existing = await sessionStore.LoadAsync(agentName, sessionId, ct);
+            if (existing is null || existing.Messages.Count == 0)
+                return ResponseFrame.Failure(request.Id, "not_found", $"Session '{sessionId}' not found or empty.");
+
+            var extraTools = await BuildResumeExtraToolsAsync(agentName, agentDef, existing, ct);
+            runtime = CreateRuntime(agentDef, agentName, existing.Messages, extraTools);
+            _runtimes[runtimeKey] = runtime;
+        }
+
+        if (runtime.IsRunning)
+            return ResponseFrame.Failure(request.Id, "runtime_busy", "Cancel the current response before resubmitting.");
+
+        UserMessage? original;
+        try
+        {
+            original = runtime.TruncateLastUserTurn();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ResponseFrame.Failure(request.Id, "runtime_busy", ex.Message);
+        }
+
+        if (original is null)
+            return ResponseFrame.Failure(request.Id, "not_found", "No user prompt to resubmit.");
+
+        // Build the replacement user message. Omitted params preserve the original.
+        var replacement = new UserMessage
+        {
+            Text = hasTextParam ? (newText ?? "") : original.Text,
+            Content = hasAttachmentsParam
+                ? (attachments!.Count > 0 ? attachments : null)
+                : original.Content,
+        };
+
+        if (string.IsNullOrEmpty(replacement.Text) && (replacement.Content is null || replacement.Content.Count == 0))
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Replacement message must have text or attachments.");
+
+        // Persist the truncated history immediately so the rewind is durable even if the new run dies.
+        var existingSession = await sessionStore.LoadAsync(agentName, sessionId, ct);
+        var truncated = new MobileSession
+        {
+            Id = sessionId,
+            Title = existingSession?.Title,
+            Created = existingSession?.Created ?? DateTimeOffset.UtcNow,
+            JobId = existingSession?.JobId,
+            Messages = [.. runtime.Messages],
+        };
+        await sessionStore.SaveAsync(agentName, truncated, ct);
+        await BroadcastSessionUpdatedAsync(agentName, truncated, ct);
+
+        // Send immediate response to the requesting client
+        var responsePayload = JsonSerializer.SerializeToElement(new
+        {
+            session_id = sessionId,
+        }, JsonOptions);
+        var response = ResponseFrame.Success(request.Id, responsePayload);
+        await connection.SendResponseAsync(response, ct);
+
+        // Stream the agent response — PromptAsync appends the user message to runtime.Messages itself.
+        _ = StreamAgentResponseAsync(runtime, agentName, sessionId, replacement, ct);
 
         return null;
     }

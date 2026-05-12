@@ -8,6 +8,11 @@ import AppKit
 #endif
 
 struct ComposerView: View {
+    struct PendingEdit: Equatable {
+        let text: String
+        let attachments: [DraftAttachment]
+    }
+
     @Environment(AppState.self) private var appState
     @Bindable var speechService: SpeechService
     @State private var text = ""
@@ -25,8 +30,27 @@ struct ComposerView: View {
     @State private var pickerItems: [PhotosPickerItem] = []
     #endif
 
+    @Binding var pendingEdit: PendingEdit?
     let onSend: (String, [DraftAttachment]) -> Void
+    let onResubmit: (String, [DraftAttachment]) -> Void
     let onCancel: () -> Void
+
+    /// Convenience initializer for callers that don't need edit/resubmit support.
+    init(
+        speechService: SpeechService,
+        pendingEdit: Binding<PendingEdit?> = .constant(nil),
+        onSend: @escaping (String, [DraftAttachment]) -> Void,
+        onResubmit: @escaping (String, [DraftAttachment]) -> Void = { _, _ in },
+        onCancel: @escaping () -> Void
+    ) {
+        self.speechService = speechService
+        self._pendingEdit = pendingEdit
+        self.onSend = onSend
+        self.onResubmit = onResubmit
+        self.onCancel = onCancel
+    }
+
+    private var isEditing: Bool { pendingEdit != nil }
 
     private let maxAttachments = 4
     private static let maxPdfBytes = 32 * 1024 * 1024
@@ -37,6 +61,10 @@ struct ComposerView: View {
                 recordingBanner
             }
 
+            if isEditing {
+                editingBanner
+            }
+
             if !attachments.isEmpty {
                 attachmentStrip
             }
@@ -44,6 +72,10 @@ struct ComposerView: View {
             inputRow
         }
         .background(.bar)
+        .onAppear { applyPendingEditIfNeeded(pendingEdit) }
+        .onChange(of: pendingEdit) { _, newValue in
+            applyPendingEditIfNeeded(newValue)
+        }
         #if os(iOS)
         .confirmationDialog("Add Attachment", isPresented: $showSourceDialog, titleVisibility: .hidden) {
             if CameraPicker.isAvailable {
@@ -84,6 +116,29 @@ struct ComposerView: View {
             case .failure(let error): print("Document picker failed: \(error)")
             }
         }
+    }
+
+    private var editingBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "pencil")
+                .foregroundStyle(.blue)
+            Text("Editing message")
+                .font(.subheadline.weight(.medium))
+            Spacer()
+            Button {
+                cancelEdit()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.secondary, Color(.systemGray5))
+                    .font(.system(size: 18))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cancel editing")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.blue.opacity(0.08))
     }
 
     private var recordingBanner: some View {
@@ -235,7 +290,28 @@ struct ComposerView: View {
         #if os(iOS)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         #endif
-        onSend(trimmed, attachments)
+        if isEditing {
+            onResubmit(trimmed, attachments)
+            pendingEdit = nil
+        } else {
+            onSend(trimmed, attachments)
+        }
+        text = ""
+        attachments = []
+        #if os(macOS)
+        composerHeight = 33
+        #endif
+    }
+
+    private func applyPendingEditIfNeeded(_ edit: PendingEdit?) {
+        guard let edit else { return }
+        text = edit.text
+        attachments = edit.attachments
+        isFocused = true
+    }
+
+    private func cancelEdit() {
+        pendingEdit = nil
         text = ""
         attachments = []
         #if os(macOS)
