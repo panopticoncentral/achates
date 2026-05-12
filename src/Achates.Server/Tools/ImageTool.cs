@@ -35,6 +35,7 @@ internal sealed class ImageTool : AgentTool
         {
             ["prompt"] = StringSchema("The image generation prompt. Include style, composition, dimensions, and any other instructions."),
             ["images"] = ArraySchema(StringSchema(), "Base64-encoded reference images for refinement, style transfer, or composition guidance."),
+            ["self"] = BooleanSchema("Set true to generate an image of yourself (selfie or scene featuring you). Your avatar is attached as a reference image and your appearance will be preserved."),
         };
         var required = new List<string> { "prompt" };
 
@@ -50,7 +51,7 @@ internal sealed class ImageTool : AgentTool
     }
 
     public override string Name => "image";
-    public override string Description => "Generate an image from a text prompt, optionally guided by reference images.";
+    public override string Description => "Generate an image from a text prompt, optionally guided by reference images. Set `self: true` to include yourself in the image.";
     public override string Label => "Image";
     public override JsonElement Parameters => _schema;
 
@@ -91,6 +92,22 @@ internal sealed class ImageTool : AgentTool
                 referenceImages = null;
         }
 
+        var includeSelf = arguments.TryGetValue("self", out var selfVal)
+            && selfVal is JsonElement { ValueKind: JsonValueKind.True };
+
+        if (includeSelf)
+        {
+            var avatarPath = FindAvatarPath();
+            if (avatarPath is null)
+                return TextResult("No avatar set. Update your profile with an avatar before generating selfies.");
+
+            var avatarBytes = await File.ReadAllBytesAsync(avatarPath, cancellationToken);
+            referenceImages ??= [];
+            referenceImages.Insert(0, avatarBytes);
+
+            prompt = "Reference image 1 is the subject's appearance — preserve face, hair, and identifying features. " + prompt;
+        }
+
         byte[]? imageBytes;
         try
         {
@@ -118,6 +135,15 @@ internal sealed class ImageTool : AgentTool
             ImageUrl = imageUrl,
             Details = new ImageDetails(Convert.ToBase64String(imageBytes), "image/jpeg", imageUrl),
         };
+    }
+
+    private string? FindAvatarPath()
+    {
+        var jpgPath = Path.Combine(_agentDir, "avatar.jpg");
+        if (File.Exists(jpgPath)) return jpgPath;
+        var pngPath = Path.Combine(_agentDir, "avatar.png");
+        if (File.Exists(pngPath)) return pngPath;
+        return null;
     }
 
     private static AgentToolResult TextResult(string text) =>
