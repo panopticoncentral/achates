@@ -112,8 +112,14 @@ public sealed class CronService : IAsyncDisposable
 
     /// <summary>
     /// Run a specific job immediately. Returns the result text.
+    /// When <paramref name="advanceSchedule"/> is true, the manual run also advances
+    /// <c>LastRunAt</c>/<c>NextRunAt</c> as if the job had fired on schedule, effectively
+    /// skipping the next scheduled occurrence.
     /// </summary>
-    public async Task<string?> RunJobAsync(string agentName, string jobId, CancellationToken ct = default)
+    public async Task<string?> RunJobAsync(
+        string agentName, string jobId,
+        bool advanceSchedule = false,
+        CancellationToken ct = default)
     {
         if (!_agents.TryGetValue(agentName, out var entry))
             return null;
@@ -122,7 +128,20 @@ public sealed class CronService : IAsyncDisposable
         var job = jobs.FirstOrDefault(j => j.Id == jobId);
         if (job is null) return null;
 
-        var (result, _, _) = await ExecuteJobAsync(agentName, entry.Agent, entry.Store, job, ct);
+        var (result, skipped, runError) = await ExecuteJobAsync(agentName, entry.Agent, entry.Store, job, ct);
+
+        if (advanceSchedule)
+        {
+            if (skipped)
+                await UpdateJobStateAfterRunAsync(entry.Store, job, "skipped", null, ct, advanceLastRunAt: false);
+            else if (runError is not null)
+                await UpdateJobStateAfterRunAsync(entry.Store, job, "error", runError, ct, advanceLastRunAt: false);
+            else
+                await UpdateJobStateAfterRunAsync(entry.Store, job, "ok", null, ct);
+
+            Poke();
+        }
+
         return result;
     }
 

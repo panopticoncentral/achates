@@ -57,13 +57,20 @@ struct JobDetailView: View {
 
             Section {
                 Button {
-                    Task { await runNow() }
+                    Task { await runNow(skipNext: false) }
                 } label: {
                     if isBusy {
                         ProgressView()
                     } else {
                         Text("Run Now")
                     }
+                }
+                .disabled(isBusy)
+
+                Button {
+                    Task { await runNow(skipNext: true) }
+                } label: {
+                    Text("Run Now & Skip Next")
                 }
                 .disabled(isBusy)
 
@@ -127,10 +134,13 @@ struct JobDetailView: View {
         return f.string(from: date)
     }
 
-    private func runNow() async {
+    private func runNow(skipNext: Bool) async {
         isBusy = true
         do {
-            try await appState.runJob(agent: liveJob.agent, jobId: liveJob.jobId)
+            try await appState.runJob(agent: liveJob.agent, jobId: liveJob.jobId, skipNext: skipNext)
+            if skipNext {
+                await refresh()
+            }
         } catch {
             errorMessage = error.localizedDescription
             showError = true

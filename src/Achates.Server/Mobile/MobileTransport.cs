@@ -1481,11 +1481,14 @@ public sealed class MobileTransport(
         if (!existing.Any(j => j.Id == jobId))
             return ResponseFrame.Failure(request.Id, "not_found", $"Job '{jobId}' not found.");
 
+        var skipNext = request.Params.TryGetProperty("skip_next", out var skipProp)
+            && skipProp.ValueKind == JsonValueKind.True;
+
         _ = Task.Run(async () =>
         {
             try
             {
-                await cron.RunJobAsync(agentName, jobId, CancellationToken.None);
+                await cron.RunJobAsync(agentName, jobId, skipNext, CancellationToken.None);
             }
             catch (Exception ex)
             {

@@ -31,6 +31,7 @@ internal sealed class CronTool(
             ["schedule_timezone"] = StringSchema("IANA timezone for cron/at schedules (e.g. 'America/New_York'). Defaults to local timezone."),
             ["job_id"] = StringSchema("Job ID. Required for 'update', 'remove', 'run'."),
             ["enabled"] = BooleanSchema("Enable or disable a job. Used with 'update'."),
+            ["skip_next"] = BooleanSchema("Used with 'run'. When true, the manual run also advances the schedule so the next scheduled occurrence is skipped (LastRunAt/NextRunAt are updated as if the job had fired on schedule). Default false: the schedule is untouched and the next scheduled run still fires."),
         },
         required: ["action"]);
 
@@ -196,11 +197,13 @@ internal sealed class CronTool(
         if (string.IsNullOrWhiteSpace(jobId))
             return TextResult("Error: 'job_id' is required.");
 
-        var result = await cronService.RunJobAsync(agentName, jobId, ct);
+        var skipNext = GetBool(args, "skip_next") ?? false;
+        var result = await cronService.RunJobAsync(agentName, jobId, skipNext, ct);
         if (result is null)
             return TextResult($"Job '{jobId}' not found.");
 
-        return TextResult($"Job executed. Result:\n\n{Truncate(result, 500)}");
+        var prefix = skipNext ? "Job executed and schedule advanced." : "Job executed.";
+        return TextResult($"{prefix} Result:\n\n{Truncate(result, 500)}");
     }
 
     private static string? ResolveUpdateScheduleKind(Dictionary<string, object?> args)
