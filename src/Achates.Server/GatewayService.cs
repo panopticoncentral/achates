@@ -566,7 +566,7 @@ public sealed class GatewayService(
 
         var tools = new List<AgentTool>();
         ContactResolver? contactResolver = null;
-        ContactResolver GetContactResolver() => contactResolver ??= new ContactResolver(graphClients);
+        ContactResolver GetContactResolver() => contactResolver ??= new ContactResolver(graphClients, logger);
 
         foreach (var toolName in agentConfig.Tools ?? [])
         {

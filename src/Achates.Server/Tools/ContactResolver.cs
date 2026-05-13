@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Achates.Server.Graph;
+using Microsoft.Identity.Client;
 
 namespace Achates.Server.Tools;
 
@@ -8,7 +9,9 @@ namespace Achates.Server.Tools;
 /// Exposes both a handle-to-name lookup (for IMessageTool) and the full contact list
 /// (for ContactsTool).
 /// </summary>
-internal sealed class ContactResolver(IReadOnlyDictionary<string, GraphClient> graphClients)
+internal sealed class ContactResolver(
+    IReadOnlyDictionary<string, GraphClient> graphClients,
+    ILogger logger)
 {
     public sealed record Contact(
         string Account,
@@ -21,6 +24,7 @@ internal sealed class ContactResolver(IReadOnlyDictionary<string, GraphClient> g
 
     private Dictionary<string, string>? _handleIndex;
     private List<Contact>? _all;
+    private Dictionary<string, string>? _loadErrors;
     private DateTime _loadedAt;
 
     /// <summary>
@@ -31,11 +35,19 @@ internal sealed class ContactResolver(IReadOnlyDictionary<string, GraphClient> g
         if (_handleIndex is not null && DateTime.UtcNow - _loadedAt < CacheDuration)
             return;
 
-        var (index, all) = await LoadContactsAsync(cancellationToken);
+        var (index, all, errors) = await LoadContactsAsync(cancellationToken);
         _handleIndex = index;
         _all = all;
+        _loadErrors = errors;
         _loadedAt = DateTime.UtcNow;
     }
+
+    /// <summary>
+    /// Per-account error messages from the most recent load. Populated when a Graph
+    /// call or token acquisition fails for an account. Empty on success.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> LoadErrors =>
+        _loadErrors ?? (IReadOnlyDictionary<string, string>)new Dictionary<string, string>();
 
     /// <summary>
     /// Resolve a handle ID (phone number or email) to a contact name.
@@ -84,32 +96,48 @@ internal sealed class ContactResolver(IReadOnlyDictionary<string, GraphClient> g
             .Take(limit);
     }
 
-    private async Task<(Dictionary<string, string> Index, List<Contact> All)> LoadContactsAsync(
-        CancellationToken cancellationToken)
+    private async Task<(Dictionary<string, string> Index, List<Contact> All, Dictionary<string, string> Errors)>
+        LoadContactsAsync(CancellationToken cancellationToken)
     {
         var index = new Dictionary<string, string>();
         var all = new List<Contact>();
+        var errors = new Dictionary<string, string>();
 
         foreach (var (account, client) in graphClients)
         {
+            var beforeCount = all.Count;
             try
             {
                 await LoadFromGraphAsync(account, client, index, all, cancellationToken);
+                logger.LogInformation("Loaded {Count} contacts from account '{Account}'",
+                    all.Count - beforeCount, account);
             }
-            catch (HttpRequestException)
+            catch (HttpRequestException ex)
             {
-                // Skip accounts that fail (insufficient permissions, etc.)
+                logger.LogWarning(ex, "Contacts load failed for account '{Account}': {Message}",
+                    account, ex.Message);
+                errors[account] = ex.Message;
+            }
+            catch (MsalException ex)
+            {
+                logger.LogWarning(ex, "Contacts auth failed for account '{Account}': {Message}",
+                    account, ex.Message);
+                errors[account] = $"Authentication failed: {ex.Message}";
             }
         }
 
-        return (index, all);
+        return (index, all, errors);
     }
 
     private static async Task LoadFromGraphAsync(
         string account, GraphClient client, Dictionary<string, string> index,
         List<Contact> all, CancellationToken cancellationToken)
     {
-        var path = "contacts?$select=id,givenName,surname,displayName,emailAddresses,phones&$top=999";
+        // Graph v1.0 Contact resource exposes phone numbers as three separate fields
+        // (homePhones, businessPhones, mobilePhone) — there is no unified `phones`
+        // collection on this endpoint (that lives on /beta).
+        var path = "contacts?$select=id,givenName,surname,displayName,emailAddresses," +
+                   "homePhones,businessPhones,mobilePhone&$top=999";
 
         while (path is not null)
         {
@@ -143,15 +171,14 @@ internal sealed class ContactResolver(IReadOnlyDictionary<string, GraphClient> g
                     }
 
                     var phones = new List<string>();
-                    if (contact.TryGetProperty("phones", out var phoneEls))
+                    AddPhones(contact, "homePhones", phones, index, displayName);
+                    AddPhones(contact, "businessPhones", phones, index, displayName);
+
+                    var mobile = GetStringProp(contact, "mobilePhone");
+                    if (!string.IsNullOrWhiteSpace(mobile))
                     {
-                        foreach (var phone in phoneEls.EnumerateArray())
-                        {
-                            var number = GetStringProp(phone, "number");
-                            if (number is null) continue;
-                            phones.Add(number);
-                            index.TryAdd(NormalizePhone(number), displayName);
-                        }
+                        phones.Add(mobile);
+                        index.TryAdd(NormalizePhone(mobile), displayName);
                     }
 
                     all.Add(new Contact(account, id, displayName, emails, phones));
@@ -195,4 +222,20 @@ internal sealed class ContactResolver(IReadOnlyDictionary<string, GraphClient> g
 
     private static string NormalizePhone(string phone) =>
         new(phone.Where(char.IsDigit).ToArray());
+
+    private static void AddPhones(JsonElement contact, string property, List<string> phones,
+        Dictionary<string, string> index, string displayName)
+    {
+        if (!contact.TryGetProperty(property, out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return;
+
+        foreach (var item in arr.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String) continue;
+            var number = item.GetString();
+            if (string.IsNullOrWhiteSpace(number)) continue;
+            phones.Add(number);
+            index.TryAdd(NormalizePhone(number), displayName);
+        }
+    }
 }

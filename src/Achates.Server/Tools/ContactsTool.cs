@@ -55,7 +55,8 @@ internal sealed class ContactsTool(
 
         await contacts.EnsureLoadedAsync(cancellationToken);
         var hits = contacts.Search(query, limit).ToList();
-        return FormatList(hits, $"Search results for \"{query}\"");
+        return FormatList(hits, $"Search results for \"{query}\"",
+            emptyHint: $"No contacts matched \"{query}\".");
     }
 
     private async Task<AgentToolResult> ListAsync(
@@ -69,7 +70,8 @@ internal sealed class ContactsTool(
             .Take(limit)
             .ToList();
 
-        return FormatList(slice, $"Contacts (showing {slice.Count} of {contacts.All.Count})");
+        return FormatList(slice, $"Contacts (showing {slice.Count} of {contacts.All.Count})",
+            emptyHint: "Your Outlook personal Contacts folder appears to be empty.");
     }
 
     private async Task<AgentToolResult> ReadAsync(
@@ -81,8 +83,11 @@ internal sealed class ContactsTool(
 
         var graph = ResolveClient(graphClients, arguments);
 
+        // Graph v1.0 Contact has no `phones` collection — only the legacy
+        // homePhones/businessPhones/mobilePhone fields. Requesting `phones`
+        // returns HTTP 400 from /v1.0/me/contacts.
         var path = $"contacts/{Uri.EscapeDataString(id)}" +
-            "?$select=id,displayName,givenName,surname,emailAddresses,phones," +
+            "?$select=id,displayName,givenName,surname,emailAddresses," +
             "businessPhones,homePhones,mobilePhone,companyName,jobTitle," +
             "personalNotes,birthday,homeAddress,businessAddress";
 
@@ -99,10 +104,21 @@ internal sealed class ContactsTool(
         return FormatFull(contact);
     }
 
-    private static AgentToolResult FormatList(IReadOnlyList<ContactResolver.Contact> hits, string header)
+    private AgentToolResult FormatList(IReadOnlyList<ContactResolver.Contact> hits, string header, string emptyHint)
     {
         if (hits.Count == 0)
-            return TextResult("No contacts found.");
+        {
+            var errors = contacts.LoadErrors;
+            if (errors.Count > 0)
+            {
+                var sb2 = new StringBuilder();
+                sb2.AppendLine("No contacts available. Errors loading from Graph:");
+                foreach (var (account, message) in errors)
+                    sb2.AppendLine($"- {account}: {message}");
+                return TextResult(sb2.ToString().TrimEnd());
+            }
+            return TextResult(emptyHint);
+        }
 
         var sb = new StringBuilder();
         sb.AppendLine($"**{header}** ({hits.Count}):");
