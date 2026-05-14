@@ -24,7 +24,6 @@ struct MessageBubble: View {
     var onResubmit: (() -> Void)? = nil
     var onBeginEdit: (() -> Void)? = nil
     @AppStorage("show_message_costs") private var showMessageCosts = false
-    @AppStorage("show_tool_activity") private var showToolActivity = false
     @State private var fullscreenImageData: Data? = nil
     @State private var fullscreenImageURL: URL? = nil
 
@@ -76,13 +75,7 @@ struct MessageBubble: View {
     }
 
     private var visibleBlocks: [ContentBlock] {
-        if showToolActivity { return message.blocks }
-        return message.blocks.filter { block in
-            if case .toolCall(_, _, let status, _) = block, status != .running {
-                return false
-            }
-            return true
-        }
+        message.blocks
     }
 
     @ViewBuilder

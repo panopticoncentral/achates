@@ -5,12 +5,17 @@ struct ToolCallView: View {
     let name: String
     let status: ToolCallStatus
     let result: String?
+    @AppStorage("show_tool_activity") private var showToolActivity = false
     @State private var isExpanded = false
+
+    private var canExpand: Bool {
+        showToolActivity && result != nil && status != .running
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Button(action: {
-                if result != nil {
+                if canExpand {
                     withAnimation { isExpanded.toggle() }
                 }
             }) {
@@ -22,7 +27,7 @@ struct ToolCallView: View {
                     Text(label)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
-                    if result != nil && status != .running {
+                    if canExpand {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                             .font(.system(size: 8, weight: .semibold))
                             .foregroundStyle(.quaternary)
@@ -30,8 +35,9 @@ struct ToolCallView: View {
                 }
             }
             .buttonStyle(.plain)
+            .allowsHitTesting(canExpand)
 
-            if isExpanded, let result {
+            if isExpanded, canExpand, let result {
                 Text(result)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -62,6 +68,9 @@ struct ToolCallView: View {
         case "web_search": return "Searching the web..."
         case "web_fetch": return "Reading webpage..."
         case "memory": return "Checking memory..."
+        case "notebook": return "Checking notebook..."
+        case "notes": return "Checking notes..."
+        case "contacts": return "Checking contacts..."
         case "mail": return "Checking email..."
         case "calendar": return "Checking calendar..."
         case "todo": return "Checking tasks..."
@@ -76,6 +85,8 @@ struct ToolCallView: View {
         case "health": return "Checking health data..."
         case "session": return "Managing session..."
         case "profile": return "Updating profile..."
+        case "agent_creator": return "Creating agent..."
+        case "think": return "Thinking deeply..."
         default: return "Working..."
         }
     }
@@ -85,6 +96,9 @@ struct ToolCallView: View {
         case "web_search": return "Searched the web"
         case "web_fetch": return "Read webpage"
         case "memory": return "Checked memory"
+        case "notebook": return "Checked notebook"
+        case "notes": return "Checked notes"
+        case "contacts": return "Checked contacts"
         case "mail": return "Checked email"
         case "calendar": return "Checked calendar"
         case "todo": return "Checked tasks"
@@ -99,6 +113,8 @@ struct ToolCallView: View {
         case "health": return "Checked health data"
         case "session": return "Managed session"
         case "profile": return "Updated profile"
+        case "agent_creator": return "Created agent"
+        case "think": return "Thought deeply"
         default: return "Used \(tool)"
         }
     }
@@ -108,8 +124,13 @@ struct ToolCallView: View {
         case "web_search": return "Web search failed"
         case "web_fetch": return "Failed to read webpage"
         case "memory": return "Memory check failed"
+        case "notebook": return "Notebook access failed"
+        case "notes": return "Notes access failed"
+        case "contacts": return "Contacts lookup failed"
         case "mail": return "Email check failed"
         case "calendar": return "Calendar check failed"
+        case "agent_creator": return "Agent creation failed"
+        case "think": return "Thinking failed"
         default: return "\(tool) failed"
         }
     }
