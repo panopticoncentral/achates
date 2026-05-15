@@ -20,7 +20,7 @@ struct ComposerView: View {
     @State private var showDocumentPicker = false
     @FocusState private var isFocused: Bool
     #if os(macOS)
-    @State private var composerHeight: CGFloat = 33
+    @State private var composerHeight: CGFloat = 30
     #endif
 
     #if os(iOS)
@@ -181,14 +181,14 @@ struct ComposerView: View {
                 text: $text,
                 measuredHeight: $composerHeight,
                 placeholder: "Message",
-                minHeight: 33,
+                minHeight: 30,
                 maxHeight: 240,
                 onSend: send
             )
             .frame(maxWidth: .infinity)
             .frame(height: composerHeight)
             .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.vertical, 2)
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(Color(.systemGray6))
@@ -238,9 +238,9 @@ struct ComposerView: View {
                 .foregroundStyle(attachments.count >= maxAttachments ? Color.gray : Color.blue)
                 .frame(width: 36, height: 36)
         }
-        .menuStyle(.borderlessButton)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .fixedSize()
         .disabled(attachments.count >= maxAttachments)
         .accessibilityLabel("Add attachment")
         #endif
@@ -253,6 +253,7 @@ struct ComposerView: View {
                 Image(systemName: "stop.circle.fill")
                     .font(.system(size: 32))
                     .foregroundStyle(.red)
+                    .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Stop generating")
@@ -274,6 +275,7 @@ struct ComposerView: View {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 32))
                     .foregroundStyle(.blue)
+                    .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Send message")
@@ -299,7 +301,7 @@ struct ComposerView: View {
         text = ""
         attachments = []
         #if os(macOS)
-        composerHeight = 33
+        composerHeight = 30
         #endif
     }
 
@@ -315,7 +317,7 @@ struct ComposerView: View {
         text = ""
         attachments = []
         #if os(macOS)
-        composerHeight = 33
+        composerHeight = 30
         #endif
     }
 
