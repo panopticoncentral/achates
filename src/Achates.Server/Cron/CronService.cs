@@ -27,6 +27,7 @@ public sealed class CronService : IAsyncDisposable
     private static readonly TimeSpan MaxSleep = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan MinSleep = TimeSpan.FromSeconds(2);
     private const int MaxJobTurns = 20;
+    private static readonly TimeSpan MaxJobDuration = TimeSpan.FromMinutes(15);
 
     private const string DreamtimeInstructions = """
 
@@ -345,10 +346,49 @@ public sealed class CronService : IAsyncDisposable
             Hidden = true,
         });
 
+        var (responseText, streamError) = await ConsumeJobStreamAsync(
+            stream, agentDef.CostLedger, job, MaxJobDuration, _logger, ct);
+
+        // Save as a session so results are visible in the app
+        if (agent.Messages.Count > 0)
+        {
+            var sessionId = Guid.NewGuid().ToString("N")[..12];
+            var session = new MobileSession
+            {
+                Id = sessionId,
+                Title = job.Name,
+                JobId = job.Id,
+                Messages = [.. agent.Messages],
+            };
+            await _sessionStore.SaveAsync(agentName, session, ct);
+
+            // Also notify the active connection in real time
+            await DeliverAsync(job, agentName, session, ct);
+        }
+
+        return (responseText, false, streamError);
+    }
+
+    /// <summary>
+    /// Consumes a job's agent event stream, accumulating response text and recording cost.
+    /// Bounded by both <see cref="MaxJobTurns"/> and a wall-clock <paramref name="timeout"/>
+    /// so a stalled run can never freeze the cron loop. Service shutdown
+    /// (<paramref name="serviceCt"/>) propagates as <see cref="OperationCanceledException"/>;
+    /// a timeout is reported via the returned error string instead of throwing.
+    /// </summary>
+    internal static async Task<(string Response, string? Error)> ConsumeJobStreamAsync(
+        IAsyncEnumerable<AgentEvent> stream,
+        CostLedger? costLedger,
+        CronJob job,
+        TimeSpan timeout,
+        ILogger logger,
+        CancellationToken serviceCt)
+    {
         var responseText = "";
         var turnCount = 0;
         string? streamError = null;
-        using var turnCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var turnCts = CancellationTokenSource.CreateLinkedTokenSource(serviceCt);
+        turnCts.CancelAfter(timeout);
 
         try
         {
@@ -369,7 +409,7 @@ public sealed class CronService : IAsyncDisposable
                             streamError = $"Completion ended with stop reason '{assistantMsg.StopReason}'.";
 
                         // Record cost
-                        if (agentDef.CostLedger is { } costLedger)
+                        if (costLedger is not null)
                         {
                             _ = costLedger.AppendAsync(new CostEntry
                             {
@@ -391,7 +431,7 @@ public sealed class CronService : IAsyncDisposable
 
                         if (turnCount >= MaxJobTurns)
                         {
-                            _logger.LogWarning("Cron job '{Name}' ({Id}) reached max turn limit ({Max})",
+                            logger.LogWarning("Cron job '{Name}' ({Id}) reached max turn limit ({Max})",
                                 job.Name, job.Id, MaxJobTurns);
                             await turnCts.CancelAsync();
                         }
@@ -399,29 +439,28 @@ public sealed class CronService : IAsyncDisposable
                 }
             }
         }
+        catch (OperationCanceledException) when (serviceCt.IsCancellationRequested)
+        {
+            // Service shutdown — let it propagate so the loop exits cleanly.
+            throw;
+        }
         catch (OperationCanceledException) when (turnCount >= MaxJobTurns)
         {
             responseText += "\n\n[Stopped: reached maximum turn limit]";
         }
-
-        // Save as a session so results are visible in the app
-        if (agent.Messages.Count > 0)
+        catch (OperationCanceledException)
         {
-            var sessionId = Guid.NewGuid().ToString("N")[..12];
-            var session = new MobileSession
-            {
-                Id = sessionId,
-                Title = job.Name,
-                JobId = job.Id,
-                Messages = [.. agent.Messages],
-            };
-            await _sessionStore.SaveAsync(agentName, session, ct);
-
-            // Also notify the active connection in real time
-            await DeliverAsync(job, agentName, session, ct);
+            // Wall-clock timeout fired (not shutdown, not turn limit). Treat as an
+            // error so the schedule advances to the next occurrence and the loop
+            // moves on instead of staying frozen on this job.
+            var minutes = (int)Math.Round(timeout.TotalMinutes);
+            logger.LogWarning("Cron job '{Name}' ({Id}) exceeded {Minutes} minute time limit",
+                job.Name, job.Id, minutes);
+            responseText += $"\n\n[Stopped: job exceeded {minutes} minute time limit]";
+            streamError = $"Timed out after {minutes} minutes.";
         }
 
-        return (responseText, false, streamError);
+        return (responseText, streamError);
     }
 
     private static IReadOnlyList<AgentTool> BuildJobTools(AgentDefinition agentDef)
