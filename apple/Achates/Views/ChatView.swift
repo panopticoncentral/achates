@@ -5,6 +5,7 @@ struct ChatView: View {
     let agent: Agent
     @State private var speechService = SpeechService()
     @State private var isAtBottom = true
+    @State private var scrollPos = ScrollPosition(idType: String.self)
     @State private var pendingEdit: ComposerView.PendingEdit?
 
     /// Live agent data from AppState, falls back to the navigation snapshot.
@@ -43,8 +44,7 @@ struct ChatView: View {
                 .accessibilityLabel("Reconnecting to server")
             }
 
-            ScrollViewReader { proxy in
-                    ScrollView {
+            ScrollView {
                         LazyVStack(spacing: 2) {
                             let items = visibleMessages
                             if items.isEmpty && !appState.isStreaming {
@@ -84,31 +84,24 @@ struct ChatView: View {
                                 .padding(.top, position.topPadding)
                                 .transition(.opacity.animation(.easeIn(duration: 0.15)))
                             }
-
-                            // Invisible anchor for scroll tracking
-                            Color.clear.frame(height: 1)
-                                .id("bottom-anchor")
                         }
+                        .scrollTargetLayout()
                         .padding(.horizontal, 8)
                         .padding(.vertical, 8)
                     }
+                    .scrollPosition($scrollPos)
+                    .defaultScrollAnchor(.bottom, for: .sizeChanges)
                     .onChange(of: appState.messages.count) { _, _ in
                         // New message added — always scroll to bottom.
                         // Defer one tick so the LazyVStack lays out the new
                         // bubbles before the animation captures its target.
-                        guard let lastId = appState.messages.last?.id else { return }
+                        guard appState.messages.last != nil else { return }
                         Task { @MainActor in
                             try? await Task.sleep(for: .milliseconds(16))
                             withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo(lastId, anchor: .bottom)
+                                scrollPos.scrollTo(edge: .bottom)
                             }
                             isAtBottom = true
-                        }
-                    }
-                    .onChange(of: streamingTextLength) { _, _ in
-                        // Streaming delta — only scroll if user was already at bottom
-                        if isAtBottom {
-                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
                         }
                     }
                     .modifier(ScrollBottomDetector(isAtBottom: $isAtBottom))
@@ -116,7 +109,7 @@ struct ChatView: View {
                         if !isAtBottom {
                             Button {
                                 withAnimation(.easeOut(duration: 0.2)) {
-                                    proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                                    scrollPos.scrollTo(edge: .bottom)
                                 }
                                 isAtBottom = true
                             } label: {
@@ -132,7 +125,6 @@ struct ChatView: View {
                             .accessibilityLabel("Scroll to bottom")
                         }
                     }
-                }
 
             ComposerView(
                 speechService: speechService,
@@ -268,12 +260,6 @@ struct ChatView: View {
                 return true
             }
         }
-    }
-
-    /// Lightweight proxy for streaming content changes — avoids O(n) string comparison.
-    private var streamingTextLength: Int {
-        guard let last = appState.messages.last else { return 0 }
-        return last.blocks.count * 10000 + last.textContent.count
     }
 
     private var connectionLabel: String? {
