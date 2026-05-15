@@ -54,6 +54,9 @@ public sealed class MobileSessionStore(string basePath)
             if (session is null) continue;
 
             var lastUserMessage = session.Messages.OfType<UserMessage>().LastOrDefault();
+            var cronTaskName = session.Messages.FirstOrDefault() is UserMessage { Hidden: true } first
+                ? Cron.CronSessionMarker.TryParseJobName(first.Text)
+                : null;
             results.Add(new MobileSessionInfo(
                 session.Id,
                 session.Title,
@@ -61,7 +64,8 @@ public sealed class MobileSessionStore(string basePath)
                 session.Updated,
                 session.Messages.Count,
                 lastUserMessage?.Text,
-                session.JobId));
+                session.JobId,
+                cronTaskName));
         }
 
         IEnumerable<MobileSessionInfo> query = results.OrderByDescending(s => s.Updated);

@@ -26,4 +26,5 @@ public sealed record MobileSessionInfo(
     DateTimeOffset Updated,
     int MessageCount,
     string? Preview,
-    string? JobId);
+    string? JobId,
+    string? CronTaskName = null);

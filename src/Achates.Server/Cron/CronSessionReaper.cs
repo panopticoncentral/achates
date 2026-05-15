@@ -5,12 +5,17 @@ namespace Achates.Server.Cron;
 /// <summary>
 /// Prunes old cron-origin sessions so recurring jobs don't bloat the session list.
 ///
-/// Only touches sessions whose <see cref="MobileSession.JobId"/> is set and whose
-/// originating job is <see cref="CronJobKind.User"/>. Dreamtime sessions are left
-/// alone so they remain auditable.
+/// A session is treated as cron-origin if its <see cref="MobileSession.JobId"/> is
+/// set, or — when the stamp was lost (e.g. an old chat-resave path) — if its first
+/// message carries the <c>[Scheduled task: &lt;name&gt;]</c> fingerprint. Detection
+/// therefore does not depend on the originating job still existing.
 ///
-/// Rule: for each JobId, keep the N most-recent sessions (default 1). Additionally,
-/// drop anything older than <see cref="CronConfig.MaxAgeDays"/> regardless of count.
+/// Rules:
+/// - User-kind: for each job (by JobId, or task name when unstamped) keep the N
+///   most-recent sessions (default 1), and drop anything older than
+///   <see cref="CronConfig.MaxAgeDays"/>.
+/// - Dreamtime-kind: keep the full nightly history (no keep-N) for auditability,
+///   bounded only by the <see cref="CronConfig.MaxAgeDays"/> max-age ceiling.
 /// </summary>
 public sealed class CronSessionReaper(
     MobileSessionStore sessionStore,
@@ -79,9 +84,14 @@ public sealed class CronSessionReaper(
         DateTimeOffset now,
         CancellationToken ct)
     {
-        // Build a set of User-kind job IDs. Dreamtime jobs are exempt.
-        var userJobIds = new HashSet<string>(
-            jobs.Where(j => j.Kind == CronJobKind.User).Select(j => j.Id));
+        var jobsById = jobs.ToDictionary(j => j.Id);
+
+        // Names that identify a dreamtime-origin session when the JobId is gone.
+        // Dreamtime jobs are always created with Name "Dreamtime"; include the
+        // literal as a defensive fallback.
+        var dreamtimeNames = new HashSet<string>(StringComparer.Ordinal) { "Dreamtime" };
+        foreach (var j in jobs.Where(j => j.Kind == CronJobKind.Dreamtime))
+            dreamtimeNames.Add(j.Name);
 
         // List all sessions (paginated API — walk to the end).
         var all = new List<MobileSessionInfo>();
@@ -94,31 +104,49 @@ public sealed class CronSessionReaper(
             before = page[^1].Updated;
         }
 
-        var victims = new List<string>();
-
-        // Absolute max-age ceiling across all cron-origin sessions.
-        if (maxAge is { } age)
+        // Classify each session as cron-origin via JobId (preferred) or the
+        // [Scheduled task: <name>] fingerprint (recovers sessions whose JobId
+        // stamp was lost). Kind drives the retention policy below.
+        var cron = new List<(MobileSessionInfo Session, CronJobKind Kind, string GroupKey)>();
+        foreach (var s in all)
         {
-            var cutoff = now - age;
-            foreach (var s in all)
+            if (s.JobId is { } jobId)
             {
-                if (s.JobId is null) continue;
-                if (!userJobIds.Contains(s.JobId)) continue;
-                if (s.Updated < cutoff) victims.Add(s.Id);
+                var kind = jobsById.TryGetValue(jobId, out var job)
+                    ? job.Kind
+                    : (IsDreamtime(s.CronTaskName, dreamtimeNames) ? CronJobKind.Dreamtime : CronJobKind.User);
+                cron.Add((s, kind, jobId));
+            }
+            else if (s.CronTaskName is { } taskName)
+            {
+                var kind = IsDreamtime(taskName, dreamtimeNames) ? CronJobKind.Dreamtime : CronJobKind.User;
+                cron.Add((s, kind, "name:" + taskName));
             }
         }
 
-        // Keep-N-per-job. Sessions are already sorted Updated desc by ListAsync.
+        var victims = new List<string>();
+
+        // Max-age ceiling — applies to every cron-origin session, both kinds.
+        if (maxAge is { } age)
+        {
+            var cutoff = now - age;
+            foreach (var (s, _, _) in cron)
+                if (s.Updated < cutoff) victims.Add(s.Id);
+        }
+
+        // Keep-N-per-job — User-kind only. Dreamtime keeps its nightly history
+        // (bounded only by max-age) for auditability. Sessions are already
+        // sorted Updated desc by ListAsync.
         if (keepLast > 0)
         {
-            var byJob = all
-                .Where(s => s.JobId is not null && userJobIds.Contains(s.JobId))
-                .GroupBy(s => s.JobId!);
+            var byJob = cron
+                .Where(c => c.Kind == CronJobKind.User)
+                .GroupBy(c => c.GroupKey);
 
             foreach (var group in byJob)
             {
-                foreach (var s in group.Skip(keepLast))
-                    victims.Add(s.Id);
+                foreach (var c in group.Skip(keepLast))
+                    victims.Add(c.Session.Id);
             }
         }
 
@@ -133,4 +161,7 @@ public sealed class CronSessionReaper(
 
         return unique.Count;
     }
+
+    private static bool IsDreamtime(string? taskName, HashSet<string> dreamtimeNames)
+        => taskName is not null && dreamtimeNames.Contains(taskName);
 }

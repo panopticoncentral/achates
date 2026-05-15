@@ -342,7 +342,7 @@ public sealed class CronService : IAsyncDisposable
 
         var stream = agent.PromptAsync(new UserMessage
         {
-            Text = $"[Scheduled task: {job.Name}]\n\n{job.Message}",
+            Text = $"{CronSessionMarker.FormatHeader(job.Name)}\n\n{job.Message}",
             Hidden = true,
         });
 
