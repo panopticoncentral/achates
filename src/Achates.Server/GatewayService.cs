@@ -367,6 +367,7 @@ public sealed class GatewayService(
                 _agents[newName] = newDef;
                 _mobileTransport?.AddAgent(newName, newDef);
                 await ReconcileDreamtimeAsync(newName, newDef, logger);
+                _cronService?.AddAgent(newName, newDef);
                 logger.LogInformation("Scaffolded default agent '{Name}' after deleting last agent", newName);
             }
         }
@@ -383,7 +384,7 @@ public sealed class GatewayService(
         _agents[name] = agentDef;
         _mobileTransport?.UpdateAgent(name, agentDef);
         await ReconcileDreamtimeAsync(name, agentDef, logger);
-        _cronService?.Poke();
+        _cronService?.AddAgent(name, agentDef);
         logger.LogInformation("Agent '{Name}' reloaded with model {Model}", name, agentDef.Model.Id);
         return agentDef;
     }

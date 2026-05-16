@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Achates.Agent;
 using Achates.Agent.Events;
 using Achates.Agent.Messages;
@@ -15,7 +16,7 @@ namespace Achates.Server.Cron;
 /// </summary>
 public sealed class CronService : IAsyncDisposable
 {
-    private readonly Dictionary<string, (CronStore Store, AgentDefinition Agent)> _agents;
+    private readonly ConcurrentDictionary<string, (CronStore Store, AgentDefinition Agent)> _agents;
     private readonly MobileTransport _transport;
     private readonly MobileSessionStore _sessionStore;
     private readonly CronSessionReaper? _reaper;
@@ -66,7 +67,7 @@ public sealed class CronService : IAsyncDisposable
         ILogger<CronService> logger,
         CronSessionReaper? reaper = null)
     {
-        _agents = agents;
+        _agents = new ConcurrentDictionary<string, (CronStore, AgentDefinition)>(agents);
         _transport = transport;
         _sessionStore = sessionStore;
         _logger = logger;
@@ -96,9 +97,21 @@ public sealed class CronService : IAsyncDisposable
     /// </summary>
     public void RenameAgent(string oldName, string newName, AgentDefinition newDefinition)
     {
-        _agents.Remove(oldName);
+        _agents.TryRemove(oldName, out _);
         if (newDefinition.CronStore is { } store)
             _agents[newName] = (store, newDefinition);
+    }
+
+    /// <summary>
+    /// Register an agent created or reloaded after startup so its cron store is
+    /// polled by the loop. No-op if the agent has no CronStore. Pokes the loop
+    /// so a freshly added (possibly overdue) job is picked up promptly.
+    /// </summary>
+    public void AddAgent(string name, AgentDefinition definition)
+    {
+        if (definition.CronStore is not { } store) return;
+        _agents[name] = (store, definition);
+        Poke();
     }
 
     /// <summary>
@@ -107,7 +120,7 @@ public sealed class CronService : IAsyncDisposable
     /// </summary>
     public void RemoveAgent(string name)
     {
-        if (_agents.Remove(name))
+        if (_agents.TryRemove(name, out _))
             Poke();
     }
 
