@@ -675,6 +675,24 @@ final class AppState {
         messages[index].completeToolCall(toolId: toolId, result: result, success: success)
     }
 
+    func startAgentTurn(agentTurnId: String, agentName: String) {
+        guard let id = streamingMessageId,
+              let index = lastMessageIndex(id: id) else { return }
+        messages[index].appendAgentTurn("", agentTurnId: agentTurnId, agentName: agentName)
+    }
+
+    func appendAgentTurnDelta(_ delta: String) {
+        guard let id = streamingMessageId,
+              let index = lastMessageIndex(id: id) else { return }
+        messages[index].appendAgentTurnDelta(delta)
+    }
+
+    func endAgentTurn(_ text: String) {
+        guard let id = streamingMessageId,
+              let index = lastMessageIndex(id: id) else { return }
+        messages[index].endAgentTurn(text)
+    }
+
     func finalizeStreamingMessage(usage: MessageUsage? = nil) {
         if let usage, let id = streamingMessageId, let index = lastMessageIndex(id: id) {
             messages[index].usage = usage

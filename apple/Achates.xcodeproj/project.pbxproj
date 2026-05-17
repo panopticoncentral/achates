@@ -52,6 +52,11 @@
 			path = Achates;
 			sourceTree = "<group>";
 		};
+		8BAC11A02F6900000003022C /* AchatesTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AchatesTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -84,6 +89,7 @@
 			isa = PBXGroup;
 			children = (
 				8B8BF0D22F6864A5005E11BC /* Achates */,
+				8BAC11A02F6900000003022C /* AchatesTests */,
 				8B8BF0D12F6864A5005E11BC /* Products */,
 			);
 			sourceTree = "<group>";
@@ -136,6 +142,9 @@
 			);
 			dependencies = (
 				8B8BF0E12F6864A6005E11BC /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				8BAC11A02F6900000003022C /* AchatesTests */,
 			);
 			name = AchatesTests;
 			packageProductDependencies = (

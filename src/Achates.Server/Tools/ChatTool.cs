@@ -1,47 +1,42 @@
 using System.Text;
 using System.Text.Json;
-using Achates.Agent;
-using Achates.Agent.Events;
-using Achates.Agent.Messages;
 using Achates.Agent.Tools;
 using Achates.Providers.Completions.Content;
-using Achates.Providers.Completions.Events;
-using Achates.Server.Mobile;
+using Achates.Server.Chat;
 using static Achates.Providers.Util.JsonSchemaHelpers;
 
 namespace Achates.Server.Tools;
 
 /// <summary>
-/// Enables inter-agent communication. An agent can discover other agents and
-/// start a ping-pong conversation with them. The target agent runs in an isolated
-/// AgentRuntime with its own tools (minus chat, to prevent cascade).
+/// Thin façade over <see cref="ChatRoomManager"/>. An agent can discover other
+/// agents (<c>agents</c>) and send a single message to one of them
+/// (<c>ask</c>), receiving its reply. State (the continuing conversation with
+/// the target) lives in the manager / target session, not here.
 /// </summary>
 internal sealed class ChatTool(
     string selfAgentName,
     IReadOnlyDictionary<string, AgentInfo> agents,
     IReadOnlyList<string>? allowList,
-    MobileSessionStore? sessionStore = null,
-    Func<string, MobileSession, CancellationToken, Task>? onSessionSaved = null) : AgentTool
+    ChatRoomManager? manager,
+    string initiatorSessionId) : AgentTool
 {
-    private const int DefaultMaxTurns = 15;
-    private const string DoneSignal = "<<DONE>>";
+    private const string ActionAgents = "agents";
+    private const string ActionAsk = "ask";
 
     private static readonly JsonElement _schema = ObjectSchema(
         new Dictionary<string, JsonElement>
         {
-            ["action"] = StringEnum(["agents", "chat"],
-                "Action to perform. 'agents' lists available agents. 'chat' starts a conversation with another agent."),
-            ["agent"] = StringSchema("Name of the agent to chat with. Required for 'chat'."),
-            ["message"] = StringSchema("Initial message to send to the agent. Required for 'chat'."),
-            ["max_turns"] = NumberSchema(
-                $"Maximum number of back-and-forth exchanges (1-{DefaultMaxTurns}). Default: {DefaultMaxTurns}."),
+            ["action"] = StringEnum([ActionAgents, ActionAsk],
+                "Action to perform. 'agents' lists available agents. 'ask' sends one message to an agent and returns its reply."),
+            ["agent"] = StringSchema("Name of the agent to message. Required for 'ask'."),
+            ["message"] = StringSchema("Message to send to the agent. Required for 'ask'."),
         },
         required: ["action"]);
 
     public override string Name => "chat";
-    public override string Description =>
-        "Talk to another agent. Use 'agents' to see who's available, then 'chat' to start a conversation.";
     public override string Label => "Agent Chat";
+    public override string Description =>
+        "Talk to another agent. 'agents' lists who's available; 'ask' sends one message to an agent and returns its reply. Call 'ask' again to continue — the other agent remembers this conversation.";
     public override JsonElement Parameters => _schema;
 
     public override async Task<AgentToolResult> ExecuteAsync(
@@ -50,12 +45,12 @@ internal sealed class ChatTool(
         CancellationToken cancellationToken = default,
         Func<AgentToolResult, Task>? onProgress = null)
     {
-        var action = GetString(arguments, "action") ?? "agents";
+        var action = GetString(arguments, "action") ?? ActionAgents;
 
         return action switch
         {
-            "agents" => ListAgents(),
-            "chat" => await ChatAsync(arguments, onProgress, cancellationToken),
+            ActionAgents => ListAgents(),
+            ActionAsk => await AskAsync(toolCallId, arguments, cancellationToken),
             _ => TextResult($"Unknown action: {action}"),
         };
     }
@@ -86,9 +81,9 @@ internal sealed class ChatTool(
         return TextResult(sb.ToString().TrimEnd());
     }
 
-    private async Task<AgentToolResult> ChatAsync(
+    private async Task<AgentToolResult> AskAsync(
+        string toolCallId,
         Dictionary<string, object?> arguments,
-        Func<AgentToolResult, Task>? onProgress,
         CancellationToken cancellationToken)
     {
         var targetName = GetString(arguments, "agent");
@@ -98,7 +93,7 @@ internal sealed class ChatTool(
         if (targetName.Equals(selfAgentName, StringComparison.OrdinalIgnoreCase))
             return TextResult("Error: you cannot chat with yourself.");
 
-        if (!agents.TryGetValue(targetName, out var targetInfo))
+        if (!agents.ContainsKey(targetName))
             return TextResult($"Error: agent '{targetName}' not found. Use action 'agents' to see available agents.");
 
         if (!IsAllowed(targetName))
@@ -108,183 +103,17 @@ internal sealed class ChatTool(
         if (string.IsNullOrWhiteSpace(message))
             return TextResult("Error: 'message' is required.");
 
-        var maxTurns = GetInt(arguments, "max_turns") ?? DefaultMaxTurns;
-        maxTurns = Math.Clamp(maxTurns, 1, DefaultMaxTurns);
+        if (manager is null)
+            return TextResult("Error: inter-agent chat is not available.");
 
-        // Build tools for both agents (excluding chat to prevent cascade)
-        var selfInfo = agents[selfAgentName];
-        var selfTools = BuildTargetTools(selfInfo.AgentDef);
-        var targetTools = BuildTargetTools(targetInfo.AgentDef);
+        // Invariant: the transport binds the sink around every chat-tool turn (Task 6); unbound = a wiring bug.
+        var sink = ChatSinkAccessor.Current
+            ?? throw new InvalidOperationException("No chat sink bound for this turn.");
 
-        var chatPreamble =
-            $"\n\n## Inter-Agent Chat\n"
-            + $"You are in a conversation with another agent. "
-            + $"When the conversation is complete and you have nothing more to add, "
-            + $"end your response with {DoneSignal} on its own line. "
-            + $"Do not use {DoneSignal} if you still have questions or need more information.";
+        var reply = await manager.AskAsync(
+            selfAgentName, initiatorSessionId, targetName, message, toolCallId, sink, cancellationToken);
 
-        // Create isolated runtimes for both agents.
-        // Date block is computed fresh; cached agentDef.SystemPrompt is date-free.
-        var dateBlock = SystemPrompt.CurrentDateTimeBlock();
-        var selfRuntime = new AgentRuntime(new AgentOptions
-        {
-            Model = selfInfo.AgentDef.Model,
-            SystemPrompt = dateBlock + selfInfo.AgentDef.SystemPrompt + chatPreamble
-                + $"\nYou are chatting with agent '{targetName}' ({targetInfo.Description ?? "no description"}).",
-            Tools = selfTools,
-            CompletionOptions = selfInfo.AgentDef.CompletionOptions,
-        });
-
-        var targetRuntime = new AgentRuntime(new AgentOptions
-        {
-            Model = targetInfo.AgentDef.Model,
-            SystemPrompt = dateBlock + targetInfo.AgentDef.SystemPrompt + chatPreamble
-                + $"\nYou are being consulted by agent '{selfAgentName}' ({selfInfo.Description ?? "no description"}).",
-            Tools = targetTools,
-            CompletionOptions = targetInfo.AgentDef.CompletionOptions,
-        });
-
-        var transcript = new StringBuilder();
-        transcript.AppendLine($"**{selfAgentName}**: {message}");
-
-        var currentMessage = message;
-        var currentSpeaker = selfAgentName;
-        var respondingRuntime = targetRuntime;
-        var respondingName = targetName;
-        var respondingDef = targetInfo.AgentDef;
-
-        for (var turn = 0; turn < maxTurns; turn++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            // The responding agent gets the message
-            var response = await RunAgentTurnAsync(
-                respondingRuntime,
-                $"[From {currentSpeaker}]: {currentMessage}",
-                respondingDef.CostLedger,
-                respondingName,
-                cancellationToken);
-
-            var cleanResponse = response.Replace(DoneSignal, "").Trim();
-            transcript.AppendLine($"**{respondingName}** (turn {turn + 1}): {cleanResponse}");
-
-            // Report progress
-            if (onProgress is not null)
-            {
-                await onProgress(TextResult(
-                    $"Turn {turn + 1}/{maxTurns}: {respondingName} responded."));
-            }
-
-            // Check if done
-            if (response.Contains(DoneSignal, StringComparison.OrdinalIgnoreCase))
-                break;
-
-            // Last turn — no swap needed
-            if (turn == maxTurns - 1)
-                break;
-
-            // Swap roles for ping-pong
-            currentMessage = cleanResponse;
-            currentSpeaker = respondingName;
-            if (respondingRuntime == targetRuntime)
-            {
-                respondingRuntime = selfRuntime;
-                respondingName = selfAgentName;
-                respondingDef = selfInfo.AgentDef;
-            }
-            else
-            {
-                respondingRuntime = targetRuntime;
-                respondingName = targetName;
-                respondingDef = targetInfo.AgentDef;
-            }
-        }
-
-        // Persist the target agent's side as its own session so its nightly
-        // dreamtime can review the conversation and remember anything worthwhile.
-        // The caller already retains the transcript in its own session.
-        if (sessionStore is not null && targetRuntime.Messages.Count > 0)
-        {
-            var bSession = new MobileSession
-            {
-                Id = Guid.NewGuid().ToString("N")[..12],
-                Title = $"Chat with {selfAgentName}",
-                Source = SessionSource.Chat,
-                Messages = [.. targetRuntime.Messages],
-            };
-            await sessionStore.SaveAsync(targetName, bSession, cancellationToken);
-            if (onSessionSaved is not null)
-                await onSessionSaved(targetName, bSession, cancellationToken);
-        }
-
-        return new AgentToolResult
-        {
-            Content = [new CompletionTextContent { Text = transcript.ToString().Trim() }],
-            Details = new { Agent = targetName, Turns = maxTurns },
-        };
-    }
-
-    private static async Task<string> RunAgentTurnAsync(
-        AgentRuntime runtime, string message, CostLedger? costLedger, string agentName,
-        CancellationToken cancellationToken)
-    {
-        var stream = runtime.PromptAsync(message);
-        var responseText = new StringBuilder();
-
-        await foreach (var evt in stream.WithCancellation(cancellationToken))
-        {
-            switch (evt)
-            {
-                case MessageStreamEvent { Inner: CompletionTextDeltaEvent delta }:
-                    responseText.Append(delta.Delta);
-                    break;
-
-                case MessageEndEvent { Message: AssistantMessage assistantMsg }:
-                    if (costLedger is not null)
-                    {
-                        _ = costLedger.AppendAsync(new CostEntry
-                        {
-                            Timestamp = DateTimeOffset.UtcNow,
-                            Model = assistantMsg.Model,
-                            Channel = "chat",
-                            Peer = agentName,
-                            InputTokens = assistantMsg.Usage.Input,
-                            OutputTokens = assistantMsg.Usage.Output,
-                            CacheReadTokens = assistantMsg.Usage.CacheRead,
-                            CacheWriteTokens = assistantMsg.Usage.CacheWrite,
-                            CostTotal = assistantMsg.Usage.Cost.Total,
-                            CostInput = assistantMsg.Usage.Cost.Input,
-                            CostOutput = assistantMsg.Usage.Cost.Output,
-                            CostCacheRead = assistantMsg.Usage.Cost.CacheRead,
-                            CostCacheWrite = assistantMsg.Usage.Cost.CacheWrite,
-                        });
-                    }
-                    break;
-            }
-        }
-
-        return responseText.ToString().Trim();
-    }
-
-    private static IReadOnlyList<AgentTool> BuildTargetTools(AgentDefinition agentDef)
-    {
-        var tools = new List<AgentTool>();
-
-        // Add shared tools, excluding ChatTool to prevent cascade
-        foreach (var tool in agentDef.Tools)
-        {
-            if (tool is not ChatTool)
-                tools.Add(tool);
-        }
-
-        // Add per-agent tools
-        var sharedMemoryPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
-        tools.Add(new MemoryTool(sharedMemoryPath, agentDef.MemoryPath));
-        if (agentDef.CostLedger is { } costLedger)
-            tools.Add(new CostTool(costLedger));
-
-        return tools;
+        return TextResult(reply);
     }
 
     private static AgentToolResult TextResult(string text) =>
@@ -292,13 +121,6 @@ internal sealed class ChatTool(
 
     private static string? GetString(Dictionary<string, object?> args, string key) =>
         args.TryGetValue(key, out var val) && val is JsonElement je ? je.GetString() : val?.ToString();
-
-    private static int? GetInt(Dictionary<string, object?> args, string key)
-    {
-        if (!args.TryGetValue(key, out var val) || val is null) return null;
-        if (val is JsonElement je && je.ValueKind == JsonValueKind.Number) return je.GetInt32();
-        return null;
-    }
 }
 
 /// <summary>
@@ -315,4 +137,20 @@ public sealed record AgentInfo
     /// Null or empty means all other agents are allowed.
     /// </summary>
     public IReadOnlyList<string>? AllowChat { get; init; }
+}
+
+/// <summary>
+/// Ambient per-turn binding of the <see cref="Achates.Server.Mobile.IChatSink"/>
+/// the transport sets up before invoking the agent runtime, so <see cref="ChatTool"/>
+/// can stream attributed inter-agent turns back to the initiator's live view.
+/// </summary>
+internal static class ChatSinkAccessor
+{
+    private static readonly AsyncLocal<Achates.Server.Mobile.IChatSink?> _current = new();
+
+    public static Achates.Server.Mobile.IChatSink? Current
+    {
+        get => _current.Value;
+        set => _current.Value = value;
+    }
 }

@@ -297,6 +297,29 @@ final class WebSocketClient {
             let success = !(payload["is_error"]?.boolValue ?? false)
             appState.completeToolCall(toolId: toolId, result: result, success: success)
 
+        case "agent_turn.start":
+            guard matchesCurrentSession else { break }
+            // Mint a fresh, unique block id per utterance. The payload `id` is
+            // the speaker agent id, which is constant across multiple rounds by
+            // the same speaker in one initiator turn — reusing it would merge
+            // distinct utterances into one bubble live (self-heals only on
+            // reload). A fresh UUID guarantees each utterance gets its own block.
+            let turnId = UUID().uuidString
+            let name = payload["agent_name"]?.stringValue ?? "agent"
+            appState.startAgentTurn(agentTurnId: turnId, agentName: name)
+
+        case "agent_turn.delta":
+            guard matchesCurrentSession else { break }
+            appState.appendAgentTurnDelta(payload["delta"]?.stringValue ?? "")
+
+        case "agent_turn.end":
+            guard matchesCurrentSession else { break }
+            // `text` is the full final text of this utterance. Apply it as the
+            // authoritative content (fills the no-delta initiator line and
+            // reconciles the streamed target line) before collapsing.
+            let text = payload["text"]?.stringValue ?? ""
+            appState.endAgentTurn(text)
+
         case "message.end":
             guard matchesCurrentSession else { break }
             var messageUsage: MessageUsage?

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Achates.Agent.Messages;
@@ -81,6 +83,31 @@ public sealed class MobileSessionStore(string basePath)
         if (hasMore) filtered.RemoveAt(filtered.Count - 1);
 
         return (filtered, hasMore);
+    }
+
+    public static string ChatSessionId(string originSessionId, string targetAgentId)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(originSessionId + "|" + targetAgentId));
+        return "chat-" + Convert.ToHexStringLower(bytes)[..12];
+    }
+
+    public async Task<MobileSession> LoadOrCreateChatSessionAsync(
+        string targetAgentId, string originSessionId, string peerAgentId, CancellationToken ct = default)
+    {
+        var id = ChatSessionId(originSessionId, targetAgentId);
+        var existing = await LoadAsync(targetAgentId, id, ct);
+        if (existing is not null) return existing;
+
+        var session = new MobileSession
+        {
+            Id = id,
+            Title = $"Chat with {peerAgentId}",
+            Source = SessionSource.Chat,
+            OriginSessionId = originSessionId,
+            PeerAgentId = peerAgentId,
+        };
+        await SaveAsync(targetAgentId, session, ct);
+        return session;
     }
 
     public async Task<MobileSession> CreateAsync(string agentName, CancellationToken ct = default)

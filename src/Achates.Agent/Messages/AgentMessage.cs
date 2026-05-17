@@ -11,6 +11,7 @@ namespace Achates.Agent.Messages;
 [JsonDerivedType(typeof(AssistantMessage), "assistant")]
 [JsonDerivedType(typeof(ToolResultMessage), "tool_result")]
 [JsonDerivedType(typeof(SummaryMessage), "summary")]
+[JsonDerivedType(typeof(AgentSpeechMessage), "speech")]
 public abstract record AgentMessage
 {
     public long Timestamp { get; init; } = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

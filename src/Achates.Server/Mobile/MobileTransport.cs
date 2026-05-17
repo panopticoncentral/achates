@@ -10,6 +10,7 @@ using Achates.Providers.Completions;
 using Achates.Providers.Completions.Content;
 using Achates.Providers.Completions.Events;
 using Achates.Providers.Models;
+using Achates.Server.Chat;
 using Achates.Server.Cron;
 using Achates.Server.Tools;
 
@@ -20,22 +21,48 @@ namespace Achates.Server.Mobile;
 /// All clients share the same session namespace — sessions are per-agent, not per-client.
 /// Manages the read loop, RPC dispatch, agent event streaming, and session persistence.
 /// </summary>
-public sealed class MobileTransport(
-    IReadOnlyDictionary<string, AgentDefinition> initialAgents,
-    MobileSessionStore sessionStore,
-    AgentStateCache stateCache,
-    ILoggerFactory loggerFactory)
+public sealed class MobileTransport
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     };
 
-    private readonly ILogger _logger = loggerFactory.CreateLogger<MobileTransport>();
-    private readonly ConcurrentDictionary<string, AgentDefinition> _agents = new(initialAgents);
+    private readonly MobileSessionStore sessionStore;
+    private readonly AgentStateCache stateCache;
+    private readonly ILoggerFactory loggerFactory;
+    private readonly ILogger _logger;
+    private readonly ConcurrentDictionary<string, AgentDefinition> _agents;
     private readonly ConcurrentDictionary<string, MobileConnection> _connections = new();
     private readonly ConcurrentDictionary<string, AgentRuntime> _runtimes = new();
+    // Intentionally unpruned: one empty buffer per active agent:session; bounded by session count.
+    private readonly ConcurrentDictionary<string, ChatTranscriptBuffer> _chatBuffers = new();
+    private readonly ChatRoomManager _chatRoomManager;
     private IReadOnlyList<object>? _modelsCache;
+
+    public MobileTransport(
+        IReadOnlyDictionary<string, AgentDefinition> initialAgents,
+        MobileSessionStore sessionStore,
+        AgentStateCache stateCache,
+        ILoggerFactory loggerFactory)
+    {
+        this.sessionStore = sessionStore;
+        this.stateCache = stateCache;
+        this.loggerFactory = loggerFactory;
+        _logger = loggerFactory.CreateLogger<MobileTransport>();
+        _agents = new(initialAgents);
+        _chatRoomManager = new ChatRoomManager(
+            sessionStore,
+            targetAgentId =>
+            {
+                if (!_agents.TryGetValue(targetAgentId, out var def))
+                    throw new InvalidOperationException($"Unknown chat target agent '{targetAgentId}'.");
+                return new AgentRuntimeFactory(
+                    def.Model,
+                    SystemPrompt.CurrentDateTimeBlock() + def.SystemPrompt,
+                    def.CostLedger);
+            });
+    }
 
     public CronService? CronService { get; set; }
 
@@ -761,9 +788,9 @@ public sealed class MobileTransport(
             var existing = await sessionStore.LoadAsync(agentName, sessionId, ct);
             var extraTools = await BuildResumeExtraToolsAsync(agentName, agentDef, existing, ct);
             if (existing is not null && existing.Messages.Count > 0)
-                runtime = CreateRuntime(agentDef, agentName, existing.Messages, extraTools);
+                runtime = CreateRuntime(agentDef, agentName, sessionId, existing.Messages, extraTools);
             else
-                runtime = CreateRuntime(agentDef, agentName, extraTools: extraTools);
+                runtime = CreateRuntime(agentDef, agentName, sessionId, extraTools: extraTools);
             _runtimes[runtimeKey] = runtime;
         }
 
@@ -836,7 +863,7 @@ public sealed class MobileTransport(
                 return ResponseFrame.Failure(request.Id, "not_found", $"Session '{sessionId}' not found or empty.");
 
             var extraTools = await BuildResumeExtraToolsAsync(agentName, agentDef, existing, ct);
-            runtime = CreateRuntime(agentDef, agentName, existing.Messages, extraTools);
+            runtime = CreateRuntime(agentDef, agentName, sessionId, existing.Messages, extraTools);
             _runtimes[runtimeKey] = runtime;
         }
 
@@ -1539,8 +1566,15 @@ public sealed class MobileTransport(
     private async Task StreamAgentResponseAsync(
         AgentRuntime runtime, string agentName, string sessionId, UserMessage userMessage, CancellationToken ct)
     {
+        var chatBuffer = _chatBuffers.GetOrAdd($"{agentName}:{sessionId}", _ => new ChatTranscriptBuffer());
         try
         {
+            chatBuffer.Clear();
+            // MUST precede PromptAsync: it eagerly Task.Run's the agent loop and
+            // snapshots ExecutionContext now, so the AsyncLocal sink set afterward
+            // would never flow into ChatTool. See Task 6 review.
+            ChatSinkAccessor.Current = new TransportChatSink(this, agentName, sessionId, chatBuffer);
+
             var stream = runtime.PromptAsync(userMessage);
 
             await foreach (var evt in stream.WithCancellation(ct))
@@ -1669,9 +1703,11 @@ public sealed class MobileTransport(
                         break;
 
                     case AgentEndEvent:
-                        // Preserve Created timestamp, title, and JobId if session already exists on disk.
-                        // JobId matters for cron-originated sessions (e.g. dreamtime) so they remain
-                        // traceable and the reaper's per-job retention still applies after the user replies.
+                        // Preserve Created timestamp, title, JobId, and chat-origin
+                        // metadata (Source/OriginSessionId/PeerAgentId) if the session
+                        // already exists on disk. JobId matters for cron-originated
+                        // sessions (e.g. dreamtime) so they remain traceable and the
+                        // reaper's per-job retention still applies after the user replies.
                         var existing = await sessionStore.LoadAsync(agentName, sessionId, ct);
                         var session = new MobileSession
                         {
@@ -1679,12 +1715,17 @@ public sealed class MobileTransport(
                             Title = existing?.Title,
                             Created = existing?.Created ?? DateTimeOffset.UtcNow,
                             JobId = existing?.JobId,
-                            Messages = [.. runtime.Messages],
+                            Source = existing?.Source,
+                            OriginSessionId = existing?.OriginSessionId,
+                            PeerAgentId = existing?.PeerAgentId,
+                            Messages = [.. chatBuffer.Merge([.. runtime.Messages])],
                         };
                         await sessionStore.SaveAsync(agentName, session, ct);
 
                         // Notify clients so the session list refreshes immediately
                         await BroadcastSessionUpdatedAsync(agentName, session, ct);
+
+                        chatBuffer.Clear();
 
                         // Auto-title after a few exchanges so the title reflects the conversation
                         if (session.Title is null && _agents.TryGetValue(agentName, out var titleAgentDef))
@@ -1710,6 +1751,7 @@ public sealed class MobileTransport(
         catch (OperationCanceledException)
         {
             _logger.LogDebug("Agent stream cancelled for {Agent}/{Session}", agentName, sessionId);
+            chatBuffer.Clear();
             stateCache.Invalidate(agentName);
             try
             {
@@ -1724,6 +1766,7 @@ public sealed class MobileTransport(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error streaming agent response for {Agent}/{Session}", agentName, sessionId);
+            chatBuffer.Clear();
             stateCache.Invalidate(agentName);
             try
             {
@@ -1824,7 +1867,7 @@ public sealed class MobileTransport(
 
     private static readonly string SharedMemoryPath = Path.Combine(AchatesHome, "memory.md");
 
-    private AgentRuntime CreateRuntime(AgentDefinition agentDef, string agentName,
+    private AgentRuntime CreateRuntime(AgentDefinition agentDef, string agentName, string sessionId,
         IReadOnlyList<AgentMessage>? messages = null,
         IReadOnlyList<AgentTool>? extraTools = null)
     {
@@ -1849,7 +1892,7 @@ public sealed class MobileTransport(
                 },
                 StringComparer.OrdinalIgnoreCase);
             tools.Add(new ChatTool(agentName, registry, agentDef.AllowChat,
-                sessionStore, BroadcastSessionUpdatedAsync));
+                _chatRoomManager, sessionId));
         }
 
         if (extraTools is not null)
@@ -1863,6 +1906,31 @@ public sealed class MobileTransport(
             CompletionOptions = agentDef.CompletionOptions,
             Messages = messages,
         });
+    }
+
+    /// <summary>
+    /// Per-turn <see cref="IChatSink"/>: broadcasts attributed inter-agent turns
+    /// to the initiator's live view and buffers attributed copies for persistence
+    /// into the initiator's session at end-of-turn.
+    /// </summary>
+    private sealed class TransportChatSink(
+        MobileTransport transport, string agentName, string sessionId, ChatTranscriptBuffer buffer) : IChatSink
+    {
+        public Task EmitTurnStartAsync(string speakerAgentId, string speakerName, string toAgentId, CancellationToken ct)
+            => transport.BroadcastEventAsync("agent_turn.start", new
+            { agent = agentName, session_id = sessionId, id = speakerAgentId,
+              speaker_id = speakerAgentId, agent_name = speakerName, to_id = toAgentId }, ct);
+
+        public Task EmitTurnDeltaAsync(string delta, CancellationToken ct)
+            => transport.BroadcastEventAsync("agent_turn.delta", new
+            { agent = agentName, session_id = sessionId, delta }, ct);
+
+        public Task EmitTurnEndAsync(string text, CancellationToken ct)
+            => transport.BroadcastEventAsync("agent_turn.end", new
+            { agent = agentName, session_id = sessionId, text }, ct);
+
+        public void BufferForInitiator(string toolCallId, AgentSpeechMessage message)
+            => buffer.Add(toolCallId, message);
     }
 
     /// <summary>

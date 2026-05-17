@@ -75,6 +75,10 @@ internal static class MessageConversion
                     });
                     break;
 
+                case AgentSpeechMessage:
+                    // Presentation/persistence artifact — never enters LLM context.
+                    break;
+
                 // Custom message types are silently skipped — they exist
                 // for the application layer, not the LLM.
             }

@@ -93,6 +93,9 @@ struct MessageBubble: View {
         case .image(_, let data, _):
             imageBubble(data)
 
+        case .agentTurn(let id, let agentName, let text, let collapsed):
+            AgentTurnView(agentTurnId: id, agentName: agentName, text: text, collapsed: collapsed)
+
         case .remoteImage(_, let url):
             remoteImageBubble(url)
         }

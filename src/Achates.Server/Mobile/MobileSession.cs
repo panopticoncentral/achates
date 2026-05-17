@@ -22,6 +22,12 @@ public sealed class MobileSession
     /// </summary>
     public SessionSource? Source { get; set; }
 
+    /// <summary>For a chat-origin session, the initiator's session id.</summary>
+    public string? OriginSessionId { get; set; }
+
+    /// <summary>For a chat-origin session, the initiator agent's id.</summary>
+    public string? PeerAgentId { get; set; }
+
     public List<AgentMessage> Messages { get; set; } = [];
 }
 

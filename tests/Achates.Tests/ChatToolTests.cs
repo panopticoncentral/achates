@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Achates.Agent.Messages;
 using Achates.Providers;
 using Achates.Providers.Completions;
 using Achates.Providers.Completions.Content;
@@ -6,6 +7,7 @@ using Achates.Providers.Completions.Events;
 using Achates.Providers.Completions.Messages;
 using Achates.Providers.Models;
 using Achates.Server;
+using Achates.Server.Chat;
 using Achates.Server.Mobile;
 using Achates.Server.Tools;
 
@@ -56,7 +58,7 @@ public sealed class ChatToolTests
             dict[key] = value is string s
                 ? JsonDocument.Parse($"\"{s}\"").RootElement
                 : value;
-        dict.TryAdd("action", JsonDocument.Parse("\"chat\"").RootElement);
+        dict.TryAdd("action", JsonDocument.Parse("\"ask\"").RootElement);
         return dict;
     }
 
@@ -66,7 +68,7 @@ public sealed class ChatToolTests
     public async Task ListAgents_shows_other_agents()
     {
         var registry = MakeRegistry(("alice", "Research agent"), ("bob", "Writer"), ("self", "Me"));
-        var tool = new ChatTool("self", registry, null);
+        var tool = new ChatTool("self", registry, null, manager: null, initiatorSessionId: "s");
 
         var result = await tool.ExecuteAsync("1",
             new Dictionary<string, object?> { ["action"] = JsonDocument.Parse("\"agents\"").RootElement });
@@ -82,7 +84,7 @@ public sealed class ChatToolTests
     public async Task ListAgents_respects_allowlist()
     {
         var registry = MakeRegistry(("alice", "A"), ("bob", "B"), ("self", "Me"));
-        var tool = new ChatTool("self", registry, ["alice"]);
+        var tool = new ChatTool("self", registry, ["alice"], manager: null, initiatorSessionId: "s");
 
         var result = await tool.ExecuteAsync("1",
             new Dictionary<string, object?> { ["action"] = JsonDocument.Parse("\"agents\"").RootElement });
@@ -96,7 +98,7 @@ public sealed class ChatToolTests
     public async Task ListAgents_empty_allowlist_shows_all()
     {
         var registry = MakeRegistry(("alice", "A"), ("bob", "B"), ("self", "Me"));
-        var tool = new ChatTool("self", registry, []);
+        var tool = new ChatTool("self", registry, [], manager: null, initiatorSessionId: "s");
 
         var result = await tool.ExecuteAsync("1",
             new Dictionary<string, object?> { ["action"] = JsonDocument.Parse("\"agents\"").RootElement });
@@ -110,7 +112,7 @@ public sealed class ChatToolTests
     public async Task ListAgents_no_others_returns_message()
     {
         var registry = MakeRegistry(("self", "Me"));
-        var tool = new ChatTool("self", registry, null);
+        var tool = new ChatTool("self", registry, null, manager: null, initiatorSessionId: "s");
 
         var result = await tool.ExecuteAsync("1",
             new Dictionary<string, object?> { ["action"] = JsonDocument.Parse("\"agents\"").RootElement });
@@ -124,7 +126,7 @@ public sealed class ChatToolTests
     public async Task Chat_requires_agent_name()
     {
         var registry = MakeRegistry(("self", "Me"), ("bob", "B"));
-        var tool = new ChatTool("self", registry, null);
+        var tool = new ChatTool("self", registry, null, manager: null, initiatorSessionId: "s");
 
         var result = await tool.ExecuteAsync("1", Args(("message", "hello")));
 
@@ -135,7 +137,7 @@ public sealed class ChatToolTests
     public async Task Chat_requires_message()
     {
         var registry = MakeRegistry(("self", "Me"), ("bob", "B"));
-        var tool = new ChatTool("self", registry, null);
+        var tool = new ChatTool("self", registry, null, manager: null, initiatorSessionId: "s");
 
         var result = await tool.ExecuteAsync("1", Args(("agent", "bob")));
 
@@ -146,7 +148,7 @@ public sealed class ChatToolTests
     public async Task Chat_rejects_self_target()
     {
         var registry = MakeRegistry(("self", "Me"), ("bob", "B"));
-        var tool = new ChatTool("self", registry, null);
+        var tool = new ChatTool("self", registry, null, manager: null, initiatorSessionId: "s");
 
         var result = await tool.ExecuteAsync("1", Args(("agent", "self"), ("message", "hello")));
 
@@ -157,7 +159,7 @@ public sealed class ChatToolTests
     public async Task Chat_rejects_unknown_agent()
     {
         var registry = MakeRegistry(("self", "Me"), ("bob", "B"));
-        var tool = new ChatTool("self", registry, null);
+        var tool = new ChatTool("self", registry, null, manager: null, initiatorSessionId: "s");
 
         var result = await tool.ExecuteAsync("1", Args(("agent", "unknown"), ("message", "hello")));
 
@@ -168,7 +170,7 @@ public sealed class ChatToolTests
     public async Task Chat_rejects_disallowed_agent()
     {
         var registry = MakeRegistry(("self", "Me"), ("alice", "A"), ("bob", "B"));
-        var tool = new ChatTool("self", registry, ["alice"]);
+        var tool = new ChatTool("self", registry, ["alice"], manager: null, initiatorSessionId: "s");
 
         var result = await tool.ExecuteAsync("1", Args(("agent", "bob"), ("message", "hello")));
 
@@ -179,7 +181,7 @@ public sealed class ChatToolTests
     public async Task ListAgents_shows_tool_names()
     {
         var registry = MakeRegistry(("self", "Me"), ("bob", "B"));
-        var tool = new ChatTool("self", registry, null);
+        var tool = new ChatTool("self", registry, null, manager: null, initiatorSessionId: "s");
 
         var result = await tool.ExecuteAsync("1",
             new Dictionary<string, object?> { ["action"] = JsonDocument.Parse("\"agents\"").RootElement });
@@ -233,44 +235,76 @@ public sealed class ChatToolTests
             });
     }
 
-    // --- Target-session persistence ---
+    // --- Ask via ChatRoomManager ---
 
     [Fact]
-    public async Task Chat_persists_target_agent_session_with_chat_source()
+    public async Task Ask_action_returns_target_reply_via_manager()
     {
-        var tempBase = Path.Combine(Path.GetTempPath(), "achates-chattool-" + Guid.NewGuid().ToString("N")[..8]);
+        var baseDir = Path.Combine(Path.GetTempPath(), "achates-ct-" + Guid.NewGuid().ToString("N")[..8]);
         try
         {
-            var store = new MobileSessionStore(tempBase);
+            var store = new Achates.Server.Mobile.MobileSessionStore(baseDir);
+            var model = new Model
+            {
+                Id = "t/m", Name = "t", Provider = new ReplyOnce("the answer"),
+                Cost = new ModelCost { Prompt = 0, Completion = 0 }, ContextWindow = 1000,
+                Input = ModelModalities.Text, Output = ModelModalities.Text, Parameters = ModelParameters.Tools,
+            };
+            var mgr = new Achates.Server.Chat.ChatRoomManager(
+                store, _ => new Achates.Server.Chat.AgentRuntimeFactory(model));
             var registry = MakeRegistry(("self", "Me"), ("bob", "B"));
-            (string, MobileSession)? saved = null;
-            var tool = new ChatTool("self", registry, null, store,
-                (agent, session, _) => { saved = (agent, session); return Task.CompletedTask; });
+            var tool = new ChatTool("self", registry, null, mgr, "sess-1");
+            Achates.Server.Tools.ChatSinkAccessor.Current = new AskFakeSink();
 
-            var result = await tool.ExecuteAsync("1",
-                Args(("agent", "bob"), ("message", "hello"), ("max_turns", 3)));
+            var result = await tool.ExecuteAsync("tc-1",
+                Args(("agent", "bob"), ("message", "hello")));
 
-            // The transcript still flows back to the caller.
-            Assert.Contains("bob", GetText(result));
-
-            // The onSessionSaved callback fired for the target agent.
-            Assert.NotNull(saved);
-            Assert.Equal("bob", saved!.Value.Item1);
-            Assert.Equal(SessionSource.Chat, saved.Value.Item2.Source);
-
-            // And the session was written under bob's store, not self's.
-            var (bobSessions, _) = await store.ListAsync("bob");
-            var session = Assert.Single(bobSessions);
-            Assert.Equal(SessionSource.Chat, session.Source);
-            Assert.Contains("self", session.Title);
-            Assert.True(session.MessageCount > 0);
-
-            var (selfSessions, _) = await store.ListAsync("self");
-            Assert.Empty(selfSessions);
+            Assert.Contains("the answer", GetText(result));
         }
         finally
         {
-            if (Directory.Exists(tempBase)) Directory.Delete(tempBase, recursive: true);
+            Achates.Server.Tools.ChatSinkAccessor.Current = null;
+            if (Directory.Exists(baseDir)) Directory.Delete(baseDir, true);
         }
+    }
+
+    private sealed class AskFakeSink : IChatSink
+    {
+        public List<string> Events { get; } = [];
+        public List<(string ToolCallId, AgentSpeechMessage Msg)> Buffered { get; } = [];
+        public Task EmitTurnStartAsync(string s, string n, string t, CancellationToken ct)
+        { Events.Add($"start:{s}->{t}"); return Task.CompletedTask; }
+        public Task EmitTurnDeltaAsync(string d, CancellationToken ct)
+        { Events.Add($"delta:{d}"); return Task.CompletedTask; }
+        public Task EmitTurnEndAsync(string text, CancellationToken ct)
+        { Events.Add($"end:{text}"); return Task.CompletedTask; }
+        public void BufferForInitiator(string toolCallId, AgentSpeechMessage m)
+            => Buffered.Add((toolCallId, m));
+    }
+
+    private sealed class ReplyOnce(string reply) : IModelProvider
+    {
+        public string Id => "stub";
+        public string Name => "Stub";
+        public string EnvironmentKey => "STUB";
+        public string? Key { get; set; }
+        public HttpClient? HttpClient { get; set; }
+        public Task<IReadOnlyList<Model>> GetModelsAsync(ModelModalities? o = null, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<Model>>([]);
+        public CompletionEventStream GetCompletions(Model model, CompletionContext context, CompletionOptions? options = null, CancellationToken ct = default)
+            => CompletionEventStream.Create(stream =>
+            {
+                var msg = new CompletionAssistantMessage
+                {
+                    Content = [new CompletionTextContent { Text = reply }],
+                    Model = model.Id,
+                    CompletionUsage = new CompletionUsage { Cost = new CompletionUsageCost() },
+                    CompletionStopReason = CompletionStopReason.Stop,
+                };
+                stream.Push(new CompletionTextDeltaEvent { ContentIndex = 0, Delta = reply, Partial = msg });
+                stream.Push(new CompletionDoneEvent { Reason = CompletionStopReason.Stop, CompletionMessage = msg });
+                stream.End();
+                return Task.CompletedTask;
+            });
     }
 }

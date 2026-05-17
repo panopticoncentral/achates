@@ -143,6 +143,16 @@ func parseMessage(_ value: JSONValue, serverURL: URL?) -> ChatMessage? {
     case "summary":
         let text = dict["summary"]?.stringValue ?? ""
         return ChatMessage(id: id, role: .assistant, text: text, timestamp: timestamp)
+    case "speech":
+        let text = dict["text"]?.stringValue ?? ""
+        let speaker = dict["speaker_display_name"]?.stringValue
+            ?? dict["speaker_agent_id"]?.stringValue ?? "agent"
+        return ChatMessage(
+            id: id,
+            role: .assistant,
+            blocks: [.agentTurn(id: id, agentName: speaker, text: text, collapsed: true)],
+            timestamp: timestamp
+        )
     default:
         return nil
     }
