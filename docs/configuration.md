@@ -158,7 +158,7 @@ Each capability is a `**Key:** value` line. List values (tools, allowed chats) u
 | `Provider` | string | _(global)_ | Override the provider for this agent. |
 | `Model` | string | _(`models.base`)_ | Base model id for this agent. Falls back to `models.base` in config.yaml. |
 | `Thinking Model` | string | _(`models.thinking`)_ | Thinking model id used by the `think` tool. Falls back to `models.thinking`. Only consulted when `think` is enabled. |
-| `Tools` | list | _(none)_ | Tool names to enable. Available: `session`, `memory`, `notebook`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cost`, `cron`, `imessage`, `transcribe`, `think`, `health`, `chat`, `location`, `camera`, `image`, `profile`, `agent_creator`. |
+| `Tools` | list | _(none)_ | Tool names to enable. Available: `session`, `memory`, `notebook`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cost`, `cron`, `imessage`, `transcribe`, `think`, `health`, `chat`, `location`, `camera`, `image`, `profile`, `agent_manager`. |
 | `Allowed Chats` | list | _(all)_ | Allowlist of agent names this agent can chat with. Omit to allow all. Only relevant when `chat` is in tools. |
 | `Reasoning Effort` | string | `medium` | Reasoning effort level. Only sent if the model supports it. |
 | `Temperature` | number | _(none)_ | Sampling temperature. |

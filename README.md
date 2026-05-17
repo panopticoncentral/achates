@@ -346,6 +346,6 @@ Tokens are cached at `~/.achates/withings-tokens.json` and refresh automatically
 | `think` | Escalate a prompt to a thinking model for complex reasoning | Per-agent `**Thinking Model:**` in AGENT.md, or `models.thinking` in config.yaml |
 | `image` | Generate images via one of the configured image models | `tools.image.models` (list, or legacy `tools.image.model`) |
 | `profile` | Let the agent read and update its own description/prompt/avatar | None |
-| `agent_creator` | Create new agents at runtime | None |
+| `agent_manager` | List, read, modify, or create agents at runtime | None |
 | `location` | Get the user's GPS location from the mobile device | Connected Apple client with `location` capability |
 | `camera` | Capture a photo from the mobile device camera | Connected Apple client with `camera` capability |

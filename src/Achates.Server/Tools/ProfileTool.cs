@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Achates.Agent.Tools;
 using Achates.Providers.Completions.Content;
-using SkiaSharp;
 using static Achates.Providers.Util.JsonSchemaHelpers;
 
 namespace Achates.Server.Tools;
@@ -112,7 +111,7 @@ internal sealed class ProfileTool(string agentDir, Func<CancellationToken, Task>
             byte[] avatarBytes;
 
             // Accept a file path (from ImageTool) or base64 data
-            var resolvedPath = TryResolveImagePath(newAvatar);
+            var resolvedPath = AvatarImage.TryResolveImagePath(newAvatar, agentDir);
             if (resolvedPath is not null)
             {
                 if (!File.Exists(resolvedPath))
@@ -131,7 +130,7 @@ internal sealed class ProfileTool(string agentDir, Func<CancellationToken, Task>
                 }
             }
 
-            avatarBytes = CompressAvatar(avatarBytes, 512, 80);
+            avatarBytes = AvatarImage.Compress(avatarBytes, 512, 80);
             await File.WriteAllBytesAsync(Path.Combine(agentDir, "avatar.jpg"), avatarBytes, ct);
 
             var pngPath = Path.Combine(agentDir, "avatar.png");
@@ -153,52 +152,6 @@ internal sealed class ProfileTool(string agentDir, Func<CancellationToken, Task>
         if (File.Exists(jpgPath)) return jpgPath;
         var pngPath = Path.Combine(agentDir, "avatar.png");
         if (File.Exists(pngPath)) return pngPath;
-        return null;
-    }
-
-    private static byte[] CompressAvatar(byte[] imageBytes, int maxSize, int quality)
-    {
-        using var original = SKBitmap.Decode(imageBytes);
-        if (original is null)
-            return imageBytes;
-
-        var scale = Math.Min((float)maxSize / original.Width, (float)maxSize / original.Height);
-        if (scale >= 1f)
-        {
-            using var img = SKImage.FromBitmap(original);
-            return img.Encode(SKEncodedImageFormat.Jpeg, quality).ToArray();
-        }
-
-        var newWidth = (int)(original.Width * scale);
-        var newHeight = (int)(original.Height * scale);
-        using var resized = original.Resize(new SKImageInfo(newWidth, newHeight), SKSamplingOptions.Default);
-        using var image = SKImage.FromBitmap(resized ?? original);
-        return image.Encode(SKEncodedImageFormat.Jpeg, quality).ToArray();
-    }
-
-    /// <summary>
-    /// Resolves an image tool URL (e.g. "/agents/friday/images/file.jpg") or absolute path to a filesystem path.
-    /// Returns null if the value doesn't look like a path.
-    /// </summary>
-    private string? TryResolveImagePath(string value)
-    {
-        // Absolute filesystem path
-        if (value.StartsWith('/') && !value.StartsWith("/agents/"))
-            return value;
-
-        // Relative URL from ImageTool: /agents/{name}/images/{file}
-        if (value.StartsWith("/agents/") && value.Contains("/images/"))
-        {
-            var fileName = value[(value.LastIndexOf('/') + 1)..];
-            return Path.Combine(agentDir, "images", fileName);
-        }
-
-        // Looks like a path if it ends with an image extension
-        if (value.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
-            value.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
-            value.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
-            return Path.Combine(agentDir, "images", value);
-
         return null;
     }
 
