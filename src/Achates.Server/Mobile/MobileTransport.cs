@@ -1836,6 +1836,22 @@ public sealed class MobileTransport(
         if (agentDef.CronStore is { } cronStore && CronService is { } cron)
             tools.Add(new CronTool(cronStore, agentName, cron));
 
+        if (agentDef.ToolNames.Contains("chat"))
+        {
+            var registry = _agents.ToDictionary(
+                kv => kv.Key,
+                kv => new AgentInfo
+                {
+                    AgentDef = kv.Value,
+                    Description = kv.Value.Description,
+                    ToolNames = kv.Value.ToolNames,
+                    AllowChat = kv.Value.AllowChat,
+                },
+                StringComparer.OrdinalIgnoreCase);
+            tools.Add(new ChatTool(agentName, registry, agentDef.AllowChat,
+                sessionStore, BroadcastSessionUpdatedAsync));
+        }
+
         if (extraTools is not null)
             tools.AddRange(extraTools);
 

@@ -6,6 +6,7 @@ using Achates.Agent.Messages;
 using Achates.Agent.Tools;
 using Achates.Providers.Completions.Content;
 using Achates.Providers.Completions.Events;
+using Achates.Server.Mobile;
 using static Achates.Providers.Util.JsonSchemaHelpers;
 
 namespace Achates.Server.Tools;
@@ -18,9 +19,11 @@ namespace Achates.Server.Tools;
 internal sealed class ChatTool(
     string selfAgentName,
     IReadOnlyDictionary<string, AgentInfo> agents,
-    IReadOnlyList<string>? allowList) : AgentTool
+    IReadOnlyList<string>? allowList,
+    MobileSessionStore? sessionStore = null,
+    Func<string, MobileSession, CancellationToken, Task>? onSessionSaved = null) : AgentTool
 {
-    private const int DefaultMaxTurns = 5;
+    private const int DefaultMaxTurns = 15;
     private const string DoneSignal = "<<DONE>>";
 
     private static readonly JsonElement _schema = ObjectSchema(
@@ -195,6 +198,23 @@ internal sealed class ChatTool(
                 respondingName = targetName;
                 respondingDef = targetInfo.AgentDef;
             }
+        }
+
+        // Persist the target agent's side as its own session so its nightly
+        // dreamtime can review the conversation and remember anything worthwhile.
+        // The caller already retains the transcript in its own session.
+        if (sessionStore is not null && targetRuntime.Messages.Count > 0)
+        {
+            var bSession = new MobileSession
+            {
+                Id = Guid.NewGuid().ToString("N")[..12],
+                Title = $"Chat with {selfAgentName}",
+                Source = SessionSource.Chat,
+                Messages = [.. targetRuntime.Messages],
+            };
+            await sessionStore.SaveAsync(targetName, bSession, cancellationToken);
+            if (onSessionSaved is not null)
+                await onSessionSaved(targetName, bSession, cancellationToken);
         }
 
         return new AgentToolResult

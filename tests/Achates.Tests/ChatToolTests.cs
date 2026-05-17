@@ -1,9 +1,12 @@
 using System.Text.Json;
 using Achates.Providers;
 using Achates.Providers.Completions;
+using Achates.Providers.Completions.Content;
 using Achates.Providers.Completions.Events;
+using Achates.Providers.Completions.Messages;
 using Achates.Providers.Models;
 using Achates.Server;
+using Achates.Server.Mobile;
 using Achates.Server.Tools;
 
 namespace Achates.Tests;
@@ -200,6 +203,74 @@ public sealed class ChatToolTests
         public string? Key { get; set; }
         public HttpClient? HttpClient { get; set; }
         public Task<IReadOnlyList<Model>> GetModelsAsync(ModelModalities? outputModalities = null, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Model>>([]);
-        public CompletionEventStream GetCompletions(Model model, CompletionContext context, CompletionOptions? options = null, CancellationToken ct = default) => throw new NotImplementedException();
+
+        // Emits a single assistant turn ending with the done sentinel so an
+        // inter-agent chat completes after exactly one exchange.
+        public CompletionEventStream GetCompletions(Model model, CompletionContext context, CompletionOptions? options = null, CancellationToken ct = default)
+            => CompletionEventStream.Create(stream =>
+            {
+                const string text = "Acknowledged. <<DONE>>";
+                var message = new CompletionAssistantMessage
+                {
+                    Content = [new CompletionTextContent { Text = text }],
+                    Model = model.Id,
+                    CompletionUsage = new CompletionUsage { Cost = new CompletionUsageCost() },
+                    CompletionStopReason = CompletionStopReason.Stop,
+                };
+                stream.Push(new CompletionTextDeltaEvent
+                {
+                    ContentIndex = 0,
+                    Delta = text,
+                    Partial = message,
+                });
+                stream.Push(new CompletionDoneEvent
+                {
+                    Reason = CompletionStopReason.Stop,
+                    CompletionMessage = message,
+                });
+                stream.End();
+                return Task.CompletedTask;
+            });
+    }
+
+    // --- Target-session persistence ---
+
+    [Fact]
+    public async Task Chat_persists_target_agent_session_with_chat_source()
+    {
+        var tempBase = Path.Combine(Path.GetTempPath(), "achates-chattool-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var store = new MobileSessionStore(tempBase);
+            var registry = MakeRegistry(("self", "Me"), ("bob", "B"));
+            (string, MobileSession)? saved = null;
+            var tool = new ChatTool("self", registry, null, store,
+                (agent, session, _) => { saved = (agent, session); return Task.CompletedTask; });
+
+            var result = await tool.ExecuteAsync("1",
+                Args(("agent", "bob"), ("message", "hello"), ("max_turns", 3)));
+
+            // The transcript still flows back to the caller.
+            Assert.Contains("bob", GetText(result));
+
+            // The onSessionSaved callback fired for the target agent.
+            Assert.NotNull(saved);
+            Assert.Equal("bob", saved!.Value.Item1);
+            Assert.Equal(SessionSource.Chat, saved.Value.Item2.Source);
+
+            // And the session was written under bob's store, not self's.
+            var (bobSessions, _) = await store.ListAsync("bob");
+            var session = Assert.Single(bobSessions);
+            Assert.Equal(SessionSource.Chat, session.Source);
+            Assert.Contains("self", session.Title);
+            Assert.True(session.MessageCount > 0);
+
+            var (selfSessions, _) = await store.ListAsync("self");
+            Assert.Empty(selfSessions);
+        }
+        finally
+        {
+            if (Directory.Exists(tempBase)) Directory.Delete(tempBase, recursive: true);
+        }
     }
 }

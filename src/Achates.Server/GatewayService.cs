@@ -530,6 +530,8 @@ public sealed class GatewayService(
             ThinkingModel = thinkingModel,
             SystemPrompt = systemPrompt,
             Tools = tools,
+            ToolNames = hasTools,
+            AllowChat = agentConfig.AllowChat,
             CompletionOptions = BuildCompletionOptions(agentConfig.Completion, model),
             MemoryPath = memoryPath,
             DisplayName = agentConfig.Title,

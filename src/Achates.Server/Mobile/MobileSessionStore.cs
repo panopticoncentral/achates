@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Achates.Agent.Messages;
 
 namespace Achates.Server.Mobile;
@@ -9,6 +10,7 @@ public sealed class MobileSessionStore(string basePath)
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         WriteIndented = true,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower) },
     };
 
     public async Task<MobileSession?> LoadAsync(string agentName, string sessionId, CancellationToken ct = default)
@@ -65,7 +67,8 @@ public sealed class MobileSessionStore(string basePath)
                 session.Messages.Count,
                 lastUserMessage?.Text,
                 session.JobId,
-                cronTaskName));
+                cronTaskName,
+                session.Source));
         }
 
         IEnumerable<MobileSessionInfo> query = results.OrderByDescending(s => s.Updated);

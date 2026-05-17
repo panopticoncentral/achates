@@ -16,6 +16,13 @@ namespace Achates.Server.Cron;
 ///   <see cref="CronConfig.MaxAgeDays"/>.
 /// - Dreamtime-kind: keep the full nightly history (no keep-N) for auditability,
 ///   bounded only by the <see cref="CronConfig.MaxAgeDays"/> max-age ceiling.
+/// - Chat-origin (<see cref="SessionSource.Chat"/>): inter-agent chat sessions
+///   recorded for the target agent. Kept with no keep-N (so nightly dreamtime
+///   has time to review them), bounded only by the max-age ceiling.
+///
+/// Note: the reaper only runs for agents in the cron loop (those with a
+/// cron/dreamtime CronStore). An agent with no dreamtime won't review or reap
+/// its chat sessions — acceptable, since the feature exists for dreamtime review.
 /// </summary>
 public sealed class CronSessionReaper(
     MobileSessionStore sessionStore,
@@ -126,12 +133,16 @@ public sealed class CronSessionReaper(
 
         var victims = new List<string>();
 
-        // Max-age ceiling — applies to every cron-origin session, both kinds.
+        // Max-age ceiling — applies to every cron-origin session, both kinds,
+        // plus chat-origin sessions (no keep-N, like dreamtime).
         if (maxAge is { } age)
         {
             var cutoff = now - age;
             foreach (var (s, _, _) in cron)
                 if (s.Updated < cutoff) victims.Add(s.Id);
+            foreach (var s in all)
+                if (s.Source == SessionSource.Chat && s.Updated < cutoff)
+                    victims.Add(s.Id);
         }
 
         // Keep-N-per-job — User-kind only. Dreamtime keeps its nightly history

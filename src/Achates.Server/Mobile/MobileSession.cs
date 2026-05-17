@@ -16,7 +16,22 @@ public sealed class MobileSession
     /// </summary>
     public string? JobId { get; set; }
 
+    /// <summary>
+    /// Origin of the session when it wasn't created by direct user interaction.
+    /// Null for normal user (and cron — see <see cref="JobId"/>) sessions.
+    /// </summary>
+    public SessionSource? Source { get; set; }
+
     public List<AgentMessage> Messages { get; set; } = [];
+}
+
+/// <summary>
+/// Distinguishes sessions that weren't started by the user directly. Only
+/// chat-origin needs distinguishing today; null means a normal user/cron session.
+/// </summary>
+public enum SessionSource
+{
+    Chat,
 }
 
 public sealed record MobileSessionInfo(
@@ -27,4 +42,5 @@ public sealed record MobileSessionInfo(
     int MessageCount,
     string? Preview,
     string? JobId,
-    string? CronTaskName = null);
+    string? CronTaskName = null,
+    SessionSource? Source = null);

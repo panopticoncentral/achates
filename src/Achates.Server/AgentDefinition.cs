@@ -16,6 +16,19 @@ public sealed record AgentDefinition
     public Model? ThinkingModel { get; init; }
     public required string SystemPrompt { get; init; }
     public required IReadOnlyList<AgentTool> Tools { get; init; }
+
+    /// <summary>
+    /// Configured tool names from the agent's AGENT.md (including per-session
+    /// tools that <see cref="Tools"/> doesn't carry, e.g. <c>chat</c>). Used to
+    /// gate per-session tool construction in the transport.
+    /// </summary>
+    public IReadOnlyList<string> ToolNames { get; init; } = [];
+
+    /// <summary>
+    /// Allowlist of agent names this agent may chat with. Null/empty means all
+    /// other agents are allowed when the chat tool is enabled.
+    /// </summary>
+    public IReadOnlyList<string>? AllowChat { get; init; }
     public required CompletionOptions? CompletionOptions { get; init; }
     public required string MemoryPath { get; init; }
     public string? DisplayName { get; init; }
