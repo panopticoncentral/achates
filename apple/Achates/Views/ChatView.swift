@@ -73,9 +73,10 @@ struct ChatView: View {
                                     isLastAssistantMessage: isLast,
                                     isLastUserMessage: isLastUser,
                                     isStreaming: isStreamingMsg,
-                                    onResubmit: (canResubmit && (isLast || isLastUser)) ? {
-                                        Task { await appState.resubmitLast(text: nil, attachments: nil) }
-                                    } : nil,
+                                    onResubmit: resubmitAction(
+                                        for: message,
+                                        canResubmit: canResubmit,
+                                        isLastAssistant: isLast),
                                     onBeginEdit: (canResubmit && isLastUser) ? {
                                         beginEditingLastUserMessage()
                                     } : nil
@@ -235,6 +236,23 @@ struct ChatView: View {
 
     private var hasResubmittableUserMessage: Bool {
         appState.messages.contains(where: { $0.role == .user })
+    }
+
+    /// Resubmit any user prompt, or retry the last assistant reply (which rewinds
+    /// the latest user turn). Returns nil when resubmit isn't available.
+    private func resubmitAction(for message: ChatMessage, canResubmit: Bool, isLastAssistant: Bool) -> (() -> Void)? {
+        guard canResubmit else { return nil }
+        if message.role == .user {
+            // 0-based user-turn ordinal: count user messages before this one.
+            guard let idx = appState.messages.firstIndex(where: { $0.id == message.id }) else { return nil }
+            let ordinal = appState.messages[..<idx].lazy.filter { $0.role == .user }.count
+            let id = message.id
+            return { Task { await appState.resubmit(promptIndex: ordinal, messageId: id) } }
+        }
+        if message.role == .assistant && isLastAssistant {
+            return { Task { await appState.resubmitLast(text: nil, attachments: nil) } }
+        }
+        return nil
     }
 
     private func beginEditingLastUserMessage() {

@@ -114,10 +114,11 @@ final class WebSocketClient {
         }
     }
 
-    /// Resubmit the latest user prompt. Pass `text: nil` to keep the original text;
-    /// pass `attachments: nil` to keep the original attachments. An empty `attachments`
-    /// array explicitly clears them.
-    func resubmit(text: String?, attachments: [DraftAttachment]?) async throws {
+    /// Resubmit a user prompt. `promptIndex` is the 0-based user-turn ordinal to
+    /// rewind to; pass `nil` to rewind the latest user turn. Pass `text: nil` to
+    /// keep the original text; pass `attachments: nil` to keep the original
+    /// attachments. An empty `attachments` array explicitly clears them.
+    func resubmit(promptIndex: Int?, text: String?, attachments: [DraftAttachment]?) async throws {
         guard let agent = appState.currentAgent,
               let sessionId = appState.currentSessionId else {
             print("Cannot resubmit: no agent or session selected")
@@ -127,6 +128,9 @@ final class WebSocketClient {
             "agent": .string(agent.id),
             "session_id": .string(sessionId),
         ]
+        if let promptIndex {
+            params["prompt_index"] = .int(promptIndex)
+        }
         if let text {
             params["text"] = .string(text)
         }

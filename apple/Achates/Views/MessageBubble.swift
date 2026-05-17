@@ -198,7 +198,7 @@ struct MessageBubble: View {
                 Label("Copy", systemImage: "doc.on.doc")
             }
 
-            if message.role == .user && isLastUserMessage {
+            if message.role == .user {
                 if let onResubmit {
                     Button {
                         onResubmit()
@@ -206,7 +206,7 @@ struct MessageBubble: View {
                         Label("Resubmit", systemImage: "arrow.counterclockwise")
                     }
                 }
-                if let onBeginEdit {
+                if isLastUserMessage, let onBeginEdit {
                     Button {
                         onBeginEdit()
                     } label: {

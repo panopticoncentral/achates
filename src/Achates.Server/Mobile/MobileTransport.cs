@@ -843,10 +843,20 @@ public sealed class MobileTransport(
         if (runtime.IsRunning)
             return ResponseFrame.Failure(request.Id, "runtime_busy", "Cancel the current response before resubmitting.");
 
+        int? promptIndex = null;
+        if (request.Params.ValueKind == JsonValueKind.Object &&
+            request.Params.TryGetProperty("prompt_index", out var promptIndexProp) &&
+            promptIndexProp.TryGetInt32(out var promptIndexVal))
+        {
+            promptIndex = promptIndexVal;
+        }
+
         UserMessage? original;
         try
         {
-            original = runtime.TruncateLastUserTurn();
+            original = promptIndex is { } pi
+                ? runtime.TruncateFromUserTurn(pi)
+                : runtime.TruncateLastUserTurn();
         }
         catch (InvalidOperationException ex)
         {

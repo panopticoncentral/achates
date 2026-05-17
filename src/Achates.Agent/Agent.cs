@@ -93,6 +93,31 @@ public sealed class AgentRuntime
         return removed;
     }
 
+    /// <summary>
+    /// Remove the user message at the given 0-based user-turn ordinal
+    /// (counting only <see cref="UserMessage"/> instances) and everything
+    /// after it. Returns the removed user message, or null if the ordinal
+    /// is out of range. Throws if the runtime is currently running.
+    /// </summary>
+    public UserMessage? TruncateFromUserTurn(int userTurnIndex)
+    {
+        if (IsRunning)
+            throw new InvalidOperationException("Cannot truncate while the agent is running.");
+        if (userTurnIndex < 0) return null;
+        var seen = 0;
+        for (var i = 0; i < _messages.Count; i++)
+        {
+            if (_messages[i] is not UserMessage user) continue;
+            if (seen == userTurnIndex)
+            {
+                _messages.RemoveRange(i, _messages.Count - i);
+                return user;
+            }
+            seen++;
+        }
+        return null;
+    }
+
     // --- Prompting ---
 
     /// <summary>

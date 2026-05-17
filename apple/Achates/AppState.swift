@@ -582,14 +582,31 @@ final class AppState {
     func resubmitLast(text: String?, attachments: [DraftAttachment]?) async {
         guard client != nil, currentAgent != nil, currentSessionId != nil else { return }
         guard let originalIndex = messages.lastIndex(where: { $0.role == .user }) else { return }
+        await performResubmit(at: originalIndex, promptIndex: nil, text: text, attachments: attachments)
+    }
 
-        let original = messages[originalIndex]
+    /// Rewind to an earlier user prompt identified by its message id — drop it and
+    /// everything after it, then re-stream a fresh response. The original prompt's
+    /// text/attachments are preserved unchanged.
+    func resubmit(promptIndex: Int, messageId: String) async {
+        guard client != nil, currentAgent != nil, currentSessionId != nil else { return }
+        guard let originalIndex = messages.firstIndex(where: { $0.id == messageId }),
+              messages[originalIndex].role == .user else { return }
+        await performResubmit(at: originalIndex, promptIndex: promptIndex, text: nil, attachments: nil)
+    }
+
+    /// Shared tail for resubmit: optimistically truncate the local message list at
+    /// `index`, re-append the (possibly edited) user message, add a streaming
+    /// placeholder, and ask the server to rewind. `promptIndex` is the 0-based
+    /// user-turn ordinal sent to the server (nil = latest turn).
+    private func performResubmit(at index: Int, promptIndex: Int?, text: String?, attachments: [DraftAttachment]?) async {
+        let original = messages[index]
         let trimmedNewText = text?.trimmingCharacters(in: .whitespacesAndNewlines)
         let effectiveText = trimmedNewText ?? original.textContent
         let effectiveAttachments = attachments ?? draftAttachments(from: original)
 
         // Drop the existing user turn (and everything after it) locally.
-        messages.removeSubrange(originalIndex..<messages.count)
+        messages.removeSubrange(index..<messages.count)
 
         // Re-append the (possibly edited) user message.
         var blocks: [ContentBlock] = []
@@ -608,7 +625,7 @@ final class AppState {
         messages.append(ChatMessage(id: assistantId, role: .assistant, blocks: []))
 
         do {
-            try await client?.resubmit(text: text, attachments: attachments)
+            try await client?.resubmit(promptIndex: promptIndex, text: text, attachments: attachments)
         } catch {
             isStreaming = false
             streamingMessageId = nil
