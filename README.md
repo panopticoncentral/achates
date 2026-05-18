@@ -330,6 +330,7 @@ Tokens are cached at `~/.achates/withings-tokens.json` and refresh automatically
 | Tool | Description | Config required |
 |------|-------------|-----------------|
 | `session` | Current time, model info, timezone | None |
+| `sessions` | Browse the agent's own past sessions — `list`, `read`, `search` (excludes the current session) | None |
 | `memory` | Persistent agent memory across sessions | None |
 | `notebook` | Read/write markdown files in a configured folder | `tools.notebook.root` path |
 | `notes` | Access Apple Notes (macOS only) — `folders`, `list`, `read`, `create` | Notes automation permission on first use |

@@ -41,14 +41,11 @@ public sealed class GatewayService(
             .Select(t => ((AgentTool)RuntimeHelpers.GetUninitializedObject(t)).Name));
 
     /// <summary>
-    /// User-selectable tools with names and labels, sorted by name. System-only tools
-    /// (e.g. <see cref="SessionReviewTool"/>, which only exists during dreamtime) are excluded
-    /// so they don't appear in the agent editor.
+    /// User-selectable tools with names and labels, sorted by name.
     /// </summary>
     public static IReadOnlyList<(string Name, string Label)> AllTools { get; } =
         typeof(GatewayService).Assembly.GetTypes()
             .Where(t => t.IsSubclassOf(typeof(AgentTool)) && !t.IsAbstract)
-            .Where(t => t != typeof(SessionReviewTool))
             .Select(t => (AgentTool)RuntimeHelpers.GetUninitializedObject(t))
             .Select(t => (t.Name, t.Label))
             .OrderBy(t => t.Name)
@@ -582,6 +579,7 @@ public sealed class GatewayService(
                 case "cost":
                 case "cron":
                 case "chat":
+                case "sessions":
                     // Per-session tools — added in MobileTransport.CreateRuntime
                     break;
                 case "mail":

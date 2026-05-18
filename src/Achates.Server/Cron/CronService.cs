@@ -39,7 +39,7 @@ public sealed class CronService : IAsyncDisposable
         You have access to your current memory and the sessions that have occurred since
         your last review. Your job is to:
 
-        1. Use the session_review tool to list recent sessions.
+        1. Use the sessions tool to list recent sessions.
         2. Scan the list and decide which sessions contain information worth remembering.
         3. Read those sessions in full.
         4. Read your current memory (both shared and agent-scoped).
@@ -500,8 +500,8 @@ public sealed class CronService : IAsyncDisposable
     {
         var tools = new List<AgentTool>();
 
-        // Session review tool — uses LastRunAt from the job itself as the "since" timestamp
-        tools.Add(new SessionReviewTool(_sessionStore, agentName, job.State.LastRunAt));
+        // Session browser — uses LastRunAt from the job itself as the "since" timestamp
+        tools.Add(new SessionsTool(_sessionStore, agentName, currentSessionId: null, job.State.LastRunAt));
 
         // Memory tool for reading and updating persistent memory
         var sharedMemoryPath = Path.Combine(
