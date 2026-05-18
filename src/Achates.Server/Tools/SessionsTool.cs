@@ -221,6 +221,10 @@ internal sealed class SessionsTool(
                         sb.AppendLine();
                     }
                     break;
+                case AgentSpeechMessage speech:
+                    sb.AppendLine($"**{speech.SpeakerDisplayName}:** {speech.Text}");
+                    sb.AppendLine();
+                    break;
                 case SummaryMessage summary:
                     sb.AppendLine($"**[Earlier conversation summary]:** {summary.Summary}");
                     sb.AppendLine();
@@ -239,6 +243,7 @@ internal sealed class SessionsTool(
                 UserMessage { Hidden: false } u => u.Text,
                 AssistantMessage a => string.Join("", a.Content.OfType<CompletionTextContent>().Select(c => c.Text)),
                 ToolResultMessage t => string.Join("", t.Content.OfType<CompletionTextContent>().Select(c => c.Text)),
+                AgentSpeechMessage sp => sp.Text,
                 SummaryMessage s => s.Summary,
                 _ => null,
             };

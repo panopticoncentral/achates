@@ -74,6 +74,61 @@ public sealed class SessionsToolTests : IDisposable
     }
 
     [Fact]
+    public async Task Read_RendersChatOriginSpeech()
+    {
+        await Save(new MobileSession
+        {
+            Id = "chat-1",
+            Title = "Chat with Val",
+            Source = SessionSource.Chat,
+            Messages =
+            [
+                new AgentSpeechMessage
+                {
+                    SpeakerAgentId = "paul", SpeakerDisplayName = "Paul", ToAgentId = "val",
+                    Text = "what did you think of the proposal",
+                },
+                new AgentSpeechMessage
+                {
+                    SpeakerAgentId = "val", SpeakerDisplayName = "Val", ToAgentId = "paul",
+                    Text = "the budget section needs work but the timeline is solid",
+                },
+            ],
+        });
+
+        var text = await Run(Tool(), new() { ["action"] = "read", ["session_id"] = "chat-1" });
+
+        Assert.Contains("what did you think of the proposal", text);
+        Assert.Contains("the budget section needs work but the timeline is solid", text);
+        Assert.Contains("Paul", text);
+        Assert.Contains("Val", text);
+    }
+
+    [Fact]
+    public async Task Search_MatchesChatOriginSpeechBody()
+    {
+        await Save(new MobileSession
+        {
+            Id = "chat-1",
+            Title = "Random",
+            Source = SessionSource.Chat,
+            Messages =
+            [
+                new AgentSpeechMessage
+                {
+                    SpeakerAgentId = "val", SpeakerDisplayName = "Val", ToAgentId = "paul",
+                    Text = "we should revisit the quarterly forecast next week",
+                },
+            ],
+        });
+
+        var text = await Run(Tool(), new() { ["action"] = "search", ["query"] = "quarterly forecast" });
+
+        Assert.Contains("`chat-1`", text);
+        Assert.Contains("quarterly forecast", text);
+    }
+
+    [Fact]
     public async Task Search_Tier1_MatchesTitleWithoutBodyScan()
     {
         await Save(new MobileSession
