@@ -325,7 +325,7 @@ public sealed class CronService : IAsyncDisposable
         // Build tool list and system prompt — dreamtime jobs get special treatment.
         // The date block is computed fresh per run; agentDef.SystemPrompt is date-free.
         var systemPrompt = SystemPrompt.CurrentDateTimeBlock() + agentDef.SystemPrompt;
-        var tools = BuildJobTools(agentDef);
+        var tools = BuildJobTools(agentName, agentDef);
 
         if (job.Kind == CronJobKind.Dreamtime)
         {
@@ -476,7 +476,7 @@ public sealed class CronService : IAsyncDisposable
         return (responseText, streamError);
     }
 
-    private static IReadOnlyList<AgentTool> BuildJobTools(AgentDefinition agentDef)
+    private IReadOnlyList<AgentTool> BuildJobTools(string agentName, AgentDefinition agentDef)
     {
         var tools = new List<AgentTool>();
 
@@ -490,8 +490,10 @@ public sealed class CronService : IAsyncDisposable
         var sharedMemoryPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
         tools.Add(new MemoryTool(sharedMemoryPath, agentDef.MemoryPath));
-        if (agentDef.CostLedger is { } costLedger)
-            tools.Add(new CostTool(costLedger));
+
+        var costLedgers = BuildCostLedgerRegistry();
+        if (costLedgers.Count > 0)
+            tools.Add(new CostTool(agentName, costLedgers));
 
         return tools;
     }
@@ -508,12 +510,21 @@ public sealed class CronService : IAsyncDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
         tools.Add(new MemoryTool(sharedMemoryPath, agentDef.MemoryPath));
 
-        // Cost tool if available
-        if (agentDef.CostLedger is { } costLedger)
-            tools.Add(new CostTool(costLedger));
+        // Cost tool — same cross-agent view as a normal turn.
+        var costLedgers = BuildCostLedgerRegistry();
+        if (costLedgers.Count > 0)
+            tools.Add(new CostTool(agentName, costLedgers));
 
         return tools;
     }
+
+    private IReadOnlyDictionary<string, CostLedger> BuildCostLedgerRegistry() =>
+        _agents
+            .Where(kv => kv.Value.Agent.CostLedger is not null)
+            .ToDictionary(
+                kv => kv.Key,
+                kv => kv.Value.Agent.CostLedger!,
+                StringComparer.OrdinalIgnoreCase);
 
     private async Task DeliverAsync(CronJob job, string agentName, MobileSession session, CancellationToken ct)
     {

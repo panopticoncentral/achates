@@ -1874,8 +1874,15 @@ public sealed class MobileTransport
         var tools = new List<AgentTool>(agentDef.Tools);
 
         tools.Add(new MemoryTool(SharedMemoryPath, agentDef.MemoryPath));
-        if (agentDef.CostLedger is { } costLedger)
-            tools.Add(new CostTool(costLedger));
+
+        // Cost tool gets a snapshot of every agent's ledger so it can serve scope=all / scope=<name>.
+        // Snapshot is rebuilt per CreateRuntime call so reloads / renames are picked up on next session.
+        var costLedgers = _agents
+            .Where(kv => kv.Value.CostLedger is not null)
+            .ToDictionary(kv => kv.Key, kv => kv.Value.CostLedger!,
+                StringComparer.OrdinalIgnoreCase);
+        if (costLedgers.Count > 0)
+            tools.Add(new CostTool(agentName, costLedgers));
         if (agentDef.CronStore is { } cronStore && CronService is { } cron)
             tools.Add(new CronTool(cronStore, agentName, cron));
 
