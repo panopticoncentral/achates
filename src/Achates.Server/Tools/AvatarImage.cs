@@ -29,8 +29,11 @@ internal static class AvatarImage
     }
 
     /// <summary>
-    /// Resolves an image tool URL (e.g. "/agents/friday/images/file.jpg") or absolute path to a filesystem path.
-    /// Returns null if the value doesn't look like a path.
+    /// Resolves an image tool URL (e.g. "/agents/friday/images/file.jpg") or absolute path to a
+    /// filesystem path. Image-tool URLs are resolved relative to the agent named *in the URL*
+    /// (which owns the file), not the <paramref name="agentDir"/> passed in — so an agent can set
+    /// another agent's avatar from an image it generated. Returns null if the value doesn't look
+    /// like a path.
     /// </summary>
     public static string? TryResolveImagePath(string value, string agentDir)
     {
@@ -41,8 +44,24 @@ internal static class AvatarImage
         // Relative URL from ImageTool: /agents/{name}/images/{file}
         if (value.StartsWith("/agents/") && value.Contains("/images/"))
         {
-            var fileName = value[(value.LastIndexOf('/') + 1)..];
-            return Path.Combine(agentDir, "images", fileName);
+            var segments = value.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            // Expect exactly ["agents", "{name}", "images", "{file}"]. Names are filesystem-safe
+            // (NormalizeId) and filenames have no slashes, so anything else is malformed.
+            if (segments.Length == 4 && segments[0] == "agents" && segments[2] == "images")
+            {
+                var urlAgentName = Uri.UnescapeDataString(segments[1]);
+                var fileName = Uri.UnescapeDataString(segments[3]);
+
+                if (!IsSafeSegment(urlAgentName) || !IsSafeSegment(fileName))
+                    return null;
+
+                var agentsRoot = Path.GetDirectoryName(agentDir);
+                return agentsRoot is null
+                    ? Path.Combine(agentDir, "images", fileName)
+                    : Path.Combine(agentsRoot, urlAgentName, "images", fileName);
+            }
+
+            return null;
         }
 
         // Looks like a path if it ends with an image extension
@@ -53,4 +72,11 @@ internal static class AvatarImage
 
         return null;
     }
+
+    private static bool IsSafeSegment(string segment) =>
+        segment.Length > 0 &&
+        segment != ".." &&
+        !segment.Contains("..") &&
+        segment.IndexOf('/') < 0 &&
+        segment.IndexOf('\\') < 0;
 }
