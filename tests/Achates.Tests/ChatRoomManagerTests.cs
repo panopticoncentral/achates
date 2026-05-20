@@ -8,6 +8,7 @@ using Achates.Providers.Completions.Messages;
 using Achates.Providers.Models;
 using Achates.Server.Chat;
 using Achates.Server.Mobile;
+using Achates.Server.Tools;
 
 namespace Achates.Tests;
 
@@ -160,6 +161,38 @@ public sealed class ChatRoomManagerTests
             Assert.True(File.Exists(ledgerPath));
             var lines = await File.ReadAllTextAsync(ledgerPath);
             Assert.Contains("\"channel\":\"chat\"", lines);
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public async Task Ask_round_completes_when_universal_tools_provided()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "achates-crm-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var store = new MobileSessionStore(dir);
+
+            var mgr = new ChatRoomManager(store,
+                _ =>
+                {
+                    var memoryTool = new MemoryTool(
+                        Path.Combine(dir, "shared.md"),
+                        Path.Combine(dir, "agent.md"));
+                    return new AgentRuntimeFactory(
+                        ModelWith(new ReplyProvider("ok")),
+                        universalTools: [memoryTool]);
+                });
+
+            var sink = new FakeSink();
+            await mgr.AskAsync("val", "s", "claire", "hello", "t1", sink, default);
+
+            // Reload the chat session and verify it was produced (i.e. the round completed
+            // through the wiring with universal tools attached to the target runtime).
+            var id = MobileSessionStore.ChatSessionId("s", "claire");
+            var session = await store.LoadAsync("claire", id);
+            Assert.NotNull(session);
+            Assert.Equal(2, session!.Messages.OfType<AgentSpeechMessage>().Count());
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }

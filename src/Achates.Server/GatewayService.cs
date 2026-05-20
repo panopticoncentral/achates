@@ -35,19 +35,31 @@ public sealed class GatewayService(
     /// All known tool names that can be assigned to agents.
     /// Derived by scanning all concrete <see cref="AgentTool"/> subclasses in this assembly.
     /// </summary>
+    // Universal tools (always-on, not opt-in) are excluded — they must not
+    // appear in the agent-edit picker. See UniversalTools.cs.
+    // Keep in sync with UniversalTools.Build: any tool added there should be added here too.
+    private static readonly HashSet<string> _universalToolNames = new(StringComparer.Ordinal)
+    {
+        "memory",
+        "cost",
+    };
+
     public static IReadOnlyCollection<string> AllToolNames { get; } = new SortedSet<string>(
         typeof(GatewayService).Assembly.GetTypes()
             .Where(t => t.IsSubclassOf(typeof(AgentTool)) && !t.IsAbstract)
-            .Select(t => ((AgentTool)RuntimeHelpers.GetUninitializedObject(t)).Name));
+            .Select(t => ((AgentTool)RuntimeHelpers.GetUninitializedObject(t)).Name)
+            .Where(n => !_universalToolNames.Contains(n)));
 
     /// <summary>
     /// User-selectable tools with names and labels, sorted by name.
+    /// Universal tools (memory, cost) are excluded — they are always-on and not opt-in.
     /// </summary>
     public static IReadOnlyList<(string Name, string Label)> AllTools { get; } =
         typeof(GatewayService).Assembly.GetTypes()
             .Where(t => t.IsSubclassOf(typeof(AgentTool)) && !t.IsAbstract)
             .Select(t => (AgentTool)RuntimeHelpers.GetUninitializedObject(t))
             .Select(t => (t.Name, t.Label))
+            .Where(t => !_universalToolNames.Contains(t.Name))
             .OrderBy(t => t.Name)
             .ToList();
 
@@ -500,7 +512,6 @@ public sealed class GatewayService(
             graphAccountNames: graphAccountNames,
             hasWebSearch: hasTools.Contains("web_search"),
             hasWebFetch: hasTools.Contains("web_fetch"),
-            hasCost: hasTools.Contains("cost"),
             hasIMessage: hasTools.Contains("imessage"),
             hasCron: hasTools.Contains("cron"),
             hasHealth: hasTools.Contains("health"),
@@ -577,6 +588,11 @@ public sealed class GatewayService(
                     break;
                 case "memory":
                 case "cost":
+                    // Deprecated as configurable: these are now universal (see UniversalTools).
+                    // Branches kept as silent no-ops so legacy AGENT.md files do not emit
+                    // "unknown tool" warnings on startup. Safe to remove once configs have
+                    // organically migrated through the iOS edit sheet.
+                    break;
                 case "cron":
                 case "chat":
                 case "sessions":

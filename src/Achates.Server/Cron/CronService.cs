@@ -486,14 +486,9 @@ public sealed class CronService : IAsyncDisposable
             tools.Add(tool);
         }
 
-        // Add per-agent tools that make sense in isolation
         var sharedMemoryPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
-        tools.Add(new MemoryTool(sharedMemoryPath, agentDef.MemoryPath));
-
-        var costLedgers = BuildCostLedgerRegistry();
-        if (costLedgers.Count > 0)
-            tools.Add(new CostTool(agentName, costLedgers));
+        tools.AddRange(UniversalTools.Build(agentName, agentDef, sharedMemoryPath, BuildCostLedgerRegistry()));
 
         return tools;
     }
@@ -505,15 +500,9 @@ public sealed class CronService : IAsyncDisposable
         // Session browser — uses LastRunAt from the job itself as the "since" timestamp
         tools.Add(new SessionsTool(_sessionStore, agentName, currentSessionId: null, job.State.LastRunAt));
 
-        // Memory tool for reading and updating persistent memory
         var sharedMemoryPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
-        tools.Add(new MemoryTool(sharedMemoryPath, agentDef.MemoryPath));
-
-        // Cost tool — same cross-agent view as a normal turn.
-        var costLedgers = BuildCostLedgerRegistry();
-        if (costLedgers.Count > 0)
-            tools.Add(new CostTool(agentName, costLedgers));
+        tools.AddRange(UniversalTools.Build(agentName, agentDef, sharedMemoryPath, BuildCostLedgerRegistry()));
 
         return tools;
     }

@@ -18,7 +18,6 @@ public static class SystemPrompt
         IReadOnlyList<string>? graphAccountNames = null,
         bool hasWebSearch = false,
         bool hasWebFetch = false,
-        bool hasCost = false,
         bool hasIMessage = false,
         bool hasCron = false,
         bool hasHealth = false,
@@ -126,14 +125,11 @@ public static class SystemPrompt
             lines.Add("");
         }
 
-        if (hasCost)
-        {
-            lines.Add("## Cost Tracking");
-            lines.Add("You can query usage costs via the cost tool.");
-            lines.Add("Use 'summary' for totals, 'recent' for last N completions, or 'breakdown' for grouped analysis.");
-            lines.Add("Available periods: today, week, month, all.");
-            lines.Add("");
-        }
+        lines.Add("## Cost Tracking");
+        lines.Add("You can query usage costs via the cost tool.");
+        lines.Add("Use 'summary' for totals, 'recent' for last N completions, or 'breakdown' for grouped analysis.");
+        lines.Add("Available periods: today, week, month, all.");
+        lines.Add("");
 
         if (hasIMessage)
         {

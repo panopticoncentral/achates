@@ -176,9 +176,9 @@ public sealed class SystemPromptTests
     }
 
     [Fact]
-    public void Cost_section_included_when_enabled()
+    public void Cost_section_always_included()
     {
-        var result = SystemPrompt.Build(hasCost: true);
+        var result = SystemPrompt.Build();
 
         Assert.Contains("## Cost Tracking", result);
     }
@@ -236,7 +236,6 @@ public sealed class SystemPromptTests
         Assert.DoesNotContain("## Calendar", result);
         Assert.DoesNotContain("## Web Search", result);
         Assert.DoesNotContain("## Web Fetch", result);
-        Assert.DoesNotContain("## Cost Tracking", result);
         Assert.DoesNotContain("## iMessage", result);
         Assert.DoesNotContain("## Health", result);
         Assert.DoesNotContain("## Scheduled Tasks", result);

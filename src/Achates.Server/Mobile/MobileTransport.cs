@@ -57,10 +57,25 @@ public sealed class MobileTransport
             {
                 if (!_agents.TryGetValue(targetAgentId, out var def))
                     throw new InvalidOperationException($"Unknown chat target agent '{targetAgentId}'.");
+
+                // Cross-agent cost-ledger snapshot. Rebuilt per call so agent reloads
+                // and renames are reflected on the next consult.
+                var costLedgers = _agents
+                    .Where(kv => kv.Value.CostLedger is not null)
+                    .ToDictionary(kv => kv.Key, kv => kv.Value.CostLedger!,
+                        StringComparer.OrdinalIgnoreCase);
+
+                var universalTools = UniversalTools.Build(
+                    agentName: targetAgentId,
+                    agentDef: def,
+                    sharedMemoryPath: SharedMemoryPath,
+                    costLedgers: costLedgers);
+
                 return new AgentRuntimeFactory(
                     def.Model,
                     SystemPrompt.CurrentDateTimeBlock() + def.SystemPrompt,
-                    def.CostLedger);
+                    def.CostLedger,
+                    universalTools);
             });
     }
 
@@ -1873,16 +1888,14 @@ public sealed class MobileTransport
     {
         var tools = new List<AgentTool>(agentDef.Tools);
 
-        tools.Add(new MemoryTool(SharedMemoryPath, agentDef.MemoryPath));
-
-        // Cost tool gets a snapshot of every agent's ledger so it can serve scope=all / scope=<name>.
-        // Snapshot is rebuilt per CreateRuntime call so reloads / renames are picked up on next session.
+        // Universal tools (memory + cost) — always available, never opt-in.
+        // Cost ledgers are snapshotted per call so agent reloads / renames are reflected.
         var costLedgers = _agents
             .Where(kv => kv.Value.CostLedger is not null)
             .ToDictionary(kv => kv.Key, kv => kv.Value.CostLedger!,
                 StringComparer.OrdinalIgnoreCase);
-        if (costLedgers.Count > 0)
-            tools.Add(new CostTool(agentName, costLedgers));
+        tools.AddRange(UniversalTools.Build(agentName, agentDef, SharedMemoryPath, costLedgers));
+
         if (agentDef.CronStore is { } cronStore && CronService is { } cron)
             tools.Add(new CronTool(cronStore, agentName, cron));
 
