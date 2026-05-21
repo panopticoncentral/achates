@@ -166,27 +166,38 @@ private struct AgentRow: View {
         HStack(spacing: 12) {
             AgentAvatar(agent: agent, size: 44)
 
-            Text(agent.displayName)
-                .font(.system(size: 16, weight: .semibold))
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(agent.displayName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .lineLimit(1)
 
-            if agent.unreadCount > 0 {
-                Circle()
-                    .fill(.blue)
-                    .frame(width: 10, height: 10)
-            }
+                    if agent.unreadCount > 0 {
+                        Circle()
+                            .fill(.blue)
+                            .frame(width: 10, height: 10)
+                    }
 
-            Spacer(minLength: 4)
+                    Spacer(minLength: 4)
 
-            if let date = agent.lastActivity {
-                Text(formatTimestamp(date))
-                    .font(.system(size: 13))
-                    .foregroundStyle(agent.unreadCount > 0 ? .blue : .secondary)
+                    if let date = agent.lastActivity {
+                        Text(formatTimestamp(date))
+                            .font(.system(size: 13))
+                            .foregroundStyle(agent.unreadCount > 0 ? .blue : .secondary)
+                    }
+                }
+
+                if !agent.description.isEmpty {
+                    Text(agent.description)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(agent.displayName)
+        .accessibilityLabel(agent.description.isEmpty ? agent.displayName : "\(agent.displayName). \(agent.description)")
         .accessibilityValue(agent.unreadCount > 0 ? "\(agent.unreadCount) unread" : "")
     }
 
