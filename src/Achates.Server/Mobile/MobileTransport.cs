@@ -593,6 +593,14 @@ public sealed class MobileTransport
 
         stateCache.Invalidate(agentName);
 
+        // Notify clients so the agent list re-sorts (deleting the newest session
+        // can change the agent's last-activity timestamp and its list position).
+        _ = BroadcastEventAsync("agents.changed", new
+        {
+            agent = agentName,
+            reason = "session_deleted",
+        }, CancellationToken.None);
+
         var payload = JsonSerializer.SerializeToElement(new { deleted = true }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
