@@ -39,13 +39,33 @@ public sealed class AgentRuntime
 
         _model = options.Model;
         _systemPrompt = options.SystemPrompt;
-        _tools = options.Tools ?? [];
+        _tools = DedupeTools(options.Tools);
         _messages = options.Messages is not null ? [..options.Messages] : [];
         _completionOptions = options.CompletionOptions;
         _convertToLlm = options.ConvertToLlm;
         _transformContext = options.TransformContext;
         _completionProvider = options.CompletionProvider;
         _metadata = options.Metadata;
+    }
+
+    /// <summary>
+    /// Removes tools that share a name, keeping the last occurrence. Tool names are the
+    /// identifier the model uses to call a tool, and providers reject a request whose tool
+    /// list contains duplicates. Several builders can legitimately overlap — e.g. resuming a
+    /// dreamtime session re-injects a <c>sessions</c> tool an agent may already list — so the
+    /// runtime dedupes defensively rather than trusting every caller to.
+    /// </summary>
+    private static IReadOnlyList<AgentTool> DedupeTools(IReadOnlyList<AgentTool>? tools)
+    {
+        if (tools is null || tools.Count < 2)
+            return tools ?? [];
+
+        var byName = new Dictionary<string, AgentTool>(StringComparer.Ordinal);
+        foreach (var tool in tools)
+            byName[tool.Name] = tool;
+
+        // Already unique — keep the original list (and its ordering) untouched.
+        return byName.Count == tools.Count ? tools : [.. byName.Values];
     }
 
     // --- State access ---
@@ -62,7 +82,7 @@ public sealed class AgentRuntime
 
     public void SetModel(Model model) => _model = model;
     public void SetSystemPrompt(string? prompt) => _systemPrompt = prompt;
-    public void SetTools(IReadOnlyList<AgentTool> tools) => _tools = tools;
+    public void SetTools(IReadOnlyList<AgentTool> tools) => _tools = DedupeTools(tools);
     public void SetCompletionOptions(CompletionOptions? options) => _completionOptions = options;
 
     /// <summary>
