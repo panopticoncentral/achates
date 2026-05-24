@@ -90,7 +90,7 @@ public sealed class ChatRoomManager(
                             if (a.StopReason == CompletionStopReason.Error && error.Length == 0)
                                 error = "completion ended in error";
                             if (factory.Ledger is { } ledger)
-                                _ = ledger.AppendAsync(new CostEntry
+                                await ledger.AppendAsync(new CostEntry
                                 {
                                     Timestamp = DateTimeOffset.UtcNow,
                                     Model = a.Model,
