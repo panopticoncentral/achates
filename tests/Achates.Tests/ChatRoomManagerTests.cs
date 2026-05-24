@@ -178,7 +178,8 @@ public sealed class ChatRoomManagerTests
                 {
                     var memoryTool = new MemoryTool(
                         Path.Combine(dir, "shared.md"),
-                        Path.Combine(dir, "agent.md"));
+                        Path.Combine(dir, "agent.md"),
+                        sharedEnabled: true);
                     return new AgentRuntimeFactory(
                         ModelWith(new ReplyProvider("ok")),
                         universalTools: [memoryTool]);

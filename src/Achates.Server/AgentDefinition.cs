@@ -42,4 +42,12 @@ public sealed record AgentDefinition
     /// Local time of day for nightly dreamtime, or null if disabled.
     /// </summary>
     public TimeOnly? Dreamtime { get; init; }
+
+    /// <summary>
+    /// Whether <see cref="Tools.MemoryTool"/> exposes the shared memory scope to
+    /// the model. Resolved from <see cref="AgentConfig.SharedMemory"/> with a
+    /// default of <c>true</c>. When false, the tool's schema omits the
+    /// <c>scope</c> parameter and reads/saves only the agent-local file.
+    /// </summary>
+    public bool SharedMemoryEnabled { get; init; } = true;
 }

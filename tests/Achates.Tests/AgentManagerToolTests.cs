@@ -269,4 +269,42 @@ public sealed class AgentManagerToolTests : IDisposable
 
         Assert.Contains("not found", Text(result), StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task Modify_SetsSharedMemoryFalse_PersistsToAgentFile()
+    {
+        await SeedAgentAsync("Roleplay Bot", "A DM.", "You are a DM.");
+        var tool = CreateTool();
+
+        var result = await tool.ExecuteAsync("m1", Args(
+            ("action", JE("modify")),
+            ("agent", JE("roleplay-bot")),
+            ("shared_memory", JsonDocument.Parse("false").RootElement)));
+
+        Assert.Contains("updated", Text(result), StringComparison.OrdinalIgnoreCase);
+        var content = await File.ReadAllTextAsync(
+            Path.Combine(_agentsDir, "roleplay-bot", "AGENT.md"));
+        Assert.Contains("**Shared Memory:** false", content);
+    }
+
+    [Fact]
+    public async Task Modify_SetsSharedMemoryTrue_OmitsLineFromAgentFile()
+    {
+        // Start with shared_memory: false so we can verify flipping it back removes the line.
+        await SeedAgentAsync("Roleplay Bot", "A DM.", "You are a DM.");
+        var tool = CreateTool();
+        await tool.ExecuteAsync("m1", Args(
+            ("action", JE("modify")),
+            ("agent", JE("roleplay-bot")),
+            ("shared_memory", JsonDocument.Parse("false").RootElement)));
+
+        await tool.ExecuteAsync("m2", Args(
+            ("action", JE("modify")),
+            ("agent", JE("roleplay-bot")),
+            ("shared_memory", JsonDocument.Parse("true").RootElement)));
+
+        var content = await File.ReadAllTextAsync(
+            Path.Combine(_agentsDir, "roleplay-bot", "AGENT.md"));
+        Assert.DoesNotContain("Shared Memory", content);
+    }
 }

@@ -30,7 +30,7 @@ public sealed class AgentRuntimeFactoryTests
     [Fact]
     public void Create_includes_universal_tools()
     {
-        var memoryTool = new MemoryTool("/tmp/shared.md", "/tmp/agent.md");
+        var memoryTool = new MemoryTool("/tmp/shared.md", "/tmp/agent.md", sharedEnabled: true);
         var factory = new AgentRuntimeFactory(TestModel(), universalTools: [memoryTool]);
 
         var runtime = factory.Create([]);

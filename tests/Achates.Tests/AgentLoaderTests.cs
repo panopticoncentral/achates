@@ -32,6 +32,101 @@ public sealed class AgentLoaderTests
         Assert.Equal(64, result!.Length);
     }
 
+    [Theory]
+    [InlineData("**Shared Memory:** false", false)]
+    [InlineData("**Shared Memory:** False", false)]
+    [InlineData("**Shared Memory:** true", true)]
+    [InlineData("**Shared Memory:** TRUE", true)]
+    public void Parse_ReadsSharedMemoryCapability(string capabilityLine, bool expected)
+    {
+        var md = $"""
+            # Test
+
+            ## Capabilities
+
+            {capabilityLine}
+            """;
+
+        var config = AgentLoader.Parse(md);
+
+        Assert.NotNull(config);
+        Assert.Equal(expected, config!.SharedMemory);
+    }
+
+    [Fact]
+    public void Parse_LeavesSharedMemoryNullWhenAbsent()
+    {
+        var md = """
+            # Test
+
+            ## Capabilities
+
+            **Tools:**
+              - memory
+            """;
+
+        var config = AgentLoader.Parse(md);
+
+        Assert.NotNull(config);
+        Assert.Null(config!.SharedMemory);
+    }
+
+    [Fact]
+    public void Parse_LeavesSharedMemoryNullOnInvalidValue()
+    {
+        var md = """
+            # Test
+
+            ## Capabilities
+
+            **Shared Memory:** maybe
+            """;
+
+        var config = AgentLoader.Parse(md);
+
+        Assert.NotNull(config);
+        Assert.Null(config!.SharedMemory);
+    }
+
+    [Fact]
+    public void Serialize_EmitsSharedMemory_WhenFalse()
+    {
+        var config = new AgentConfig { SharedMemory = false };
+        Assert.Contains("**Shared Memory:** false", AgentLoader.Serialize("Test", config));
+    }
+
+    [Fact]
+    public void Serialize_OmitsSharedMemory_WhenTrue()
+    {
+        var config = new AgentConfig { SharedMemory = true };
+        Assert.DoesNotContain("Shared Memory", AgentLoader.Serialize("Test", config));
+    }
+
+    [Fact]
+    public void Serialize_OmitsSharedMemory_WhenNull()
+    {
+        var config = new AgentConfig { SharedMemory = null };
+        Assert.DoesNotContain("Shared Memory", AgentLoader.Serialize("Test", config));
+    }
+
+    [Fact]
+    public void Parse_Serialize_Roundtrips_SharedMemoryFalse()
+    {
+        var original = new AgentConfig
+        {
+            Title = "Test",
+            Description = "desc",
+            SharedMemory = false,
+            Prompt = "prompt",
+        };
+
+        var md = AgentLoader.Serialize("Test", original);
+        var roundtripped = AgentLoader.Parse(md);
+
+        Assert.NotNull(roundtripped);
+        Assert.False(roundtripped!.SharedMemory);
+    }
+
     [Fact]
     public void RenameAgent_OnDisk_MovesDirectoryAndUpdatesCrossReferences()
     {

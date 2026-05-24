@@ -518,7 +518,8 @@ public sealed class GatewayService(
             hasTranscribe: hasTools.Contains("transcribe"),
             hasChat: hasTools.Contains("chat"),
             chatAgentNames: agentConfig.AllowChat,
-            hasThink: hasTools.Contains("think"));
+            hasThink: hasTools.Contains("think"),
+            sharedMemoryEnabled: agentConfig.SharedMemory ?? true);
         var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
         var costLedgerPath = Path.Combine(achatesHome, "agents", name, "costs.jsonl");
         var costLedger = new CostLedger(costLedgerPath);
@@ -549,6 +550,7 @@ public sealed class GatewayService(
             GraphClients = graphClients,
             AvatarData = avatarData,
             Dreamtime = agentConfig.Dreamtime,
+            SharedMemoryEnabled = agentConfig.SharedMemory ?? true,
         };
 
         logger.LogInformation("Agent '{Name}' resolved with model {Model}", name, model.Id);

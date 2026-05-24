@@ -35,6 +35,7 @@ internal sealed class AgentManagerTool(
             ["max_tokens"] = NumberSchema("Max output tokens. Optional ('modify' only)."),
             ["allowed_chats"] = ArraySchema(StringSchema("Agent id."), "Agents this agent may chat with. Optional ('modify' only); replaces the whole list."),
             ["dreamtime"] = StringSchema("Dreamtime, e.g. '3:00 AM', or 'off' to disable. Optional ('modify' only)."),
+            ["shared_memory"] = BooleanSchema("When false, the agent's memory tool only sees its own private notes (the universal user memory at ~/.achates/memory.md is hidden). Useful for roleplay or in-character agents. Optional ('modify' only)."),
             ["avatar"] = StringSchema("Avatar image: a file path from the image tool or base64-encoded data. Optional ('modify' only)."),
         },
         required: ["action"]);
@@ -123,6 +124,7 @@ internal sealed class AgentManagerTool(
         sb.AppendLine($"**Temperature:** {config.Completion?.Temperature?.ToString(CultureInfo.InvariantCulture) ?? "(default)"}");
         sb.AppendLine($"**Max tokens:** {config.Completion?.MaxTokens?.ToString(CultureInfo.InvariantCulture) ?? "(default)"}");
         sb.AppendLine($"**Dreamtime:** {config.Dreamtime?.ToString("h:mm tt", CultureInfo.InvariantCulture) ?? "(off)"}");
+        sb.AppendLine($"**Shared memory:** {(config.SharedMemory == false ? "disabled" : "enabled")}");
         sb.AppendLine();
         sb.AppendLine($"**Prompt:**\n{config.Prompt ?? "(none)"}");
 
@@ -171,12 +173,15 @@ internal sealed class AgentManagerTool(
         var newAllowedChats = GetStringList(arguments, "allowed_chats");
         var hasDreamtime = arguments.ContainsKey("dreamtime");
         var newDreamtime = GetString(arguments, "dreamtime");
+        var hasSharedMemory = arguments.ContainsKey("shared_memory");
+        var newSharedMemory = GetBool(arguments, "shared_memory");
         var newAvatar = GetString(arguments, "avatar");
 
         var anyField = newName is not null || newDescription is not null || newPrompt is not null
             || newTools is not null || newModel is not null || newThinkingModel is not null
             || newProvider is not null || newReasoning is not null || newTemperature is not null
             || newMaxTokens is not null || newAllowedChats is not null || hasDreamtime
+            || hasSharedMemory
             || newAvatar is not null;
         if (!anyField)
             return TextResult("Provide at least one field to modify.");
@@ -214,6 +219,14 @@ internal sealed class AgentManagerTool(
                 return TextResult($"Could not parse dreamtime '{newDreamtime}'. Use a time like '3:00 AM' or 'off'.");
             }
             changed.Add("dreamtime");
+        }
+
+        if (hasSharedMemory)
+        {
+            // GetBool returns null when the value wasn't a JSON bool, which clears the
+            // override (Serialize emits no line for null or true, only for false).
+            config.SharedMemory = newSharedMemory;
+            changed.Add("shared_memory");
         }
 
         // Determine rename before writing so we serialize with the final display name.
@@ -339,6 +352,21 @@ internal sealed class AgentManagerTool(
         if (val is JsonElement je)
             return je.ValueKind == JsonValueKind.Number ? je.GetInt32() : null;
         return val is int i ? i : null;
+    }
+
+    private static bool? GetBool(Dictionary<string, object?> args, string key)
+    {
+        if (!args.TryGetValue(key, out var val)) return null;
+        if (val is JsonElement je)
+        {
+            return je.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                _ => null,
+            };
+        }
+        return val is bool b ? b : null;
     }
 
     private static List<string>? GetStringList(Dictionary<string, object?> args, string key)

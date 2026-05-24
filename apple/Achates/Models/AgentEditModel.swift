@@ -17,6 +17,7 @@ struct AgentEditModel: Equatable {
     var thinkingModel: String?
     var defaultModel: String?
     var defaultThinkingModel: String?
+    var sharedMemory: Bool
 
     static func from(_ payload: [String: JSONValue]) -> AgentEditModel? {
         AgentEditModel(
@@ -33,7 +34,8 @@ struct AgentEditModel: Equatable {
             model: nonEmpty(payload["model"]?.stringValue),
             thinkingModel: nonEmpty(payload["thinking_model"]?.stringValue),
             defaultModel: nonEmpty(payload["default_model"]?.stringValue),
-            defaultThinkingModel: nonEmpty(payload["default_thinking_model"]?.stringValue)
+            defaultThinkingModel: nonEmpty(payload["default_thinking_model"]?.stringValue),
+            sharedMemory: payload["shared_memory"]?.boolValue ?? true
         )
     }
 
@@ -67,6 +69,7 @@ struct AgentEditModel: Equatable {
         if let d = dreamtime {
             params["dreamtime"] = .string(formatDreamtime(d))
         }
+        params["shared_memory"] = .bool(sharedMemory)
         return params
     }
 }

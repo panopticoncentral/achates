@@ -24,7 +24,8 @@ public static class SystemPrompt
         bool hasTranscribe = false,
         bool hasChat = false,
         IReadOnlyList<string>? chatAgentNames = null,
-        bool hasThink = false)
+        bool hasThink = false,
+        bool sharedMemoryEnabled = true)
     {
         var lines = new List<string>();
 
@@ -55,13 +56,25 @@ public static class SystemPrompt
             lines.Add("");
         }
 
-        // Memory section — always included since memory tool is added per-session
+        // Memory section — always included since memory tool is added per-session.
+        // Roleplay/in-character agents (sharedMemoryEnabled == false) get a
+        // single-scope variant that never names the shared scope.
         lines.Add("## Memory");
-        lines.Add("You have two persistent memory files that survive session resets.");
-        lines.Add("- **Shared memory** (`scope: shared`): Facts about the user that any assistant should know — name, family, preferences, important dates. All agents read and write this same file.");
-        lines.Add("- **Agent memory** (`scope: agent`): Notes specific to your role and past conversations with the user. Only you use this file.");
-        lines.Add("Read memory at the start of new conversations to recall prior context.");
-        lines.Add("When saving, include everything you want to keep — the file for that scope is replaced, not appended.");
+        if (sharedMemoryEnabled)
+        {
+            lines.Add("You have two persistent memory files that survive session resets.");
+            lines.Add("- **Shared memory** (`scope: shared`): Facts about the user that any assistant should know — name, family, preferences, important dates. All agents read and write this same file.");
+            lines.Add("- **Agent memory** (`scope: agent`): Notes specific to your role and past conversations with the user. Only you use this file.");
+            lines.Add("Read memory at the start of new conversations to recall prior context.");
+            lines.Add("When saving, include everything you want to keep — the file for that scope is replaced, not appended.");
+        }
+        else
+        {
+            lines.Add("You have a persistent private memory file that survives session resets.");
+            lines.Add("- **Agent memory** (`scope: agent`): Notes specific to your role and past conversations with the user.");
+            lines.Add("Read your memory at the start of new conversations to recall prior context.");
+            lines.Add("When saving, include everything you want to keep — the file is replaced, not appended.");
+        }
         lines.Add("");
 
         if (hasNotebook)

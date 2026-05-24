@@ -112,6 +112,12 @@ public static class AgentLoader
             sb.AppendLine($"**Dreamtime:** {dreamtime:h:mm tt}");
         }
 
+        if (config.SharedMemory == false)
+        {
+            sb.AppendLine();
+            sb.AppendLine("**Shared Memory:** false");
+        }
+
         if (!string.IsNullOrWhiteSpace(config.Prompt))
         {
             sb.AppendLine();
@@ -348,6 +354,10 @@ public static class AgentLoader
                     if (TimeOnly.TryParse(value, out var time))
                         config.Dreamtime = time;
                 }
+                break;
+            case "shared memory":
+                if (value is not null && bool.TryParse(value, out var sharedMemory))
+                    config.SharedMemory = sharedMemory;
                 break;
         }
     }

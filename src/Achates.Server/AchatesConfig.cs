@@ -77,6 +77,16 @@ public sealed class AgentConfig
     public TimeOnly? Dreamtime { get; set; }
 
     /// <summary>
+    /// Whether the agent may access the shared memory scope (universal user facts at
+    /// <c>~/.achates/memory.md</c>). Null means "not specified" — resolves to the
+    /// default of <c>true</c>. Setting this to <c>false</c> hides the shared scope
+    /// from <see cref="Tools.MemoryTool"/>'s schema so the model never sees it —
+    /// useful for roleplay/in-character agents that should not be polluted by
+    /// real-world identity facts.
+    /// </summary>
+    public bool? SharedMemory { get; set; }
+
+    /// <summary>
     /// System prompt from the ## Prompt section of AGENT.md.
     /// Set by <see cref="AgentLoader"/>, not deserialized.
     /// </summary>

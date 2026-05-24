@@ -1041,6 +1041,7 @@ public sealed class MobileTransport
             thinking_model = config.ThinkingModel,
             default_model = DefaultModelId,
             default_thinking_model = DefaultThinkingModelId,
+            shared_memory = config.SharedMemory ?? true,
         }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
@@ -1110,6 +1111,15 @@ public sealed class MobileTransport
         {
             var v = tmProp.GetString();
             config.ThinkingModel = string.IsNullOrWhiteSpace(v) ? null : v;
+        }
+
+        if (p.TryGetProperty("shared_memory", out var smProp))
+        {
+            if (smProp.ValueKind == JsonValueKind.True)
+                config.SharedMemory = true;
+            else if (smProp.ValueKind == JsonValueKind.False)
+                config.SharedMemory = false;
+            // Any other value type leaves config.SharedMemory at its default (null).
         }
 
         var displayName = char.ToUpper(agentName[0]) + agentName[1..];

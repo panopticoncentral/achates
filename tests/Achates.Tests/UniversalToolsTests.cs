@@ -6,7 +6,7 @@ namespace Achates.Tests;
 
 public sealed class UniversalToolsTests
 {
-    private static AgentDefinition MakeAgentDef(string memoryPath) => new()
+    private static AgentDefinition MakeAgentDef(string memoryPath, bool sharedMemoryEnabled = true) => new()
     {
         DisplayName = "test",
         Description = "",
@@ -22,6 +22,7 @@ public sealed class UniversalToolsTests
         ToolNames = [],
         MemoryPath = memoryPath,
         CompletionOptions = null,
+        SharedMemoryEnabled = sharedMemoryEnabled,
     };
 
     [Fact]
@@ -59,5 +60,25 @@ public sealed class UniversalToolsTests
             Assert.Equal("cost", tools[1].Name);
         }
         finally { if (Directory.Exists(ledgerDir)) Directory.Delete(ledgerDir, true); }
+    }
+
+    [Fact]
+    public void Build_passes_SharedMemoryEnabled_to_MemoryTool()
+    {
+        // The schema is the contract: when shared is enabled it must list both
+        // scopes; when disabled it must omit the scope parameter entirely.
+        var enabledDef = MakeAgentDef("/tmp/a.md", sharedMemoryEnabled: true);
+        var enabledTools = UniversalTools.Build("test", enabledDef, "/tmp/s.md",
+            new Dictionary<string, CostLedger>());
+        var enabledSchema = enabledTools[0].Parameters.GetRawText();
+        Assert.Contains("\"shared\"", enabledSchema);
+        Assert.Contains("\"scope\"", enabledSchema);
+
+        var disabledDef = MakeAgentDef("/tmp/a.md", sharedMemoryEnabled: false);
+        var disabledTools = UniversalTools.Build("test", disabledDef, "/tmp/s.md",
+            new Dictionary<string, CostLedger>());
+        var disabledSchema = disabledTools[0].Parameters.GetRawText();
+        Assert.DoesNotContain("\"shared\"", disabledSchema);
+        Assert.DoesNotContain("\"scope\"", disabledSchema);
     }
 }

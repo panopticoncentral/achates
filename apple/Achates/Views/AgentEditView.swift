@@ -196,6 +196,12 @@ struct AgentEditView: View {
                 Text("Each night at this time, the agent reviews recent sessions and updates its memory.")
             }
 
+            Section {
+                Toggle("Access shared user memory", isOn: sharedMemoryBinding)
+            } footer: {
+                Text("When off, this agent only sees its own private notes — useful for roleplay or in-character chat.")
+            }
+
             Section("Tools") {
                 DisclosureGroup(isExpanded: $showToolsEditor) {
                     ForEach(availableTools) { tool in
@@ -345,6 +351,17 @@ struct AgentEditView: View {
             set: { newValue in
                 guard var c = config else { return }
                 c.dreamtime = newValue
+                config = c
+            }
+        )
+    }
+
+    private var sharedMemoryBinding: Binding<Bool> {
+        Binding(
+            get: { config?.sharedMemory ?? true },
+            set: { newValue in
+                guard var c = config else { return }
+                c.sharedMemory = newValue
                 config = c
             }
         )

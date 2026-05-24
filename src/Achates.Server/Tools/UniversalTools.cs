@@ -21,7 +21,7 @@ internal static class UniversalTools
     {
         var tools = new List<AgentTool>
         {
-            new MemoryTool(sharedMemoryPath, agentDef.MemoryPath),
+            new MemoryTool(sharedMemoryPath, agentDef.MemoryPath, agentDef.SharedMemoryEnabled),
         };
         if (costLedgers.Count > 0)
             tools.Add(new CostTool(agentName, costLedgers));

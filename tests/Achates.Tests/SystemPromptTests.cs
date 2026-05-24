@@ -71,12 +71,38 @@ public sealed class SystemPromptTests
     // --- Memory section (always present) ---
 
     [Fact]
-    public void Always_includes_memory_section()
+    public void Includes_both_memory_scopes_when_shared_enabled()
     {
+        var result = SystemPrompt.Build(sharedMemoryEnabled: true);
+
+        Assert.Contains("## Memory", result);
+        Assert.Contains("Shared memory", result);
+        Assert.Contains("Agent memory", result);
+    }
+
+    [Fact]
+    public void Default_is_shared_enabled()
+    {
+        // The parameter defaults to true, so the default-arg call must still
+        // produce the dual-scope block. Existing callers don't break.
         var result = SystemPrompt.Build();
 
         Assert.Contains("## Memory", result);
         Assert.Contains("Shared memory", result);
+        Assert.Contains("Agent memory", result);
+    }
+
+    [Fact]
+    public void Omits_shared_memory_when_shared_disabled()
+    {
+        var result = SystemPrompt.Build(sharedMemoryEnabled: false);
+
+        Assert.Contains("## Memory", result);
+        // The shared scope must not be named, described, or hinted at.
+        Assert.DoesNotContain("Shared memory", result);
+        Assert.DoesNotContain("scope: shared", result);
+        Assert.DoesNotContain("shared`)", result);
+        // The remaining single-scope text should be present.
         Assert.Contains("Agent memory", result);
     }
 

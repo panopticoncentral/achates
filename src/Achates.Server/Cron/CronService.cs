@@ -42,7 +42,7 @@ public sealed class CronService : IAsyncDisposable
         1. Use the sessions tool to list recent sessions.
         2. Scan the list and decide which sessions contain information worth remembering.
         3. Read those sessions in full.
-        4. Read your current memory (both shared and agent-scoped).
+        4. Read your current memory.
         5. Update your memory to incorporate new learnings — add new facts, correct
            outdated ones, remove things that are no longer true, and consolidate where
            appropriate.
