@@ -73,7 +73,7 @@ public sealed class MobileTransport
 
                 return new AgentRuntimeFactory(
                     def.Model,
-                    SystemPrompt.CurrentDateTimeBlock() + def.SystemPrompt,
+                    def.SystemPrompt,
                     def.CostLedger,
                     universalTools);
             });
@@ -1942,10 +1942,11 @@ public sealed class MobileTransport
         return new AgentRuntime(new AgentOptions
         {
             Model = agentDef.Model,
-            SystemPrompt = SystemPrompt.CurrentDateTimeBlock() + agentDef.SystemPrompt,
+            SystemPrompt = agentDef.SystemPrompt,
             Tools = tools,
             CompletionOptions = agentDef.CompletionOptions,
             Messages = messages,
+            TransformContext = TemporalContext.CreateTransform(),
         });
     }
 

@@ -46,26 +46,13 @@ public sealed class SystemPromptTests
     [Fact]
     public void Build_does_not_include_date_section()
     {
-        // Date is computed fresh per AgentRuntime via CurrentDateTimeBlock(),
-        // not baked into the cached Build() output (which would go stale across midnight).
+        // The system prompt is fully date-free. Temporal context is injected
+        // per-turn at the tail of the outgoing payload by TemporalContext,
+        // keeping this prompt byte-stable across sessions (cache-friendly).
         var result = SystemPrompt.Build();
 
         Assert.DoesNotContain("## Current Date & Time", result);
         Assert.DoesNotContain("Timezone:", result);
-    }
-
-    [Fact]
-    public void CurrentDateTimeBlock_includes_today_and_timezone()
-    {
-        var result = SystemPrompt.CurrentDateTimeBlock();
-
-        Assert.Contains("## Current Date & Time", result);
-        Assert.Contains("Date:", result);
-        Assert.Contains("Timezone:", result);
-
-        var today = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.Local);
-        Assert.Contains(today.ToString("dddd, MMMM d, yyyy"), result);
-        Assert.Contains(TimeZoneInfo.Local.Id, result);
     }
 
     // --- Memory section (always present) ---

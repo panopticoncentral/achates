@@ -26,5 +26,6 @@ public sealed class AgentRuntimeFactory(
         SystemPrompt = systemPrompt,
         Tools = universalTools,
         Messages = seed,
+        TransformContext = TemporalContext.CreateTransform(),
     });
 }

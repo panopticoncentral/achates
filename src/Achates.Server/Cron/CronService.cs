@@ -323,8 +323,9 @@ public sealed class CronService : IAsyncDisposable
             job.Name, job.Id, agentName);
 
         // Build tool list and system prompt — dreamtime jobs get special treatment.
-        // The date block is computed fresh per run; agentDef.SystemPrompt is date-free.
-        var systemPrompt = SystemPrompt.CurrentDateTimeBlock() + agentDef.SystemPrompt;
+        // The system prompt is date-free; temporal context is injected per-turn at
+        // the tail of the outgoing payload via TemporalContext.CreateTransform().
+        var systemPrompt = agentDef.SystemPrompt;
         var tools = BuildJobTools(agentName, agentDef);
 
         if (job.Kind == CronJobKind.Dreamtime)
@@ -341,7 +342,7 @@ public sealed class CronService : IAsyncDisposable
                 return ("Skipped: no sessions to review since last dreamtime.", true, null);
             }
 
-            systemPrompt = SystemPrompt.CurrentDateTimeBlock() + agentDef.SystemPrompt + DreamtimeInstructions;
+            systemPrompt = agentDef.SystemPrompt + DreamtimeInstructions;
             tools = BuildDreamtimeTools(agentName, agentDef, job);
         }
 
@@ -351,6 +352,7 @@ public sealed class CronService : IAsyncDisposable
             SystemPrompt = systemPrompt,
             Tools = tools,
             CompletionOptions = agentDef.CompletionOptions,
+            TransformContext = TemporalContext.CreateTransform(),
         });
 
         var stream = agent.PromptAsync(new UserMessage
