@@ -171,6 +171,9 @@ struct ChatView: View {
                 }
                 .accessibilityLabel(connectionLabel.map { "\(liveAgent.displayName), \($0)" } ?? liveAgent.displayName)
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                speechToggleButton
+            }
             #else
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 8) {
@@ -188,8 +191,23 @@ struct ChatView: View {
                 }
                 .accessibilityLabel(connectionLabel.map { "\(liveAgent.displayName), \($0)" } ?? liveAgent.displayName)
             }
+            ToolbarItem(placement: .primaryAction) {
+                speechToggleButton
+            }
             #endif
         }
+    }
+
+    @ViewBuilder
+    private var speechToggleButton: some View {
+        let on = appState.currentSpeechEnabled
+        Button {
+            Task { await appState.toggleSpeechForCurrentSession() }
+        } label: {
+            Image(systemName: on ? "speaker.wave.2.fill" : "speaker.slash")
+                .accessibilityLabel(on ? "Disable speech for this session" : "Enable speech for this session")
+        }
+        .disabled(appState.currentSessionId == nil)
     }
 
     private var emptyState: some View {

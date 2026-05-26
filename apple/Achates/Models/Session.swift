@@ -7,6 +7,9 @@ struct SessionInfo: Identifiable, Sendable, Equatable {
     let preview: String?
     let created: Date
     let updated: Date
+    /// Per-session opt-in for spoken assistant replies. Mirrors the server's
+    /// `MobileSession.SpeechEnabled` field; flipped via `session.set_speech` RPC.
+    var speechEnabled: Bool = false
 
     static func fromList(_ payload: [String: JSONValue]) -> [SessionInfo] {
         guard let arr = payload["sessions"]?.arrayValue else { return [] }
@@ -23,7 +26,8 @@ struct SessionInfo: Identifiable, Sendable, Equatable {
             title: dict["title"]?.stringValue,
             preview: dict["preview"]?.stringValue,
             created: parseDate(dict["created"]),
-            updated: parseDate(dict["updated"])
+            updated: parseDate(dict["updated"]),
+            speechEnabled: dict["speech_enabled"]?.boolValue ?? false
         )
     }
 

@@ -43,6 +43,16 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
     var blocks: [ContentBlock]
     let timestamp: Date
     var usage: MessageUsage?
+    /// Server-side turn id of the speech synthesized for this assistant message
+    /// (captured from the first `audio.block` event). The replay button hands
+    /// this back to SpeechPlayer to reconstruct the queue from its archive.
+    var audioTurnId: String?
+    /// Speakable text, one entry per emitted sentence (in arrival order).
+    /// Useful for accessibility/debug captions next to the replay button.
+    var audioTranscript: [String] = []
+    /// Set when an `audio.error` arrives for this turn — surfaces a small
+    /// "speech unavailable" chip on the bubble.
+    var audioError: String?
 
     var textContent: String {
         blocks.compactMap { block in

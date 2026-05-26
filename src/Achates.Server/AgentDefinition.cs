@@ -50,4 +50,11 @@ public sealed record AgentDefinition
     /// <c>scope</c> parameter and reads/saves only the agent-local file.
     /// </summary>
     public bool SharedMemoryEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Per-agent voice id for TTS. Resolved from the <c>**Voice:**</c>
+    /// capability in AGENT.md. Null means the agent is voiceless unless
+    /// <c>tools.speech.default_voice</c> is set globally.
+    /// </summary>
+    public string? Voice { get; init; }
 }

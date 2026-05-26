@@ -35,6 +35,10 @@ final class AppState {
     var client: WebSocketClient?
     var error: String?
 
+    /// Plays back streamed assistant-speech audio. One instance app-wide;
+    /// turns are tagged so per-message replay can reconstruct a finished turn.
+    let speechPlayer = SpeechPlayer()
+
     /// Sessions for the currently selected agent
     var sessions: [SessionInfo] = []
     var hasMoreSessions = false
@@ -270,6 +274,35 @@ final class AppState {
     func updateSessionTitle(sessionId: String, title: String) {
         if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
             sessions[index].title = title
+        }
+    }
+
+    /// Speech-enabled state for the currently open session, or false when no
+    /// session is open. The nav-bar toggle reads this.
+    var currentSpeechEnabled: Bool {
+        guard let id = currentSessionId else { return false }
+        return sessions.first(where: { $0.id == id })?.speechEnabled ?? false
+    }
+
+    /// Toggle speech for the currently open session via `session.set_speech`.
+    /// Updates local state on success so the toolbar icon reflects the new
+    /// value without waiting for the broadcast round-trip.
+    func toggleSpeechForCurrentSession() async {
+        guard let agent = currentAgent,
+              let sessionId = currentSessionId,
+              let client else { return }
+        let newState = !currentSpeechEnabled
+        do {
+            _ = try await client.sendRequest(method: "session.set_speech", params: [
+                "agent": .string(agent.id),
+                "session_id": .string(sessionId),
+                "enabled": .bool(newState),
+            ])
+            if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
+                sessions[index].speechEnabled = newState
+            }
+        } catch {
+            self.error = "Failed to toggle speech: \(error.localizedDescription)"
         }
     }
 
@@ -697,6 +730,38 @@ final class AppState {
         if let usage, let id = streamingMessageId, let index = lastMessageIndex(id: id) {
             messages[index].usage = usage
         }
+    }
+
+    /// Tag the currently-streaming assistant message with a turn id and append a
+    /// sentence to its audio transcript. The first audio block of a turn binds
+    /// the id; later blocks for the same turn append text only.
+    func recordAudioMetadata(turnId: String, sentenceIndex: Int, text: String) {
+        let index: Int? = {
+            if let id = streamingMessageId, let i = lastMessageIndex(id: id) { return i }
+            return messages.lastIndex(where: { $0.role == .assistant })
+        }()
+        guard let index else { return }
+        if messages[index].audioTurnId == nil {
+            messages[index].audioTurnId = turnId
+        }
+        if messages[index].audioTurnId == turnId {
+            messages[index].audioTranscript.append(text)
+        }
+    }
+
+    /// Surface an `audio.error` on whichever assistant message owns the turn,
+    /// falling back to the latest assistant message when the turn id hasn't
+    /// been bound yet (synth was unavailable before any sentence landed).
+    func recordAudioError(turnId: String, message: String) {
+        let index: Int? = {
+            if let i = messages.lastIndex(where: { $0.role == .assistant && $0.audioTurnId == turnId }) {
+                return i
+            }
+            if let id = streamingMessageId, let i = lastMessageIndex(id: id) { return i }
+            return messages.lastIndex(where: { $0.role == .assistant })
+        }()
+        guard let index else { return }
+        messages[index].audioError = message
     }
 
     // MARK: - Private helpers

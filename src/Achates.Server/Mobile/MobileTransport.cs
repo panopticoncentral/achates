@@ -32,6 +32,7 @@ public sealed class MobileTransport
     private readonly AgentStateCache stateCache;
     private readonly ILoggerFactory loggerFactory;
     private readonly ILogger _logger;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ConcurrentDictionary<string, AgentDefinition> _agents;
     private readonly ConcurrentDictionary<string, MobileConnection> _connections = new();
     private readonly ConcurrentDictionary<string, AgentRuntime> _runtimes = new();
@@ -44,12 +45,14 @@ public sealed class MobileTransport
         IReadOnlyDictionary<string, AgentDefinition> initialAgents,
         MobileSessionStore sessionStore,
         AgentStateCache stateCache,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        IServiceProvider serviceProvider)
     {
         this.sessionStore = sessionStore;
         this.stateCache = stateCache;
         this.loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<MobileTransport>();
+        _serviceProvider = serviceProvider;
         _agents = new(initialAgents);
         _chatRoomManager = new ChatRoomManager(
             sessionStore,
@@ -272,6 +275,7 @@ public sealed class MobileTransport
                 updated = session.Updated.ToUnixTimeMilliseconds(),
                 job_id = session.JobId,
                 message_count = session.Messages.Count,
+                speech_enabled = session.SpeechEnabled,
             },
         }, ct);
     }
@@ -366,6 +370,8 @@ public sealed class MobileTransport
                 "jobs.update" => await HandleJobsUpdateAsync(request, ct),
                 "jobs.delete" => await HandleJobsDeleteAsync(request, ct),
                 "jobs.run" => await HandleJobsRunAsync(request, ct),
+                "session.set_speech" => await HandleSessionSetSpeechAsync(request, ct),
+                "voices.list" => await HandleVoicesListAsync(request, ct),
                 _ => ResponseFrame.Failure(request.Id, "unknown_method", $"Unknown method: {request.Method}"),
             };
 
@@ -494,6 +500,7 @@ public sealed class MobileTransport
                 last_activity = preview.LastActivity,
                 unread_count = preview.UnreadCount,
                 avatar = def.AvatarData is not null ? Convert.ToBase64String(def.AvatarData) : null,
+                voice = def.Voice,
             });
         }
 
@@ -531,6 +538,7 @@ public sealed class MobileTransport
                 created = s.Created.ToUnixTimeMilliseconds(),
                 updated = s.Updated.ToUnixTimeMilliseconds(),
                 job_id = s.JobId,
+                speech_enabled = s.SpeechEnabled,
             }),
             has_more = hasMore,
         }, JsonOptions);
@@ -573,6 +581,7 @@ public sealed class MobileTransport
             title = session.Title,
             created = session.Created.ToUnixTimeMilliseconds(),
             updated = session.Updated.ToUnixTimeMilliseconds(),
+            speech_enabled = session.SpeechEnabled,
             messages = session.Messages,
         }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
@@ -657,6 +666,51 @@ public sealed class MobileTransport
 
         var payload = JsonSerializer.SerializeToElement(new { cleared = true }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleSessionSetSpeechAsync(RequestFrame request, CancellationToken ct)
+    {
+        var agentName = GetStringParam(request.Params, "agent");
+        var sessionId = GetStringParam(request.Params, "session_id");
+        var enabled = request.Params.TryGetProperty("enabled", out var e) && e.GetBoolean();
+
+        if (string.IsNullOrEmpty(agentName) || string.IsNullOrEmpty(sessionId))
+            return ResponseFrame.Failure(request.Id, "bad_request", "agent and session_id are required");
+
+        if (!_agents.TryGetValue(agentName, out _))
+            return ResponseFrame.Failure(request.Id, "not_found", $"Unknown agent: {agentName}");
+
+        var session = await sessionStore.LoadAsync(agentName, sessionId, ct);
+        if (session is null)
+            return ResponseFrame.Failure(request.Id, "not_found", $"Unknown session: {sessionId}");
+
+        session.SpeechEnabled = enabled;
+        session.Updated = DateTimeOffset.UtcNow;
+        await sessionStore.SaveAsync(agentName, session, ct);
+
+        // Use the standard nested-shape broadcast so iOS's upsertSession path
+        // picks up the change. The flat form previously emitted here was
+        // ignored by clients that expected the `session` sub-object.
+        await BroadcastSessionUpdatedAsync(agentName, session, ct);
+
+        return ResponseFrame.Success(request.Id, JsonSerializer.SerializeToElement(new
+        {
+            ok = true,
+            speech_enabled = enabled,
+        }, JsonOptions));
+    }
+
+    private async Task<ResponseFrame> HandleVoicesListAsync(RequestFrame request, CancellationToken ct)
+    {
+        var synth = _serviceProvider.GetService<Speech.ISpeechSynthesizer>();
+        var voices = synth is null
+            ? Array.Empty<string>()
+            : (await synth.ListVoicesAsync(ct)).ToArray();
+
+        return ResponseFrame.Success(request.Id, JsonSerializer.SerializeToElement(new
+        {
+            voices,
+        }, JsonOptions));
     }
 
     // --- Chat ---
@@ -1042,6 +1096,7 @@ public sealed class MobileTransport
             default_model = DefaultModelId,
             default_thinking_model = DefaultThinkingModelId,
             shared_memory = config.SharedMemory ?? true,
+            voice = config.Voice,
         }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
@@ -1111,6 +1166,12 @@ public sealed class MobileTransport
         {
             var v = tmProp.GetString();
             config.ThinkingModel = string.IsNullOrWhiteSpace(v) ? null : v;
+        }
+
+        if (p.TryGetProperty("voice", out var voiceProp) && voiceProp.ValueKind == JsonValueKind.String)
+        {
+            var v = voiceProp.GetString();
+            config.Voice = string.IsNullOrWhiteSpace(v) ? null : v;
         }
 
         if (p.TryGetProperty("shared_memory", out var smProp))
@@ -1608,6 +1669,27 @@ public sealed class MobileTransport
             // would never flow into ChatTool. See Task 6 review.
             ChatSinkAccessor.Current = new TransportChatSink(this, agentName, sessionId, chatBuffer);
 
+            // Speech path (parallel to text streaming).
+            Speech.SpeechBroker? speechBroker = null;
+            var speechSynth = _serviceProvider.GetService<Speech.ISpeechSynthesizer>();
+            if (speechSynth is not null)
+            {
+                var speechSession = await sessionStore.LoadAsync(agentName, sessionId, ct);
+                if (speechSession?.SpeechEnabled == true && _agents.TryGetValue(agentName, out var agentDefForVoice))
+                {
+                    var globalDefaultVoice = _serviceProvider.GetService<Speech.SpeechConfig>()?.DefaultVoice;
+                    var resolvedVoice = !string.IsNullOrWhiteSpace(agentDefForVoice.Voice)
+                        ? agentDefForVoice.Voice
+                        : globalDefaultVoice;
+                    if (!string.IsNullOrWhiteSpace(resolvedVoice))
+                    {
+                        var turnId = Guid.NewGuid().ToString("N");
+                        var sink = new TransportSpeechSink(this, agentName, sessionId, ct);
+                        speechBroker = new Speech.SpeechBroker(speechSynth, sink, resolvedVoice, turnId);
+                    }
+                }
+            }
+
             var stream = runtime.PromptAsync(userMessage);
 
             await foreach (var evt in stream.WithCancellation(ct))
@@ -1621,6 +1703,9 @@ public sealed class MobileTransport
                             session_id = sessionId,
                             delta = delta.Delta,
                         }, ct);
+
+                        if (speechBroker is not null)
+                            await speechBroker.PushTextAsync(delta.Delta, ct);
                         break;
 
                     case MessageStreamEvent { Inner: CompletionThinkingDeltaEvent thinking }:
@@ -1732,6 +1817,9 @@ public sealed class MobileTransport
                                 agent = agentName,
                                 session_id = sessionId,
                             }, ct);
+
+                            if (speechBroker is not null)
+                                await speechBroker.FinishAsync(ct);
                         }
                         break;
 
@@ -1973,6 +2061,36 @@ public sealed class MobileTransport
 
         public void BufferForInitiator(string toolCallId, AgentSpeechMessage message)
             => buffer.Add(toolCallId, message);
+    }
+
+    /// <summary>
+    /// Per-turn <see cref="Speech.ISpeechSink"/>: broadcasts synthesized audio blocks
+    /// and errors to all connected clients as <c>audio.block</c> / <c>audio.error</c> events.
+    /// </summary>
+    private sealed class TransportSpeechSink(MobileTransport transport, string agentName, string sessionId, CancellationToken ct) : Speech.ISpeechSink
+    {
+        public Task EmitAudioBlockAsync(string turnId, int sentenceIndex, string voice, string format, byte[] data, string text, CancellationToken _)
+            => transport.BroadcastEventAsync("audio.block", new
+            {
+                agent = agentName,
+                session_id = sessionId,
+                turn_id = turnId,
+                sentence_index = sentenceIndex,
+                voice,
+                format,
+                data = Convert.ToBase64String(data),
+                text,
+            }, ct);
+
+        public Task EmitAudioErrorAsync(string turnId, int? sentenceIndex, string message, CancellationToken _)
+            => transport.BroadcastEventAsync("audio.error", new
+            {
+                agent = agentName,
+                session_id = sessionId,
+                turn_id = turnId,
+                sentence_index = sentenceIndex,
+                message,
+            }, ct);
     }
 
     /// <summary>

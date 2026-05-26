@@ -28,6 +28,14 @@ public sealed class MobileSession
     /// <summary>For a chat-origin session, the initiator agent's id.</summary>
     public string? PeerAgentId { get; set; }
 
+    /// <summary>
+    /// Per-session opt-in for spoken assistant replies. Default false; flipped
+    /// by the <c>session.set_speech</c> RPC. When true AND the active agent
+    /// has a voice (or a global default is configured), <see cref="Achates.Server.Speech.SpeechBroker"/>
+    /// is wired into the streaming loop and emits <c>audio.block</c> events.
+    /// </summary>
+    public bool SpeechEnabled { get; set; }
+
     public List<AgentMessage> Messages { get; set; } = [];
 }
 
@@ -49,4 +57,5 @@ public sealed record MobileSessionInfo(
     string? Preview,
     string? JobId,
     string? CronTaskName = null,
-    SessionSource? Source = null);
+    SessionSource? Source = null,
+    bool SpeechEnabled = false);

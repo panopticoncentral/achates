@@ -19,7 +19,8 @@ public sealed class GatewayService(
     AchatesConfig config,
     IHttpClientFactory httpClientFactory,
     ILoggerFactory loggerFactory,
-    ILogger<GatewayService> logger)
+    ILogger<GatewayService> logger,
+    IServiceProvider serviceProvider)
     : IHostedLifecycleService, IAsyncDisposable
 {
     private string? _achatesHome;
@@ -124,7 +125,7 @@ public sealed class GatewayService(
         _agentStateCache = new AgentStateCache();
         _mobileSessionStore = new MobileSessionStore(_achatesHome);
         await _mobileSessionStore.MigrateAsync(agents.Keys, cancellationToken);
-        _mobileTransport = new MobileTransport(agents, _mobileSessionStore, _agentStateCache, loggerFactory);
+        _mobileTransport = new MobileTransport(agents, _mobileSessionStore, _agentStateCache, loggerFactory, serviceProvider);
         _mobileTransport.AgentReloadFunc = ReloadAgentAsync;
         _mobileTransport.AgentRenameFunc = RenameAgentAsync;
         _mobileTransport.AgentDeleteFunc = DeleteAgentAsync;
@@ -551,6 +552,7 @@ public sealed class GatewayService(
             AvatarData = avatarData,
             Dreamtime = agentConfig.Dreamtime,
             SharedMemoryEnabled = agentConfig.SharedMemory ?? true,
+            Voice = agentConfig.Voice,
         };
 
         logger.LogInformation("Agent '{Name}' resolved with model {Model}", name, model.Id);

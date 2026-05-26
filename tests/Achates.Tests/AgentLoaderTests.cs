@@ -128,6 +128,78 @@ public sealed class AgentLoaderTests
     }
 
     [Fact]
+    public void Parse_reads_voice_capability()
+    {
+        var md = """
+            # Test Agent
+
+            ## Capabilities
+
+            **Voice:** af_nicole
+
+            ## Prompt
+
+            hello
+            """;
+
+        var config = AgentLoader.Parse(md);
+
+        Assert.NotNull(config);
+        Assert.Equal("af_nicole", config!.Voice);
+    }
+
+    [Fact]
+    public void Parse_reads_voice_blend()
+    {
+        var md = """
+            # Test
+
+            ## Capabilities
+
+            **Voice:** af_nicole(0.7)+af_bella(0.3)
+            """;
+
+        var config = AgentLoader.Parse(md);
+
+        Assert.Equal("af_nicole(0.7)+af_bella(0.3)", config!.Voice);
+    }
+
+    [Fact]
+    public void Serialize_emits_voice_capability()
+    {
+        var config = new AgentConfig
+        {
+            Title = "Test",
+            Description = "",
+            Voice = "af_nicole",
+            Prompt = "hi",
+        };
+
+        var md = AgentLoader.Serialize("test", config);
+
+        Assert.Contains("**Voice:** af_nicole", md);
+    }
+
+    [Fact]
+    public void Parse_voice_capability_absent_yields_null()
+    {
+        var md = """
+            # Test
+
+            ## Capabilities
+
+            **Model:** anthropic/claude-sonnet-4.6
+
+            ## Prompt
+
+            hi
+            """;
+
+        var config = AgentLoader.Parse(md);
+        Assert.Null(config!.Voice);
+    }
+
+    [Fact]
     public void RenameAgent_OnDisk_MovesDirectoryAndUpdatesCrossReferences()
     {
         var basePath = Path.Combine(Path.GetTempPath(), $"achates-rename-test-{Guid.NewGuid():N}");

@@ -17,6 +17,7 @@ struct AgentEditView: View {
     @State private var showToolsEditor = false
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
+    @State private var voiceRegistry: VoiceRegistry?
 
     var body: some View {
         Group {
@@ -202,6 +203,29 @@ struct AgentEditView: View {
                 Text("When off, this agent only sees its own private notes — useful for roleplay or in-character chat.")
             }
 
+            Section {
+                voicePicker
+                HStack {
+                    Text("Custom blend")
+                    Spacer()
+                    TextField("af_nicole(0.7)+af_bella(0.3)", text: voiceBinding)
+                        .multilineTextAlignment(.trailing)
+                        .foregroundStyle(.secondary)
+                        .autocorrectionDisabled()
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                }
+            } header: {
+                Text("Voice")
+            } footer: {
+                if let reg = voiceRegistry, reg.voices.isEmpty, !reg.isLoading {
+                    Text("Speech is not configured on the server. Configure tools.speech in ~/.achates/config.yaml and restart to enable.")
+                } else {
+                    Text("Voice plays for sessions where the speaker toggle is on. Empty makes the agent silent.")
+                }
+            }
+
             Section("Tools") {
                 DisclosureGroup(isExpanded: $showToolsEditor) {
                     ForEach(availableTools) { tool in
@@ -356,6 +380,54 @@ struct AgentEditView: View {
         )
     }
 
+    @ViewBuilder
+    private var voicePicker: some View {
+        // Picker selects from the known voice list; "" = voiceless. If the
+        // configured voice doesn't match (e.g. a custom blend), the picker
+        // shows the explicit "Custom" sentinel and the textfield carries
+        // the actual string.
+        let known = voiceRegistry?.voices ?? []
+        let current = config?.voice ?? ""
+        let isCustom = !current.isEmpty && !known.contains(current)
+        HStack {
+            Text("Voice")
+            Spacer()
+            Picker("", selection: voicePickerBinding) {
+                Text("Voiceless").tag("")
+                ForEach(known, id: \.self) { v in
+                    Text(v).tag(v)
+                }
+                if isCustom {
+                    Text("Custom (\(current))").tag(current)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+        }
+    }
+
+    private var voicePickerBinding: Binding<String> {
+        Binding(
+            get: { config?.voice ?? "" },
+            set: { newValue in
+                guard var c = config else { return }
+                c.voice = newValue.isEmpty ? nil : newValue
+                config = c
+            }
+        )
+    }
+
+    private var voiceBinding: Binding<String> {
+        Binding(
+            get: { config?.voice ?? "" },
+            set: { newValue in
+                guard var c = config else { return }
+                c.voice = newValue.isEmpty ? nil : newValue
+                config = c
+            }
+        )
+    }
+
     private var sharedMemoryBinding: Binding<Bool> {
         Binding(
             get: { config?.sharedMemory ?? true },
@@ -473,6 +545,13 @@ struct AgentEditView: View {
             errorMessage = error.localizedDescription
             showError = true
         }
+
+        // Kick off voice list refresh in the background; the picker shows
+        // "Voiceless" + the agent's current voice immediately and adds the
+        // server list as it lands.
+        let registry = voiceRegistry ?? VoiceRegistry(appState: appState)
+        voiceRegistry = registry
+        await registry.loadIfStale()
     }
 
     private func save() async {

@@ -10,6 +10,7 @@ namespace Achates.Server;
 ///   - **Model:** anthropic/claude-sonnet-4.6
 ///   - **Thinking Model:** anthropic/claude-opus-4-7
 ///   - **Tools:** session, memory, todo
+///   - **Voice:** af_nicole
 ///   - **Allow chat:** val, claire
 ///   - **Reasoning effort:** medium
 ///   ## Prompt
@@ -116,6 +117,12 @@ public static class AgentLoader
         {
             sb.AppendLine();
             sb.AppendLine("**Shared Memory:** false");
+        }
+
+        if (!string.IsNullOrWhiteSpace(config.Voice))
+        {
+            sb.AppendLine();
+            sb.AppendLine($"**Voice:** {config.Voice}");
         }
 
         if (!string.IsNullOrWhiteSpace(config.Prompt))
@@ -358,6 +365,9 @@ public static class AgentLoader
             case "shared memory":
                 if (value is not null && bool.TryParse(value, out var sharedMemory))
                     config.SharedMemory = sharedMemory;
+                break;
+            case "voice":
+                config.Voice = string.IsNullOrWhiteSpace(value) ? null : value;
                 break;
         }
     }

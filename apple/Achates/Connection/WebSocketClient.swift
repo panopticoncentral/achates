@@ -320,6 +320,22 @@ final class WebSocketClient {
             let text = payload["text"]?.stringValue ?? ""
             appState.endAgentTurn(text)
 
+        case "audio.block":
+            guard matchesCurrentSession,
+                  let turnId = payload["turn_id"]?.stringValue,
+                  let sentenceIndex = payload["sentence_index"]?.intValue,
+                  let dataString = payload["data"]?.stringValue,
+                  let data = Data(base64Encoded: dataString) else { break }
+            appState.speechPlayer.enqueue(turnId: turnId, sentenceIndex: sentenceIndex, mp3Data: data)
+            let speechText = payload["text"]?.stringValue ?? ""
+            appState.recordAudioMetadata(turnId: turnId, sentenceIndex: sentenceIndex, text: speechText)
+
+        case "audio.error":
+            guard matchesCurrentSession else { break }
+            let turnId = payload["turn_id"]?.stringValue ?? "<unknown>"
+            let message = payload["message"]?.stringValue ?? "Speech unavailable."
+            appState.recordAudioError(turnId: turnId, message: message)
+
         case "message.end":
             guard matchesCurrentSession else { break }
             var messageUsage: MessageUsage?

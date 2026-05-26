@@ -61,6 +61,14 @@ public sealed class AgentConfig
     /// </summary>
     public string? ThinkingModel { get; set; }
 
+    /// <summary>
+    /// Per-agent voice id for TTS (e.g. "af_nicole" or a Kokoro blend like
+    /// "af_nicole(0.7)+af_bella(0.3)"). Null/empty means the agent is
+    /// voiceless — speech is not generated even when the per-session toggle
+    /// is on, unless <c>tools.speech.default_voice</c> is set globally.
+    /// </summary>
+    public string? Voice { get; set; }
+
     public List<string>? Tools { get; set; }
     public CompletionConfig? Completion { get; set; }
 
@@ -103,6 +111,7 @@ public sealed class ToolsConfig
     public TitleConfig? Title { get; set; }
     public Dictionary<string, GraphConfig>? Graph { get; set; }
     public WithingsConfig? Withings { get; set; }
+    public Achates.Server.Speech.SpeechConfig? Speech { get; set; }
 }
 
 public sealed class AvatarConfig

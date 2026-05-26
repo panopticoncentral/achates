@@ -1,4 +1,5 @@
 using Achates.Server;
+using Achates.Server.Speech;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,6 +10,23 @@ builder.Services.AddSingleton(userConfig);
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<GatewayService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GatewayService>());
+
+// Speech (conditional on tools.speech being configured).
+if (userConfig.Tools?.Speech is { } speechConfig)
+{
+    builder.Services.AddSingleton(speechConfig);
+    builder.Services.AddSingleton<KokoroSpeechSynthesizer>(sp =>
+    {
+        var http = sp.GetRequiredService<IHttpClientFactory>().CreateClient("kokoro");
+        var endpoint = !string.IsNullOrWhiteSpace(speechConfig.Endpoint)
+            ? new Uri(speechConfig.Endpoint)
+            : new Uri("http://127.0.0.1:8880"); // matches sidecar default; sidecar process resolves the same way
+        return new KokoroSpeechSynthesizer(http, endpoint);
+    });
+    builder.Services.AddSingleton<ISpeechSynthesizer>(sp => sp.GetRequiredService<KokoroSpeechSynthesizer>());
+    builder.Services.AddHostedService<KokoroSidecarProcess>();
+    builder.Services.AddHttpClient("kokoro").ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
+}
 
 var app = builder.Build();
 app.UseWebSockets();

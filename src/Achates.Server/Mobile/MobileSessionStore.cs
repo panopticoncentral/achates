@@ -70,7 +70,8 @@ public sealed class MobileSessionStore(string basePath)
                 lastUserMessage?.Text,
                 session.JobId,
                 cronTaskName,
-                session.Source));
+                session.Source,
+                session.SpeechEnabled));
         }
 
         IEnumerable<MobileSessionInfo> query = results.OrderByDescending(s => s.Updated);

@@ -17,13 +17,14 @@ internal sealed class ProfileTool(string agentDir, Func<CancellationToken, Task>
             ["description"] = StringSchema("New agent description. Only used with 'update'."),
             ["prompt"] = StringSchema("New system prompt. Only used with 'update'."),
             ["avatar"] = StringSchema("Avatar image. Provide a file path from the image tool (e.g. '/agents/.../image.jpg') or base64-encoded image data. Only used with 'update'."),
+            ["voice"] = StringSchema("Per-agent TTS voice id (e.g. 'af_nicole' or a Kokoro blend). Empty string clears the voice (makes the agent voiceless). Only used with 'update'."),
         },
         required: ["action"]);
 
     public override string Name => "profile";
     public override string Description =>
-        "Read or update your own profile. 'get' returns your current description, prompt, and avatar. " +
-        "'update' changes your description, prompt, and/or avatar (only provide fields you want to change).";
+        "Read or update your own profile. 'get' returns your current description, prompt, avatar, and voice. " +
+        "'update' changes your description, prompt, avatar, and/or voice (only provide fields you want to change).";
     public override string Label => "Profile";
     public override JsonElement Parameters => _schema;
 
@@ -56,7 +57,7 @@ internal sealed class ProfileTool(string agentDir, Func<CancellationToken, Task>
 
         var parts = new List<CompletionUserContent>();
 
-        var text = $"**Description:** {config.Description ?? "(none)"}\n\n**Prompt:** {config.Prompt ?? "(none)"}";
+        var text = $"**Description:** {config.Description ?? "(none)"}\n\n**Prompt:** {config.Prompt ?? "(none)"}\n\n**Voice:** {config.Voice ?? "(none)"}";
         parts.Add(new CompletionTextContent { Text = text });
 
         // Include avatar if one exists
@@ -77,9 +78,10 @@ internal sealed class ProfileTool(string agentDir, Func<CancellationToken, Task>
         var newDescription = GetString(arguments, "description");
         var newPrompt = GetString(arguments, "prompt");
         var newAvatar = GetString(arguments, "avatar");
+        var newVoice = GetString(arguments, "voice");
 
-        if (newDescription is null && newPrompt is null && newAvatar is null)
-            return TextResult("Provide at least one of: description, prompt, avatar.");
+        if (newDescription is null && newPrompt is null && newAvatar is null && newVoice is null)
+            return TextResult("Provide at least one of: description, prompt, avatar, voice.");
 
         // Read and parse current config
         var agentFile = Path.Combine(agentDir, "AGENT.md");
@@ -96,6 +98,8 @@ internal sealed class ProfileTool(string agentDir, Func<CancellationToken, Task>
             config.Description = newDescription;
         if (newPrompt is not null)
             config.Prompt = newPrompt;
+        if (newVoice is not null)
+            config.Voice = string.IsNullOrEmpty(newVoice) ? null : newVoice;
 
         // Serialize and write back
         var displayName = config.Title ?? Path.GetFileName(agentDir);
@@ -143,6 +147,7 @@ internal sealed class ProfileTool(string agentDir, Func<CancellationToken, Task>
         if (newDescription is not null) updated.Add("description");
         if (newPrompt is not null) updated.Add("prompt");
         if (newAvatar is not null) updated.Add("avatar");
+        if (newVoice is not null) updated.Add("voice");
         return TextResult($"Profile updated: {string.Join(", ", updated)}.");
     }
 

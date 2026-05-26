@@ -14,6 +14,7 @@ enum BubblePosition {
 }
 
 struct MessageBubble: View {
+    @Environment(AppState.self) private var appState
     let message: ChatMessage
     var position: BubblePosition = .alone
     var agent: Agent? = nil
@@ -49,6 +50,31 @@ struct MessageBubble: View {
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .padding(.leading, 4)
+                }
+
+                if message.role == .assistant, let turnId = message.audioTurnId, !message.audioTranscript.isEmpty {
+                    Button {
+                        appState.speechPlayer.replay(turnId: turnId)
+                    } label: {
+                        Image(systemName: "play.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Replay audio")
+                    .padding(.leading, 4)
+                }
+
+                if message.role == .assistant, let err = message.audioError {
+                    HStack(spacing: 4) {
+                        Image(systemName: "speaker.slash")
+                        Text("Speech unavailable")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+                    .help(err)
+                    .accessibilityLabel("Speech unavailable: \(err)")
                 }
 
                 if visibleBlocks.isEmpty && message.role == .assistant && (message.blocks.isEmpty || isStreaming) {

@@ -36,6 +36,7 @@ internal sealed class AgentManagerTool(
             ["allowed_chats"] = ArraySchema(StringSchema("Agent id."), "Agents this agent may chat with. Optional ('modify' only); replaces the whole list."),
             ["dreamtime"] = StringSchema("Dreamtime, e.g. '3:00 AM', or 'off' to disable. Optional ('modify' only)."),
             ["shared_memory"] = BooleanSchema("When false, the agent's memory tool only sees its own private notes (the universal user memory at ~/.achates/memory.md is hidden). Useful for roleplay or in-character agents. Optional ('modify' only)."),
+            ["voice"] = StringSchema("Per-agent TTS voice id (e.g. 'af_nicole' or a Kokoro blend). Empty string clears the voice. Only used with 'modify' or 'create'."),
             ["avatar"] = StringSchema("Avatar image: a file path from the image tool or base64-encoded data. Optional ('modify' only)."),
         },
         required: ["action"]);
@@ -89,7 +90,8 @@ internal sealed class AgentManagerTool(
             var desc = config.Description ?? "(no description)";
             var tools = config.Tools is { Count: > 0 } ? string.Join(", ", config.Tools) : "none";
             var model = config.Model ?? "(default)";
-            sb.AppendLine($"- {id} — {display}: {desc} (tools: {tools}; model: {model})");
+            var voiceSuffix = config.Voice is not null ? $"; voice: {config.Voice}" : "";
+            sb.AppendLine($"- {id} — {display}: {desc} (tools: {tools}; model: {model}{voiceSuffix})");
         }
 
         var text = sb.Length == 0 ? "No agents found." : sb.ToString().TrimEnd();
@@ -125,6 +127,7 @@ internal sealed class AgentManagerTool(
         sb.AppendLine($"**Max tokens:** {config.Completion?.MaxTokens?.ToString(CultureInfo.InvariantCulture) ?? "(default)"}");
         sb.AppendLine($"**Dreamtime:** {config.Dreamtime?.ToString("h:mm tt", CultureInfo.InvariantCulture) ?? "(off)"}");
         sb.AppendLine($"**Shared memory:** {(config.SharedMemory == false ? "disabled" : "enabled")}");
+        sb.AppendLine($"**Voice:** {config.Voice ?? "(none)"}");
         sb.AppendLine();
         sb.AppendLine($"**Prompt:**\n{config.Prompt ?? "(none)"}");
 
@@ -175,13 +178,15 @@ internal sealed class AgentManagerTool(
         var newDreamtime = GetString(arguments, "dreamtime");
         var hasSharedMemory = arguments.ContainsKey("shared_memory");
         var newSharedMemory = GetBool(arguments, "shared_memory");
+        var hasVoice = arguments.ContainsKey("voice");
+        var newVoice = GetString(arguments, "voice");
         var newAvatar = GetString(arguments, "avatar");
 
         var anyField = newName is not null || newDescription is not null || newPrompt is not null
             || newTools is not null || newModel is not null || newThinkingModel is not null
             || newProvider is not null || newReasoning is not null || newTemperature is not null
             || newMaxTokens is not null || newAllowedChats is not null || hasDreamtime
-            || hasSharedMemory
+            || hasSharedMemory || hasVoice
             || newAvatar is not null;
         if (!anyField)
             return TextResult("Provide at least one field to modify.");
@@ -227,6 +232,12 @@ internal sealed class AgentManagerTool(
             // override (Serialize emits no line for null or true, only for false).
             config.SharedMemory = newSharedMemory;
             changed.Add("shared_memory");
+        }
+
+        if (hasVoice)
+        {
+            config.Voice = string.IsNullOrEmpty(newVoice) ? null : newVoice;
+            changed.Add("voice");
         }
 
         // Determine rename before writing so we serialize with the final display name.
@@ -305,12 +316,14 @@ internal sealed class AgentManagerTool(
             return TextResult($"An agent '{agentId}' already exists.");
 
         var tools = GetStringList(arguments, "tools");
+        var voice = GetString(arguments, "voice");
 
         var config = new AgentConfig
         {
             Description = description,
             Prompt = prompt,
             Tools = tools is { Count: > 0 } ? tools : null,
+            Voice = string.IsNullOrEmpty(voice) ? null : voice,
         };
 
         var markdown = AgentLoader.Serialize(name, config);

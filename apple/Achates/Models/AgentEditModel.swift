@@ -18,6 +18,9 @@ struct AgentEditModel: Equatable {
     var defaultModel: String?
     var defaultThinkingModel: String?
     var sharedMemory: Bool
+    /// Per-agent TTS voice id (e.g. "af_nicole" or a Kokoro blend like
+    /// "af_nicole(0.7)+af_bella(0.3)"). Nil/empty makes the agent voiceless.
+    var voice: String?
 
     static func from(_ payload: [String: JSONValue]) -> AgentEditModel? {
         AgentEditModel(
@@ -35,7 +38,8 @@ struct AgentEditModel: Equatable {
             thinkingModel: nonEmpty(payload["thinking_model"]?.stringValue),
             defaultModel: nonEmpty(payload["default_model"]?.stringValue),
             defaultThinkingModel: nonEmpty(payload["default_thinking_model"]?.stringValue),
-            sharedMemory: payload["shared_memory"]?.boolValue ?? true
+            sharedMemory: payload["shared_memory"]?.boolValue ?? true,
+            voice: nonEmpty(payload["voice"]?.stringValue)
         )
     }
 
@@ -50,6 +54,8 @@ struct AgentEditModel: Equatable {
             // (empty string == revert to global default).
             "model": .string(model ?? ""),
             "thinking_model": .string(thinkingModel ?? ""),
+            // Always send voice so empty string clears it (makes agent voiceless).
+            "voice": .string(voice ?? ""),
         ]
         if let re = reasoningEffort {
             params["reasoning_effort"] = .string(re)
