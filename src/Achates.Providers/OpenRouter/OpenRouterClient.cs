@@ -10,6 +10,27 @@ internal sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
 {
     private const string DefaultBaseUrl = "https://openrouter.ai/api/v1";
 
+    private const int MaxAttempts = 3;
+
+    internal static Func<int, TimeSpan> RetryDelay { get; set; } = DefaultRetryDelay;
+
+    private static TimeSpan DefaultRetryDelay(int attempt)
+    {
+        // 500ms, 2s, 8s base, multiplied by a jitter factor uniform on [0.75, 1.25].
+        var baseMs = 500 * Math.Pow(4, attempt);
+        var jitter = 0.75 + Random.Shared.NextDouble() * 0.5;
+        return TimeSpan.FromMilliseconds(baseMs * jitter);
+    }
+
+    private static bool IsTransient502(OpenRouterException ex)
+    {
+        if (ex.Code == 502) return true;
+        if (ex.Metadata is not { ValueKind: JsonValueKind.Object } meta) return false;
+        if (!meta.TryGetProperty("error_type", out var t)) return false;
+        return t.ValueKind == JsonValueKind.String
+            && t.GetString() == "provider_unavailable";
+    }
+
     private void SetAuth(HttpRequestMessage request) =>
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
@@ -59,6 +80,26 @@ internal sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
         OpenRouterChatCompletionRequest request,
         CancellationToken cancellationToken = default)
     {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await SendCompletionOnceAsync(request, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OpenRouterException ex) when (
+                IsTransient502(ex) && attempt < MaxAttempts - 1)
+            {
+                await Task.Delay(RetryDelay(attempt), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task<OpenRouterChatCompletionResponse?> SendCompletionOnceAsync(
+        OpenRouterChatCompletionRequest request,
+        CancellationToken cancellationToken)
+    {
         var requestUri = $"{GetBaseUrl()}/chat/completions";
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri);
@@ -67,7 +108,8 @@ internal sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
             request,
             OpenRouterJsonContext.Default.OpenRouterChatCompletionRequest);
 
-        using var httpResponse = await httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
+        using var httpResponse = await httpClient.SendAsync(httpRequest, cancellationToken)
+            .ConfigureAwait(false);
 
         if (!httpResponse.IsSuccessStatusCode)
         {
@@ -83,6 +125,45 @@ internal sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
     public async IAsyncEnumerable<OpenRouterChatCompletionChunk> StreamOpenRouterChatCompletionAsync(
         OpenRouterChatCompletionRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var yieldedAny = false;
+        for (var attempt = 0; ; attempt++)
+        {
+            // Token already bound to the iterator via [EnumeratorCancellation];
+            // GetAsyncEnumerator gets default to avoid threading the same token twice.
+            await using var inner = StreamOneAttemptAsync(request, cancellationToken)
+                .GetAsyncEnumerator();
+            var shouldRetry = false;
+
+            while (true)
+            {
+                bool hasNext;
+                try
+                {
+                    hasNext = await inner.MoveNextAsync().ConfigureAwait(false);
+                }
+                catch (OpenRouterException ex) when (
+                    IsTransient502(ex)
+                    && !yieldedAny
+                    && attempt < MaxAttempts - 1)
+                {
+                    shouldRetry = true;
+                    break;
+                }
+
+                if (!hasNext) break;
+                yieldedAny = true;
+                yield return inner.Current;
+            }
+
+            if (!shouldRetry) yield break;
+            await Task.Delay(RetryDelay(attempt), cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async IAsyncEnumerable<OpenRouterChatCompletionChunk> StreamOneAttemptAsync(
+        OpenRouterChatCompletionRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var requestUri = $"{GetBaseUrl()}/chat/completions";
 
