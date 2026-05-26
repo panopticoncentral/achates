@@ -73,18 +73,21 @@ public sealed class SpeechBrokerTests
     }
 
     [Fact]
-    public async Task Skips_synthesis_when_synthesizer_unavailable()
+    public async Task First_synth_failure_suppresses_remaining_sentences_in_turn()
     {
+        // Mimics a dead Kokoro endpoint mid-turn: the first sentence fails and
+        // we emit one audio.error, but subsequent sentences must NOT trigger
+        // more synth attempts (no HTTP spam) and no further errors.
         var sink = new RecordingSink();
-        var synth = new FakeSynth { Available = false };
+        var synth = new FakeSynth { ThrowOnSynth = true };
         var broker = new SpeechBroker(synth, sink, voice: "af_nicole", turnId: "turn-1");
 
-        await broker.PushTextAsync("Hello.");
+        await broker.PushTextAsync("Hello. How are you? Goodbye.");
         await broker.FinishAsync();
 
         Assert.Empty(sink.Blocks);
         Assert.Single(sink.Errors);
-        Assert.Contains("unavailable", sink.Errors[0].Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, synth.SynthCallCount);
     }
 
     [Fact]
@@ -103,11 +106,11 @@ public sealed class SpeechBrokerTests
 
     private sealed class FakeSynth : ISpeechSynthesizer
     {
-        public bool Available { get; set; } = true;
         public bool ThrowOnSynth { get; set; }
-        public bool IsAvailable => Available;
+        public int SynthCallCount { get; private set; }
         public Task<SynthesisResult> SynthesizeAsync(string text, string voice, CancellationToken ct)
         {
+            SynthCallCount++;
             if (ThrowOnSynth) throw new HttpRequestException("boom");
             return Task.FromResult(new SynthesisResult(new byte[] { 1, 2, 3 }, "mp3"));
         }

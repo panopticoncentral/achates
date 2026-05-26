@@ -6,8 +6,9 @@ namespace Achates.Server.Speech;
 /// <summary>
 /// HTTP client targeting the OpenAI-compatible /v1/audio/speech endpoint
 /// exposed by kokoro-fastapi (or any other Kokoro server with the same
-/// shape). Availability is gated externally by <see cref="KokoroSidecarProcess"/>
-/// which calls <see cref="MarkAvailable"/> after a successful health probe.
+/// shape). The lifecycle of the underlying server is the user's responsibility
+/// (launchd, systemd, Docker, a terminal) — Achates just sends requests to
+/// the configured endpoint and surfaces failures via <see cref="SpeechBroker"/>.
 /// </summary>
 public sealed class KokoroSpeechSynthesizer(HttpClient http, Uri baseUrl) : ISpeechSynthesizer
 {
@@ -16,13 +17,6 @@ public sealed class KokoroSpeechSynthesizer(HttpClient http, Uri baseUrl) : ISpe
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
-
-    private volatile bool _available;
-
-    public bool IsAvailable => _available;
-
-    /// <summary>Set by the sidecar supervisor after a successful health probe.</summary>
-    public void MarkAvailable(bool value) => _available = value;
 
     public async Task<SynthesisResult> SynthesizeAsync(string text, string voice, CancellationToken ct)
     {

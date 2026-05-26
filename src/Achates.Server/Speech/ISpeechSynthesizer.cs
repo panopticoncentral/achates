@@ -9,13 +9,6 @@ namespace Achates.Server.Speech;
 public interface ISpeechSynthesizer
 {
     /// <summary>
-    /// Whether the synthesizer is reachable and ready. False when the sidecar
-    /// is starting up, has crashed, or was never configured. <see cref="SpeechBroker"/>
-    /// reads this before attempting any synthesis call.
-    /// </summary>
-    bool IsAvailable { get; }
-
-    /// <summary>
     /// Synthesize <paramref name="text"/> in the named voice and return the
     /// complete audio bytes plus the format (e.g. "mp3"). May throw on
     /// network errors or non-2xx HTTP responses; callers must handle

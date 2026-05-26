@@ -109,7 +109,7 @@ Providers <- Agent <- Server
 - Health check: `GET /health`
 - Agent images: `GET /agents/{name}/images/{file}` (serves generated images from disk)
 - Memory and scheduled-jobs management live in the Apple app under Settings → System (see `memory.*` and `jobs.*` RPC methods below). Costs are exposed via the Costs sheet from the session list.
-- **Speech pipeline** (`src/Achates.Server/Speech/`) — local TTS via a Kokoro-FastAPI sidecar. `ISpeechSynthesizer` is the engine-agnostic seam; `KokoroSpeechSynthesizer` calls the OpenAI-compatible `/v1/audio/speech` endpoint. `KokoroSidecarProcess` (IHostedService) supervises an optional managed sidecar (spawn on startup, health-check, restart with backoff 1s→5s→30s→5min, kill on shutdown) — external sidecars are also supported via `tools.speech.endpoint`. `SpeechBroker` is constructed per turn in `MobileTransport.StreamAgentResponseAsync` when the session has `SpeechEnabled` and the agent has a `Voice` (or `tools.speech.default_voice` is set); it consumes the text stream, segments into sentences via `SentenceSegmenter`, sanitizes them via `SpeechSanitizer` (strips markdown, code fences, URLs, emoji), synthesizes each, and emits `audio.block` events on the WebSocket via a `TransportSpeechSink`. Tool calls, thinking blocks, and inter-agent chat replies are never spoken.
+- **Speech pipeline** (`src/Achates.Server/Speech/`) — local TTS via an externally-managed Kokoro-FastAPI sidecar. The user runs the sidecar themselves (terminal, launchd, systemd, Docker) and points Achates at it via `tools.speech.endpoint` (defaults to `http://127.0.0.1:8880`). `ISpeechSynthesizer` is the engine-agnostic seam; `KokoroSpeechSynthesizer` calls the OpenAI-compatible `/v1/audio/speech` endpoint. `SpeechBroker` is constructed per turn in `MobileTransport.StreamAgentResponseAsync` when the session has `SpeechEnabled` and the agent has a `Voice` (or `tools.speech.default_voice` is set); it consumes the text stream, segments into sentences via `SentenceSegmenter`, sanitizes them via `SpeechSanitizer` (strips markdown, code fences, URLs, emoji), synthesizes each, and emits `audio.block` events on the WebSocket via a `TransportSpeechSink`. Failure behavior: when `tools.speech` is unset, no `ISpeechSynthesizer` is registered and the broker is never built (silent skip); when configured but the endpoint is unreachable, the first sentence's synth call emits one `audio.error` and the rest of the turn is skipped silently via a `_synthFailedForTurn` gate — no retry storm. Tool calls, thinking blocks, and inter-agent chat replies are never spoken.
 
 ### Transport (`Achates.Server.Mobile`)
 - `MobileTransport` — WebSocket handler for `/ws` connections. Supports multiple concurrent clients. All clients share the same session namespace (sessions are per-agent, not per-client). Events are broadcast to all connected clients. Manages RPC dispatch, agent event streaming, and session persistence.
@@ -195,13 +195,10 @@ tools:
     client_secret: <withings-client-secret>  # or set WITHINGS_CLIENT_SECRET env var
     redirect_uri: http://localhost:5000/withings/callback  # optional, this is the default
   speech:
-    # Managed sidecar — Achates spawns kokoro-fastapi on startup.
-    sidecar:
-      working_dir: ~/kokoro-fastapi
-      command: uv
-      args: [run, uvicorn, api.src.main:app, --host, "127.0.0.1", --port, "8880"]
-    # Or point at an externally-managed sidecar (mutually exclusive with `sidecar`):
-    # endpoint: http://127.0.0.1:8880
+    # URL of the Kokoro-FastAPI server (user-managed — start it yourself
+    # via terminal, launchd, systemd, Docker, etc.). Defaults to
+    # http://127.0.0.1:8880 when omitted, matching Kokoro's own default.
+    endpoint: http://127.0.0.1:8880
     # Optional global default voice for agents that don't declare **Voice:**:
     # default_voice: af_nicole
 

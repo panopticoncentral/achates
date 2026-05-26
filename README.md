@@ -327,7 +327,7 @@ Tokens are cached at `~/.achates/withings-tokens.json` and refresh automatically
 
 ## Voice (TTS) Setup
 
-Agents can speak their replies via a locally-hosted [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) sidecar. Fully private (no cloud), no content moderation, per-agent voice identity. See [`docs/speech-setup.md`](docs/speech-setup.md) for the one-time install. Voice is per-agent (`**Voice:** af_nicole` in `AGENT.md`) and opt-in per session (speaker toggle in the chat nav bar).
+Agents can speak their replies via a locally-hosted [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) sidecar. Fully private (no cloud), no content moderation, per-agent voice identity. You run the sidecar yourself (terminal, launchd, systemd, Docker — your call) and point Achates at it via `tools.speech.endpoint`. See [`docs/speech-setup.md`](docs/speech-setup.md) for the one-time install. Voice is per-agent (`**Voice:** af_nicole` in `AGENT.md`) and opt-in per session (speaker toggle in the chat nav bar).
 
 ## Tools Reference
 

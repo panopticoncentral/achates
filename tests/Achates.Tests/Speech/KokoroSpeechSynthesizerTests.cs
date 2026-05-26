@@ -29,7 +29,6 @@ public sealed class KokoroSpeechSynthesizerTests
 
         var client = new HttpClient(handler);
         var synth = new KokoroSpeechSynthesizer(client, new Uri("http://127.0.0.1:8880"));
-        synth.MarkAvailable(true);
 
         var result = await synth.SynthesizeAsync("hello", "af_nicole", CancellationToken.None);
 
@@ -53,7 +52,6 @@ public sealed class KokoroSpeechSynthesizerTests
         }));
 
         var synth = new KokoroSpeechSynthesizer(new HttpClient(handler), new Uri("http://127.0.0.1:8880"));
-        synth.MarkAvailable(true);
 
         var ex = await Assert.ThrowsAsync<HttpRequestException>(
             () => synth.SynthesizeAsync("hi", "bad_voice", CancellationToken.None));
@@ -65,7 +63,6 @@ public sealed class KokoroSpeechSynthesizerTests
     {
         var handler = new StubHandler(_ => throw new HttpRequestException("connection refused"));
         var synth = new KokoroSpeechSynthesizer(new HttpClient(handler), new Uri("http://127.0.0.1:8880"));
-        // Not marked available — sidecar never came up.
         var voices = await synth.ListVoicesAsync(CancellationToken.None);
         Assert.Empty(voices);
     }
@@ -81,7 +78,6 @@ public sealed class KokoroSpeechSynthesizerTests
         }));
 
         var synth = new KokoroSpeechSynthesizer(new HttpClient(handler), new Uri("http://127.0.0.1:8880"));
-        synth.MarkAvailable(true);
         var voices = await synth.ListVoicesAsync(CancellationToken.None);
         Assert.Equal(new[] { "af_nicole", "af_bella", "am_michael" }, voices);
     }
@@ -97,7 +93,6 @@ public sealed class KokoroSpeechSynthesizerTests
         }));
 
         var synth = new KokoroSpeechSynthesizer(new HttpClient(handler), new Uri("http://127.0.0.1:8880"));
-        synth.MarkAvailable(true);
         var voices = await synth.ListVoicesAsync(CancellationToken.None);
         Assert.Equal(new[] { "af_alloy", "af_nicole" }, voices);
     }
@@ -113,7 +108,6 @@ public sealed class KokoroSpeechSynthesizerTests
         }));
 
         var synth = new KokoroSpeechSynthesizer(new HttpClient(handler), new Uri("http://127.0.0.1:8880"));
-        synth.MarkAvailable(true);
         var voices = await synth.ListVoicesAsync(CancellationToken.None);
         Assert.Equal(new[] { "af_one", "af_two" }, voices);
     }
@@ -128,7 +122,6 @@ public sealed class KokoroSpeechSynthesizerTests
         }));
 
         var synth = new KokoroSpeechSynthesizer(new HttpClient(handler), new Uri("http://127.0.0.1:8880"));
-        synth.MarkAvailable(true);
         var voices = await synth.ListVoicesAsync(CancellationToken.None);
         Assert.Empty(voices);
     }

@@ -4,6 +4,11 @@ Achates uses [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) as
 a local TTS sidecar. The model runs entirely on your machine; nothing is
 sent to a cloud TTS vendor, and there is no content moderation.
 
+The sidecar is managed externally — you start it yourself however you
+prefer (a terminal, launchd, systemd, Docker, …) and point Achates at it
+via `tools.speech.endpoint`. Achates only sends HTTP requests; it does
+not spawn or supervise the process.
+
 This guide walks through a one-time install on macOS (Apple Silicon).
 Linux is similar; Windows is not currently tested.
 
@@ -38,7 +43,7 @@ EOF
 Replace `<you>` with your username. (The `.env` is loaded by uvicorn from
 the working directory.)
 
-## Test the sidecar standalone
+## Run the sidecar
 
 ```bash
 cd ~/kokoro-fastapi
@@ -55,7 +60,9 @@ curl -X POST http://127.0.0.1:8880/v1/audio/speech \
   --output /tmp/test.mp3 && afplay /tmp/test.mp3
 ```
 
-If you hear the greeting, the sidecar is healthy.
+If you hear the greeting, the sidecar is healthy. Leave it running while
+you use Achates — or wrap it in `launchd` / `systemd` / a Docker
+container so it starts at login.
 
 ## Tell Achates about it
 
@@ -64,35 +71,20 @@ In `~/.achates/config.yaml`:
 ```yaml
 tools:
   speech:
-    sidecar:
-      working_dir: ~/kokoro-fastapi
-      command: uv
-      args: [run, uvicorn, api.src.main:app, --host, "127.0.0.1", --port, "8880"]
-```
-
-Restart Achates. On startup it spawns the sidecar (you'll see
-`[kokoro]`-prefixed lines in the log) and marks speech available after
-the health check passes — look for `Speech: Kokoro sidecar is ready.`
-
-### External sidecar (alternative)
-
-If you'd rather run the sidecar yourself (Docker, dev loop, a shared
-instance), point Achates at it instead:
-
-```yaml
-tools:
-  speech:
     endpoint: http://127.0.0.1:8880
 ```
 
-Achates will not spawn a child process; it only health-checks the endpoint.
+The `endpoint` field is optional — it defaults to `http://127.0.0.1:8880`
+(Kokoro-FastAPI's own default), so an empty `speech:` block is enough if
+you're running the sidecar locally on the default port. Restart Achates
+after editing the config.
 
 ### Optional global default voice
 
 ```yaml
 tools:
   speech:
-    # ... sidecar or endpoint ...
+    endpoint: http://127.0.0.1:8880
     default_voice: af_nicole
 ```
 
@@ -130,14 +122,16 @@ on. Replies will be spoken as they stream.
 - **`Initializing Kokoro V1 on cuda`** — `USE_GPU=true` (default).
   Set `USE_GPU=false` in `.env`.
 - **Port 8880 in use** — kill the existing listener
-  (`lsof -ti :8880 | xargs kill`) or change `--port` in both the sidecar
-  args and the Achates config.
-- **No audio events in the app** — check the per-session toggle is on
+  (`lsof -ti :8880 | xargs kill`) or change `--port` for the sidecar and
+  set the same value in `tools.speech.endpoint`.
+- **`audio.error` chip on the first sentence of every reply** — the
+  endpoint is unreachable. Verify the sidecar is running
+  (`lsof -i :8880`) and that the URL in `tools.speech.endpoint` matches.
+  Achates only attempts the first sentence per turn after a failure —
+  subsequent sentences in the same turn are skipped silently.
+- **No audio events at all** — check the per-session toggle is on
   (speaker icon in the nav bar) and the agent has `**Voice:**` set (or
   `tools.speech.default_voice` is configured globally).
-- **`Speech unavailable` chip on every message** — check the Achates
-  server logs for `[kokoro]`-prefixed errors; verify the sidecar process
-  is running with `lsof -i :8880`.
 
 ## Uninstall
 

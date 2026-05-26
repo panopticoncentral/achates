@@ -26,7 +26,7 @@ public sealed class SpeechBroker(
 {
     private readonly SentenceSegmenter _segmenter = new();
     private int _sentenceIndex;
-    private bool _emittedUnavailableError;
+    private bool _synthFailedForTurn;
 
     public async Task PushTextAsync(string text, CancellationToken ct = default)
     {
@@ -48,16 +48,11 @@ public sealed class SpeechBroker(
         if (string.IsNullOrWhiteSpace(spoken))
             return; // Nothing speakable; skip silently.
 
-        if (!synth.IsAvailable)
-        {
-            if (!_emittedUnavailableError)
-            {
-                _emittedUnavailableError = true;
-                await sink.EmitAudioErrorAsync(turnId, sentenceIndex: null,
-                    message: "Speech engine unavailable for this turn.", ct);
-            }
+        // Once the synthesizer has failed in this turn, skip the rest — there's
+        // no point spamming HTTP requests at a dead endpoint and we already
+        // surfaced one audio.error to the client.
+        if (_synthFailedForTurn)
             return;
-        }
 
         var index = _sentenceIndex++;
         try
@@ -67,6 +62,7 @@ public sealed class SpeechBroker(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            _synthFailedForTurn = true;
             await sink.EmitAudioErrorAsync(turnId, index, ex.Message, ct);
         }
     }

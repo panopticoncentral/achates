@@ -128,17 +128,16 @@ At least one of `models` or `model` is required when an agent enables the `image
 
 #### `tools.speech`
 
-Local TTS via a [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) sidecar. Audio is synthesized per-sentence and streamed to the client as `audio.block` events. See [`speech-setup.md`](speech-setup.md) for the one-time sidecar install. Speech is opt-in per session (the iOS app's nav-bar speaker toggle) and per agent (the `Voice` capability in `AGENT.md`).
+Local TTS via an externally-managed [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) sidecar. Audio is synthesized per-sentence and streamed to the client as `audio.block` events. See [`speech-setup.md`](speech-setup.md) for the one-time sidecar install. Speech is opt-in per session (the iOS app's nav-bar speaker toggle) and per agent (the `Voice` capability in `AGENT.md`).
+
+The Kokoro server's lifecycle is the user's responsibility — start it however you prefer (terminal, launchd, systemd, Docker) and point Achates at it. Achates only sends HTTP requests to the configured endpoint; it does not spawn or supervise the process.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `sidecar.working_dir` | path | _(none)_ | Directory containing the kokoro-fastapi checkout. Achates spawns the child process here. |
-| `sidecar.command` | string | _(none)_ | Executable used to launch the sidecar (e.g. `uv`, `python`, an absolute path). |
-| `sidecar.args` | list of strings | _(none)_ | Arguments passed to `sidecar.command`. The `--port N` pair is used to derive the health-check endpoint when `endpoint` is not set. |
-| `endpoint` | string | _(derived from `sidecar.args`, else `http://127.0.0.1:8880`)_ | URL of an externally-managed sidecar. When set, Achates does **not** spawn a child process; it only health-checks the endpoint. If both `sidecar` and `endpoint` are configured, `endpoint` wins and a warning is logged. |
+| `endpoint` | string | `http://127.0.0.1:8880` | URL of the Kokoro-FastAPI server. Matches Kokoro's own default port. |
 | `default_voice` | string | _(none)_ | Global fallback voice id used when an agent doesn't declare `**Voice:**`. Off by default — voiceless agents stay silent. |
 
-Lifecycle (managed sidecar): spawn on startup → poll `GET /health` (60s deadline) → mark availability → restart on unexpected exit with exponential backoff (1s → 5s → 30s → 5min steady) → SIGTERM + 5s SIGKILL on shutdown. Stdout/stderr are forwarded as `[kokoro]`-prefixed log lines.
+Failure behavior: if the endpoint is unreachable mid-turn, the first sentence's synthesis attempt fails and emits one `audio.error`; subsequent sentences in the same turn are skipped silently (no retry storm). If `tools.speech` is omitted from the config entirely, speech is disabled — no `ISpeechSynthesizer` is registered and the broker is never built, even for sessions with the speaker toggle on.
 
 ### `cron`
 
