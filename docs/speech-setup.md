@@ -110,6 +110,26 @@ Or a blend:
 The iOS app's agent edit sheet exposes the same field via a picker plus
 a custom-blend text field.
 
+## Per-agent rate
+
+Optionally tune the agent's TTS speed with the `**Speech Rate:**` capability:
+
+```markdown
+**Voice:** af_nicole
+**Speech Rate:** 1.15
+```
+
+Accepts `[0.25, 4.0]` (Kokoro's documented range; clamped silently if you
+write a value outside it). `1.0` is normal speed; the practical range for
+"sounds like a normal person" is roughly `0.85`–`1.25`. Omitting the
+capability uses Kokoro's default — the field is dropped from the
+synthesis request body entirely.
+
+The iOS agent edit sheet exposes the same setting via a stepper (in 0.05
+increments from 0.5× to 2.0×) and a **Play sample** button that
+synthesizes a preset sentence with the current voice + rate so you can
+audition before saving.
+
 ## Enable speech for a session
 
 In the iOS app, tap the speaker icon in the chat nav bar to toggle it

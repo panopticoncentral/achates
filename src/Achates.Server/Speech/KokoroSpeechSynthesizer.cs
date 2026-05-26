@@ -18,10 +18,10 @@ public sealed class KokoroSpeechSynthesizer(HttpClient http, Uri baseUrl) : ISpe
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public async Task<SynthesisResult> SynthesizeAsync(string text, string voice, CancellationToken ct)
+    public async Task<SynthesisResult> SynthesizeAsync(string text, string voice, double? speed, CancellationToken ct)
     {
         var url = new Uri(baseUrl, "/v1/audio/speech");
-        var body = new SpeechRequest("kokoro", voice, text, "mp3");
+        var body = new SpeechRequest("kokoro", voice, text, "mp3", speed);
 
         var response = await http.PostAsJsonAsync(url, body, Json, ct);
         response.EnsureSuccessStatusCode();
@@ -94,5 +94,8 @@ public sealed class KokoroSpeechSynthesizer(HttpClient http, Uri baseUrl) : ISpe
         return false;
     }
 
-    private sealed record SpeechRequest(string Model, string Voice, string Input, string ResponseFormat);
+    // `Speed` is nullable so the field is dropped from the wire when null
+    // (JsonIgnoreCondition.WhenWritingNull on `Json` above). Today's "rate = default"
+    // calls therefore remain byte-identical to the pre-rate request body.
+    private sealed record SpeechRequest(string Model, string Voice, string Input, string ResponseFormat, double? Speed);
 }

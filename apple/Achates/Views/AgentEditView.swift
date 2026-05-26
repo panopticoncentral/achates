@@ -18,6 +18,9 @@ struct AgentEditView: View {
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
     @State private var voiceRegistry: VoiceRegistry?
+    @State private var previewPlayer = SpeechPreviewPlayer()
+    @State private var isPreviewLoading = false
+    @State private var previewError: String?
 
     var body: some View {
         Group {
@@ -216,13 +219,22 @@ struct AgentEditView: View {
                         .textInputAutocapitalization(.never)
                         #endif
                 }
+                speechRateRow
+                if config?.speechRate != nil {
+                    Button("Reset rate to default") { resetSpeechRate() }
+                        .font(.footnote)
+                }
+                playSampleRow
             } header: {
                 Text("Voice")
             } footer: {
-                if let reg = voiceRegistry, reg.voices.isEmpty, !reg.isLoading {
+                if let err = previewError {
+                    Text(err)
+                        .foregroundStyle(.red)
+                } else if let reg = voiceRegistry, reg.voices.isEmpty, !reg.isLoading {
                     Text("Speech is not configured on the server. Configure tools.speech in ~/.achates/config.yaml and restart to enable.")
                 } else {
-                    Text("Voice plays for sessions where the speaker toggle is on. Empty makes the agent silent.")
+                    Text("Voice plays for sessions where the speaker toggle is on. Empty makes the agent silent. Rate ranges from 0.5× (slow) to 2× (fast); 1.0× is normal.")
                 }
             }
 
@@ -426,6 +438,106 @@ struct AgentEditView: View {
                 config = c
             }
         )
+    }
+
+    @ViewBuilder
+    private var speechRateRow: some View {
+        // The stepper operates on a non-nil Double (Kokoro's default 1.0 stands
+        // in for nil). Snapping back to exactly 1.0 reverts the model to nil so
+        // we don't pin "default" into AGENT.md as a no-op `**Speech Rate:** 1`.
+        HStack {
+            Text("Rate")
+            Spacer()
+            Text(speechRateLabel)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Stepper("Rate", value: speechRateBinding, in: 0.5...2.0, step: 0.05)
+                .labelsHidden()
+        }
+    }
+
+    /// Human-readable label that matches the stepper value. Shows "1.0×
+    /// (default)" when unset so the user understands they're at the unspecified
+    /// baseline.
+    private var speechRateLabel: String {
+        if let r = config?.speechRate {
+            return String(format: "%.2f×", r)
+        }
+        return "1.0× (default)"
+    }
+
+    private var speechRateBinding: Binding<Double> {
+        Binding(
+            get: { config?.speechRate ?? 1.0 },
+            set: { newValue in
+                guard var c = config else { return }
+                // Snap exact 1.0 to nil — that's the "default" sentinel and
+                // shouldn't be persisted as a no-op capability line.
+                let rounded = (newValue * 100).rounded() / 100
+                c.speechRate = abs(rounded - 1.0) < 0.001 ? nil : rounded
+                config = c
+            }
+        )
+    }
+
+    private func resetSpeechRate() {
+        guard var c = config else { return }
+        c.speechRate = nil
+        config = c
+    }
+
+    @ViewBuilder
+    private var playSampleRow: some View {
+        Button {
+            Task { await playSample() }
+        } label: {
+            HStack {
+                if isPreviewLoading {
+                    ProgressView().controlSize(.small)
+                    Text("Synthesizing…")
+                } else if previewPlayer.isPlaying {
+                    Image(systemName: "speaker.wave.2.fill")
+                    Text("Playing…")
+                } else {
+                    Image(systemName: "play.circle")
+                    Text("Play sample")
+                }
+                Spacer()
+            }
+        }
+        .disabled(playSampleDisabled)
+    }
+
+    private var playSampleDisabled: Bool {
+        // Need a voice to test with, and don't fire while a synth call is in
+        // flight or playback is already running.
+        let hasVoice = !(config?.voice ?? "").isEmpty
+        return !hasVoice || isPreviewLoading || previewPlayer.isPlaying
+    }
+
+    private func playSample() async {
+        guard let client = appState.client, let voice = config?.voice, !voice.isEmpty else { return }
+        isPreviewLoading = true
+        previewError = nil
+        defer { isPreviewLoading = false }
+
+        var params: [String: JSONValue] = ["voice": .string(voice)]
+        if let rate = config?.speechRate {
+            params["speed"] = .double(rate)
+        }
+        do {
+            let payload = try await client.sendRequest(method: "speech.test", params: params)
+            if let base64 = payload?["data"]?.stringValue {
+                previewPlayer.play(base64Mp3: base64)
+                if let err = previewPlayer.lastError {
+                    previewError = err
+                }
+            } else {
+                previewError = "Server returned no audio."
+            }
+        } catch {
+            previewError = "Sample failed: \(error.localizedDescription)"
+        }
     }
 
     private var sharedMemoryBinding: Binding<Bool> {

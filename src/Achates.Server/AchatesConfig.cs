@@ -69,6 +69,15 @@ public sealed class AgentConfig
     /// </summary>
     public string? Voice { get; set; }
 
+    /// <summary>
+    /// Per-agent TTS rate. <c>1.0</c> is normal speed; Kokoro accepts the
+    /// inclusive range <c>[0.25, 4.0]</c> and rejects values outside it.
+    /// Null means "use Kokoro's default (1.0)" — the field is then omitted
+    /// from the synthesis request body. Out-of-range values supplied via
+    /// AGENT.md are clamped to the accepted range silently.
+    /// </summary>
+    public double? SpeechRate { get; set; }
+
     public List<string>? Tools { get; set; }
     public CompletionConfig? Completion { get; set; }
 

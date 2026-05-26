@@ -22,7 +22,8 @@ public sealed class SpeechBroker(
     ISpeechSynthesizer synth,
     ISpeechSink sink,
     string voice,
-    string turnId)
+    string turnId,
+    double? speed = null)
 {
     private readonly SentenceSegmenter _segmenter = new();
     private int _sentenceIndex;
@@ -57,7 +58,7 @@ public sealed class SpeechBroker(
         var index = _sentenceIndex++;
         try
         {
-            var result = await synth.SynthesizeAsync(spoken, voice, ct);
+            var result = await synth.SynthesizeAsync(spoken, voice, speed, ct);
             await sink.EmitAudioBlockAsync(turnId, index, voice, result.Format, result.Audio, spoken, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

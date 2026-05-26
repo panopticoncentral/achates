@@ -22,6 +22,11 @@ struct AgentEditModel: Equatable {
     /// "af_nicole(0.7)+af_bella(0.3)"). Nil/empty makes the agent voiceless.
     var voice: String?
 
+    /// Per-agent TTS rate. `1.0` is normal; Kokoro accepts `[0.25, 4.0]`.
+    /// `nil` means "use Kokoro's default (1.0)" and the field is omitted from
+    /// the synthesis request entirely.
+    var speechRate: Double?
+
     static func from(_ payload: [String: JSONValue]) -> AgentEditModel? {
         AgentEditModel(
             displayName: payload["display_name"]?.stringValue ?? "",
@@ -39,7 +44,8 @@ struct AgentEditModel: Equatable {
             defaultModel: nonEmpty(payload["default_model"]?.stringValue),
             defaultThinkingModel: nonEmpty(payload["default_thinking_model"]?.stringValue),
             sharedMemory: payload["shared_memory"]?.boolValue ?? true,
-            voice: nonEmpty(payload["voice"]?.stringValue)
+            voice: nonEmpty(payload["voice"]?.stringValue),
+            speechRate: payload["speech_rate"]?.doubleValue
         )
     }
 
@@ -56,6 +62,10 @@ struct AgentEditModel: Equatable {
             "thinking_model": .string(thinkingModel ?? ""),
             // Always send voice so empty string clears it (makes agent voiceless).
             "voice": .string(voice ?? ""),
+            // Always send speech_rate so 0 reverts to Kokoro's default. The
+            // server treats any non-positive number as "clear" and clamps
+            // positive values into [0.25, 4.0].
+            "speech_rate": .double(speechRate ?? 0),
         ]
         if let re = reasoningEffort {
             params["reasoning_effort"] = .string(re)

@@ -57,4 +57,12 @@ public sealed record AgentDefinition
     /// <c>tools.speech.default_voice</c> is set globally.
     /// </summary>
     public string? Voice { get; init; }
+
+    /// <summary>
+    /// Per-agent TTS rate (Kokoro's <c>speed</c> param). Resolved from the
+    /// <c>**Speech Rate:**</c> capability in AGENT.md. Null means "use
+    /// Kokoro's default (1.0)" — the field is omitted from the synthesis
+    /// request entirely. Range: <c>[0.25, 4.0]</c>.
+    /// </summary>
+    public double? SpeechRate { get; init; }
 }

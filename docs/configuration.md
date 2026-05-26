@@ -178,6 +178,7 @@ Each capability is a `**Key:** value` line. List values (tools, allowed chats) u
 | `Dreamtime` | time | _(none)_ | Local time (e.g. `3:00 AM`) for nightly memory consolidation. Omit to disable dreamtime for this agent. |
 | `Shared Memory` | bool | `true` | When `false`, the agent only sees its own private memory file — roleplay/in-character mode. |
 | `Voice` | string | _(none)_ | TTS voice id for this agent. Accepts a single Kokoro voice (`af_nicole`) or a blend (`af_nicole(0.7)+af_bella(0.3)`). When omitted, the agent is voiceless unless `tools.speech.default_voice` is set globally. |
+| `Speech Rate` | number | _(Kokoro default = 1.0)_ | Per-agent TTS rate, Kokoro's `speed` parameter. Accepts `[0.25, 4.0]` and is clamped silently if out of range. Practical range: `0.85`–`1.25`. When omitted, the field is dropped from the synthesis request body entirely so default-rate calls stay byte-identical to pre-rate behavior. |
 
 ## Full example
 

@@ -199,6 +199,75 @@ public sealed class AgentLoaderTests
         Assert.Null(config!.Voice);
     }
 
+    [Theory]
+    [InlineData("**Speech Rate:** 1.15", 1.15)]
+    [InlineData("**Speech Rate:** 0.85", 0.85)]
+    [InlineData("**Speech Rate:** 2", 2.0)]
+    public void Parse_reads_speech_rate_capability(string capabilityLine, double expected)
+    {
+        var md = $"""
+            # Test
+
+            ## Capabilities
+
+            {capabilityLine}
+            """;
+
+        var config = AgentLoader.Parse(md);
+        Assert.Equal(expected, config!.SpeechRate);
+    }
+
+    [Fact]
+    public void Parse_clamps_speech_rate_below_min()
+    {
+        var md = "# Test\n\n## Capabilities\n\n**Speech Rate:** 0.1\n";
+        var config = AgentLoader.Parse(md);
+        // 0.1 is below Kokoro's min of 0.25 — must clamp to 0.25, not silently disable.
+        Assert.Equal(0.25, config!.SpeechRate);
+    }
+
+    [Fact]
+    public void Parse_clamps_speech_rate_above_max()
+    {
+        var md = "# Test\n\n## Capabilities\n\n**Speech Rate:** 8\n";
+        var config = AgentLoader.Parse(md);
+        // 8.0 is above Kokoro's max of 4.0 — must clamp to 4.0.
+        Assert.Equal(4.0, config!.SpeechRate);
+    }
+
+    [Fact]
+    public void Parse_speech_rate_absent_yields_null()
+    {
+        var md = "# Test\n\n## Capabilities\n\n**Voice:** af_nicole\n";
+        var config = AgentLoader.Parse(md);
+        Assert.Null(config!.SpeechRate);
+    }
+
+    [Fact]
+    public void Serialize_emits_speech_rate_when_set()
+    {
+        var config = new AgentConfig { Title = "Test", Voice = "af_nicole", SpeechRate = 1.15 };
+        var md = AgentLoader.Serialize("test", config);
+        Assert.Contains("**Speech Rate:** 1.15", md);
+    }
+
+    [Fact]
+    public void Serialize_omits_speech_rate_when_null()
+    {
+        var config = new AgentConfig { Title = "Test", Voice = "af_nicole", SpeechRate = null };
+        var md = AgentLoader.Serialize("test", config);
+        Assert.DoesNotContain("Speech Rate", md);
+    }
+
+    [Fact]
+    public void Parse_serialize_roundtrips_speech_rate()
+    {
+        var original = new AgentConfig { Title = "Test", SpeechRate = 1.2, Prompt = "hi" };
+        var md = AgentLoader.Serialize("test", original);
+        var roundtripped = AgentLoader.Parse(md);
+        Assert.Equal(1.2, roundtripped!.SpeechRate);
+    }
+
     [Fact]
     public void RenameAgent_OnDisk_MovesDirectoryAndUpdatesCrossReferences()
     {

@@ -10,11 +10,12 @@ public interface ISpeechSynthesizer
 {
     /// <summary>
     /// Synthesize <paramref name="text"/> in the named voice and return the
-    /// complete audio bytes plus the format (e.g. "mp3"). May throw on
-    /// network errors or non-2xx HTTP responses; callers must handle
-    /// failures.
+    /// complete audio bytes plus the format (e.g. "mp3"). <paramref name="speed"/>
+    /// is Kokoro's <c>speed</c> param ([0.25, 4.0]); pass <c>null</c> to omit
+    /// it from the request, which yields Kokoro's default (1.0). May throw on
+    /// network errors or non-2xx HTTP responses; callers must handle failures.
     /// </summary>
-    Task<SynthesisResult> SynthesizeAsync(string text, string voice, CancellationToken ct);
+    Task<SynthesisResult> SynthesizeAsync(string text, string voice, double? speed, CancellationToken ct);
 
     /// <summary>
     /// List of voice ids known to the synthesizer (e.g. for populating an

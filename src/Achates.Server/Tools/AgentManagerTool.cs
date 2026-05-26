@@ -37,6 +37,7 @@ internal sealed class AgentManagerTool(
             ["dreamtime"] = StringSchema("Dreamtime, e.g. '3:00 AM', or 'off' to disable. Optional ('modify' only)."),
             ["shared_memory"] = BooleanSchema("When false, the agent's memory tool only sees its own private notes (the universal user memory at ~/.achates/memory.md is hidden). Useful for roleplay or in-character agents. Optional ('modify' only)."),
             ["voice"] = StringSchema("Per-agent TTS voice id (e.g. 'af_nicole' or a Kokoro blend). Empty string clears the voice. Only used with 'modify' or 'create'."),
+            ["speech_rate"] = NumberSchema("Per-agent TTS rate. 1.0 is normal speed; Kokoro accepts [0.25, 4.0]. Practical range: 0.85–1.25. Pass 0 to revert to default (1.0). Only used with 'modify' or 'create'."),
             ["avatar"] = StringSchema("Avatar image: a file path from the image tool or base64-encoded data. Optional ('modify' only)."),
         },
         required: ["action"]);
@@ -128,6 +129,7 @@ internal sealed class AgentManagerTool(
         sb.AppendLine($"**Dreamtime:** {config.Dreamtime?.ToString("h:mm tt", CultureInfo.InvariantCulture) ?? "(off)"}");
         sb.AppendLine($"**Shared memory:** {(config.SharedMemory == false ? "disabled" : "enabled")}");
         sb.AppendLine($"**Voice:** {config.Voice ?? "(none)"}");
+        sb.AppendLine($"**Speech rate:** {config.SpeechRate?.ToString(CultureInfo.InvariantCulture) ?? "(default)"}");
         sb.AppendLine();
         sb.AppendLine($"**Prompt:**\n{config.Prompt ?? "(none)"}");
 
@@ -180,13 +182,15 @@ internal sealed class AgentManagerTool(
         var newSharedMemory = GetBool(arguments, "shared_memory");
         var hasVoice = arguments.ContainsKey("voice");
         var newVoice = GetString(arguments, "voice");
+        var hasSpeechRate = arguments.ContainsKey("speech_rate");
+        var newSpeechRate = GetDouble(arguments, "speech_rate");
         var newAvatar = GetString(arguments, "avatar");
 
         var anyField = newName is not null || newDescription is not null || newPrompt is not null
             || newTools is not null || newModel is not null || newThinkingModel is not null
             || newProvider is not null || newReasoning is not null || newTemperature is not null
             || newMaxTokens is not null || newAllowedChats is not null || hasDreamtime
-            || hasSharedMemory || hasVoice
+            || hasSharedMemory || hasVoice || hasSpeechRate
             || newAvatar is not null;
         if (!anyField)
             return TextResult("Provide at least one field to modify.");
@@ -238,6 +242,13 @@ internal sealed class AgentManagerTool(
         {
             config.Voice = string.IsNullOrEmpty(newVoice) ? null : newVoice;
             changed.Add("voice");
+        }
+
+        if (hasSpeechRate)
+        {
+            // 0 / negative / non-numeric clears back to default (null). Anything positive is clamped.
+            config.SpeechRate = newSpeechRate is > 0 ? Speech.SpeechRate.Clamp(newSpeechRate.Value) : null;
+            changed.Add("speech_rate");
         }
 
         // Determine rename before writing so we serialize with the final display name.
@@ -317,6 +328,7 @@ internal sealed class AgentManagerTool(
 
         var tools = GetStringList(arguments, "tools");
         var voice = GetString(arguments, "voice");
+        var speechRate = GetDouble(arguments, "speech_rate");
 
         var config = new AgentConfig
         {
@@ -324,6 +336,7 @@ internal sealed class AgentManagerTool(
             Prompt = prompt,
             Tools = tools is { Count: > 0 } ? tools : null,
             Voice = string.IsNullOrEmpty(voice) ? null : voice,
+            SpeechRate = speechRate is > 0 ? Speech.SpeechRate.Clamp(speechRate.Value) : null,
         };
 
         var markdown = AgentLoader.Serialize(name, config);

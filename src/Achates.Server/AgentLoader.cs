@@ -125,6 +125,12 @@ public static class AgentLoader
             sb.AppendLine($"**Voice:** {config.Voice}");
         }
 
+        if (config.SpeechRate is { } speechRate)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"**Speech Rate:** {speechRate.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+        }
+
         if (!string.IsNullOrWhiteSpace(config.Prompt))
         {
             sb.AppendLine();
@@ -368,6 +374,14 @@ public static class AgentLoader
                 break;
             case "voice":
                 config.Voice = string.IsNullOrWhiteSpace(value) ? null : value;
+                break;
+            case "speech rate":
+                if (value is not null &&
+                    double.TryParse(value, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var rate))
+                {
+                    config.SpeechRate = Speech.SpeechRate.Clamp(rate);
+                }
                 break;
         }
     }

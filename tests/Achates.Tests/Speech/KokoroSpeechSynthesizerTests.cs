@@ -30,7 +30,7 @@ public sealed class KokoroSpeechSynthesizerTests
         var client = new HttpClient(handler);
         var synth = new KokoroSpeechSynthesizer(client, new Uri("http://127.0.0.1:8880"));
 
-        var result = await synth.SynthesizeAsync("hello", "af_nicole", CancellationToken.None);
+        var result = await synth.SynthesizeAsync("hello", "af_nicole", speed: null, CancellationToken.None);
 
         Assert.Equal("mp3", result.Format);
         Assert.Equal(new byte[] { 0xff, 0xfb, 0x90, 0x44 }, result.Audio);
@@ -41,6 +41,28 @@ public sealed class KokoroSpeechSynthesizerTests
         Assert.Equal("af_nicole", doc.RootElement.GetProperty("voice").GetString());
         Assert.Equal("hello", doc.RootElement.GetProperty("input").GetString());
         Assert.Equal("mp3", doc.RootElement.GetProperty("response_format").GetString());
+        // speed must be omitted entirely when null so Kokoro applies its default.
+        Assert.False(doc.RootElement.TryGetProperty("speed", out _));
+    }
+
+    [Fact]
+    public async Task SynthesizeAsync_includes_speed_in_payload_when_set()
+    {
+        byte[]? capturedBody = null;
+        var handler = new StubHandler(async req =>
+        {
+            capturedBody = await req.Content!.ReadAsByteArrayAsync();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent([0xff]),
+            };
+        });
+
+        var synth = new KokoroSpeechSynthesizer(new HttpClient(handler), new Uri("http://127.0.0.1:8880"));
+        await synth.SynthesizeAsync("hello", "af_nicole", speed: 1.15, CancellationToken.None);
+
+        var doc = JsonDocument.Parse(Encoding.UTF8.GetString(capturedBody!));
+        Assert.Equal(1.15, doc.RootElement.GetProperty("speed").GetDouble());
     }
 
     [Fact]
@@ -54,7 +76,7 @@ public sealed class KokoroSpeechSynthesizerTests
         var synth = new KokoroSpeechSynthesizer(new HttpClient(handler), new Uri("http://127.0.0.1:8880"));
 
         var ex = await Assert.ThrowsAsync<HttpRequestException>(
-            () => synth.SynthesizeAsync("hi", "bad_voice", CancellationToken.None));
+            () => synth.SynthesizeAsync("hi", "bad_voice", speed: null, CancellationToken.None));
         Assert.Contains("400", ex.Message);
     }
 

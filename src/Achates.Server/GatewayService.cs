@@ -553,6 +553,7 @@ public sealed class GatewayService(
             Dreamtime = agentConfig.Dreamtime,
             SharedMemoryEnabled = agentConfig.SharedMemory ?? true,
             Voice = agentConfig.Voice,
+            SpeechRate = agentConfig.SpeechRate,
         };
 
         logger.LogInformation("Agent '{Name}' resolved with model {Model}", name, model.Id);

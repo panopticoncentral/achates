@@ -372,6 +372,7 @@ public sealed class MobileTransport
                 "jobs.run" => await HandleJobsRunAsync(request, ct),
                 "session.set_speech" => await HandleSessionSetSpeechAsync(request, ct),
                 "voices.list" => await HandleVoicesListAsync(request, ct),
+                "speech.test" => await HandleSpeechTestAsync(request, ct),
                 _ => ResponseFrame.Failure(request.Id, "unknown_method", $"Unknown method: {request.Method}"),
             };
 
@@ -711,6 +712,54 @@ public sealed class MobileTransport
         {
             voices,
         }, JsonOptions));
+    }
+
+    /// <summary>
+    /// Synthesize a short preset sentence with the given voice and rate so the
+    /// agent edit UI can audition settings before saving. Returns the audio
+    /// inline as base64 (not via the <c>audio.block</c> event stream — this is
+    /// a one-shot preview, not part of a turn).
+    /// </summary>
+    private const string SpeechTestPresetText =
+        "Hi there. This is how I'll sound when I read your messages aloud.";
+
+    private async Task<ResponseFrame> HandleSpeechTestAsync(RequestFrame request, CancellationToken ct)
+    {
+        var synth = _serviceProvider.GetService<Speech.ISpeechSynthesizer>();
+        if (synth is null)
+            return ResponseFrame.Failure(request.Id, "speech_not_configured",
+                "Speech is not configured on the server. Set tools.speech in ~/.achates/config.yaml and restart.");
+
+        var voice = GetStringParam(request.Params, "voice");
+        if (string.IsNullOrWhiteSpace(voice))
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'voice' parameter.");
+
+        double? speed = null;
+        if (request.Params.TryGetProperty("speed", out var speedProp) &&
+            speedProp.ValueKind == JsonValueKind.Number)
+        {
+            var raw = speedProp.GetDouble();
+            if (raw > 0)
+                speed = Speech.SpeechRate.Clamp(raw);
+        }
+
+        var text = GetStringParam(request.Params, "text");
+        if (string.IsNullOrWhiteSpace(text))
+            text = SpeechTestPresetText;
+
+        try
+        {
+            var result = await synth.SynthesizeAsync(text!, voice!, speed, ct);
+            return ResponseFrame.Success(request.Id, JsonSerializer.SerializeToElement(new
+            {
+                format = result.Format,
+                data = Convert.ToBase64String(result.Audio),
+            }, JsonOptions));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return ResponseFrame.Failure(request.Id, "synthesis_failed", ex.Message);
+        }
     }
 
     // --- Chat ---
@@ -1097,6 +1146,7 @@ public sealed class MobileTransport
             default_thinking_model = DefaultThinkingModelId,
             shared_memory = config.SharedMemory ?? true,
             voice = config.Voice,
+            speech_rate = config.SpeechRate,
         }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
@@ -1172,6 +1222,19 @@ public sealed class MobileTransport
         {
             var v = voiceProp.GetString();
             config.Voice = string.IsNullOrWhiteSpace(v) ? null : v;
+        }
+
+        // speech_rate: empty/null/missing/0 = revert to default (null). Numeric value = clamp + set.
+        if (p.TryGetProperty("speech_rate", out var rateProp))
+        {
+            if (rateProp.ValueKind == JsonValueKind.Number && rateProp.GetDouble() > 0)
+                config.SpeechRate = Speech.SpeechRate.Clamp(rateProp.GetDouble());
+            else if (rateProp.ValueKind == JsonValueKind.String &&
+                     double.TryParse(rateProp.GetString(),
+                         System.Globalization.NumberStyles.Float,
+                         System.Globalization.CultureInfo.InvariantCulture, out var parsed) && parsed > 0)
+                config.SpeechRate = Speech.SpeechRate.Clamp(parsed);
+            // null/empty-string/zero leaves SpeechRate at null (reverts to Kokoro's default 1.0).
         }
 
         if (p.TryGetProperty("shared_memory", out var smProp))
@@ -1685,7 +1748,8 @@ public sealed class MobileTransport
                     {
                         var turnId = Guid.NewGuid().ToString("N");
                         var sink = new TransportSpeechSink(this, agentName, sessionId, ct);
-                        speechBroker = new Speech.SpeechBroker(speechSynth, sink, resolvedVoice, turnId);
+                        speechBroker = new Speech.SpeechBroker(speechSynth, sink, resolvedVoice, turnId,
+                            speed: agentDefForVoice.SpeechRate);
                     }
                 }
             }

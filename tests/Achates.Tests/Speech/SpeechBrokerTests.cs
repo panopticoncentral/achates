@@ -91,6 +91,36 @@ public sealed class SpeechBrokerTests
     }
 
     [Fact]
+    public async Task Forwards_speed_parameter_to_synth()
+    {
+        var sink = new RecordingSink();
+        var synth = new FakeSynth();
+        var broker = new SpeechBroker(synth, sink, voice: "af_nicole", turnId: "turn-1", speed: 1.15);
+
+        await broker.PushTextAsync("Hello. There. Friend.");
+        await broker.FinishAsync();
+
+        Assert.Equal(3, synth.SynthCallCount);
+        Assert.All(synth.SpeedsSeen, s => Assert.Equal(1.15, s));
+    }
+
+    [Fact]
+    public async Task Default_speed_is_null_when_unspecified()
+    {
+        // When no speed is supplied, the broker passes null so the synth can
+        // omit the field from the request body entirely.
+        var sink = new RecordingSink();
+        var synth = new FakeSynth();
+        var broker = new SpeechBroker(synth, sink, voice: "af_nicole", turnId: "turn-1");
+
+        await broker.PushTextAsync("Hi.");
+        await broker.FinishAsync();
+
+        Assert.Single(synth.SpeedsSeen);
+        Assert.Null(synth.SpeedsSeen[0]);
+    }
+
+    [Fact]
     public async Task FlushAsync_drains_trailing_unterminated_sentence()
     {
         var sink = new RecordingSink();
@@ -108,9 +138,11 @@ public sealed class SpeechBrokerTests
     {
         public bool ThrowOnSynth { get; set; }
         public int SynthCallCount { get; private set; }
-        public Task<SynthesisResult> SynthesizeAsync(string text, string voice, CancellationToken ct)
+        public List<double?> SpeedsSeen { get; } = [];
+        public Task<SynthesisResult> SynthesizeAsync(string text, string voice, double? speed, CancellationToken ct)
         {
             SynthCallCount++;
+            SpeedsSeen.Add(speed);
             if (ThrowOnSynth) throw new HttpRequestException("boom");
             return Task.FromResult(new SynthesisResult(new byte[] { 1, 2, 3 }, "mp3"));
         }
