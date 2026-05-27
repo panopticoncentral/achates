@@ -1032,15 +1032,10 @@ public sealed class MobileTransport
             return ResponseFrame.Failure(request.Id, "invalid_params", "Replacement message must have text or attachments.");
 
         // Persist the truncated history immediately so the rewind is durable even if the new run dies.
+        // Uses WithMessages so SpeechEnabled and chat-origin pairing (Source/OriginSessionId/PeerAgentId)
+        // survive the rewind — the previous hand-rolled construction silently dropped them.
         var existingSession = await sessionStore.LoadAsync(agentName, sessionId, ct);
-        var truncated = new MobileSession
-        {
-            Id = sessionId,
-            Title = existingSession?.Title,
-            Created = existingSession?.Created ?? DateTimeOffset.UtcNow,
-            JobId = existingSession?.JobId,
-            Messages = [.. runtime.Messages],
-        };
+        var truncated = MobileSession.WithMessages(existingSession, sessionId, runtime.Messages);
         await sessionStore.SaveAsync(agentName, truncated, ct);
         await BroadcastSessionUpdatedAsync(agentName, truncated, ct);
 
@@ -1888,23 +1883,15 @@ public sealed class MobileTransport
                         break;
 
                     case AgentEndEvent:
-                        // Preserve Created timestamp, title, JobId, and chat-origin
-                        // metadata (Source/OriginSessionId/PeerAgentId) if the session
-                        // already exists on disk. JobId matters for cron-originated
-                        // sessions (e.g. dreamtime) so they remain traceable and the
-                        // reaper's per-job retention still applies after the user replies.
+                        // WithMessages preserves every persistable field from the
+                        // existing on-disk session (title, Created, JobId, chat-origin
+                        // pairing, SpeechEnabled) and applies the new message list.
+                        // Hand-rolling field lists here was how SpeechEnabled used to
+                        // get silently wiped after every turn — flipping the speaker
+                        // icon off mid-conversation.
                         var existing = await sessionStore.LoadAsync(agentName, sessionId, ct);
-                        var session = new MobileSession
-                        {
-                            Id = sessionId,
-                            Title = existing?.Title,
-                            Created = existing?.Created ?? DateTimeOffset.UtcNow,
-                            JobId = existing?.JobId,
-                            Source = existing?.Source,
-                            OriginSessionId = existing?.OriginSessionId,
-                            PeerAgentId = existing?.PeerAgentId,
-                            Messages = [.. chatBuffer.Merge([.. runtime.Messages])],
-                        };
+                        var session = MobileSession.WithMessages(existing, sessionId,
+                            chatBuffer.Merge([.. runtime.Messages]));
                         await sessionStore.SaveAsync(agentName, session, ct);
 
                         // Notify clients so the session list refreshes immediately

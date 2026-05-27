@@ -37,6 +37,32 @@ public sealed class MobileSession
     public bool SpeechEnabled { get; set; }
 
     public List<AgentMessage> Messages { get; set; } = [];
+
+    /// <summary>
+    /// Build a session for the current turn's save: carry every persistable
+    /// field forward from the existing on-disk record (if any), with a new
+    /// message list. Centralizing this is a guardrail — every field added to
+    /// <see cref="MobileSession"/> must be persisted across turn saves, and
+    /// the previous "manually list each preserved field" pattern at the call
+    /// sites silently dropped <see cref="SpeechEnabled"/> (and, on the resubmit
+    /// path, the chat-origin pairing fields). New fields on this type are now
+    /// auto-preserved here; tests pin the contract.
+    /// </summary>
+    public static MobileSession WithMessages(MobileSession? existing, string id, IEnumerable<AgentMessage> messages)
+    {
+        return new MobileSession
+        {
+            Id = id,
+            Title = existing?.Title,
+            Created = existing?.Created ?? DateTimeOffset.UtcNow,
+            JobId = existing?.JobId,
+            Source = existing?.Source,
+            OriginSessionId = existing?.OriginSessionId,
+            PeerAgentId = existing?.PeerAgentId,
+            SpeechEnabled = existing?.SpeechEnabled ?? false,
+            Messages = [.. messages],
+        };
+    }
 }
 
 /// <summary>
