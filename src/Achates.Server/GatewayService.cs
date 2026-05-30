@@ -133,6 +133,7 @@ public sealed class GatewayService(
         _mobileTransport.GenerateAvatarFunc = GenerateAvatarAsync;
         _mobileTransport.DefaultModelId = config.Models?.Base;
         _mobileTransport.DefaultThinkingModelId = config.Models?.Thinking;
+        _mobileTransport.SetDefaultModelsFunc = SetDefaultModelsAsync;
 
         // Resolve title model for auto-titling sessions
         var titleModelId = config.Tools?.Title?.Model;
@@ -397,6 +398,72 @@ public sealed class GatewayService(
         _cronService?.AddAgent(name, agentDef);
         logger.LogInformation("Agent '{Name}' reloaded with model {Model}", name, agentDef.Model.Id);
         return agentDef;
+    }
+
+    /// <summary>
+    /// Applies a change to the global default models. Each field is updated only when
+    /// its <c>*Set</c> flag is true; an empty/whitespace value clears the default to null.
+    /// Persists the config, refreshes the transport's cached default labels, and reloads
+    /// only the agents that rely on a changed global (see <see cref="DefaultModelReload"/>).
+    /// Assumes low-frequency, effectively-single-admin use: it mutates the shared
+    /// <see cref="config"/> object without locking. A concurrent turn reading
+    /// <c>config.Models</c> sees either the old or new value (both valid) — there is no
+    /// torn-write hazard since the fields are reference-typed string assignments.
+    /// </summary>
+    public async Task SetDefaultModelsAsync(
+        string? baseModel, bool baseSet,
+        string? thinkingModel, bool thinkingSet,
+        CancellationToken ct)
+    {
+        config.Models ??= new ModelsConfig();
+
+        var baseChanged = false;
+        if (baseSet)
+        {
+            var v = string.IsNullOrWhiteSpace(baseModel) ? null : baseModel;
+            baseChanged = config.Models.Base != v;
+            config.Models.Base = v;
+        }
+
+        var thinkingChanged = false;
+        if (thinkingSet)
+        {
+            var v = string.IsNullOrWhiteSpace(thinkingModel) ? null : thinkingModel;
+            thinkingChanged = config.Models.Thinking != v;
+            config.Models.Thinking = v;
+        }
+
+        if (!baseChanged && !thinkingChanged)
+            return;
+
+        ConfigLoader.Save(config);
+
+        if (_mobileTransport is not null)
+        {
+            _mobileTransport.DefaultModelId = config.Models.Base;
+            _mobileTransport.DefaultThinkingModelId = config.Models.Thinking;
+        }
+
+        var agentConfigs = AgentLoader.LoadAgents(_achatesHome!);
+        var toReload = DefaultModelReload.AgentsToReload(
+            agentConfigs.Select(kv => (kv.Key, kv.Value)),
+            baseChanged, thinkingChanged);
+
+        foreach (var name in toReload)
+        {
+            try
+            {
+                await ReloadAgentAsync(name, ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Default-models change: reload of agent '{Name}' failed", name);
+            }
+        }
+
+        logger.LogInformation(
+            "Default models updated (base={Base}, thinking={Thinking}); reloaded {Count} agent(s)",
+            config.Models.Base ?? "<none>", config.Models.Thinking ?? "<none>", toReload.Count);
     }
 
     private static async Task ReconcileDreamtimeAsync(

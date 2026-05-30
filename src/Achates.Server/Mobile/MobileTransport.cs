@@ -103,6 +103,14 @@ public sealed class MobileTransport
     public string? DefaultThinkingModelId { get; set; }
 
     /// <summary>
+    /// Applies a change to the global default models. Args:
+    /// (baseModel, baseSet, thinkingModel, thinkingSet, ct). A <c>*Set</c> flag of
+    /// false means "leave that field unchanged"; an empty value with the flag true
+    /// clears the default. Wired by <c>GatewayService</c>.
+    /// </summary>
+    public Func<string?, bool, string?, bool, CancellationToken, Task>? SetDefaultModelsFunc { get; set; }
+
+    /// <summary>
     /// Delegate to reload an agent definition from disk. Set by GatewayService after construction.
     /// </summary>
     public Func<string, CancellationToken, Task<AgentDefinition>>? AgentReloadFunc { get; set; }
@@ -362,6 +370,8 @@ public sealed class MobileTransport
                 "agent.generate_avatar" => await HandleAgentGenerateAvatarAsync(request, ct),
                 "tools.list" => HandleToolsList(request),
                 "models.list" => await HandleModelsListAsync(request, ct),
+                "config.get_models" => HandleConfigGetModels(request),
+                "config.set_models" => await HandleConfigSetModelsAsync(request, ct),
                 "costs.summary" => await HandleCostsSummaryAsync(request, ct),
                 "memory.list" => HandleMemoryList(request),
                 "memory.get" => await HandleMemoryGetAsync(request, ct),
@@ -1441,6 +1451,49 @@ public sealed class MobileTransport
         }
 
         var payload = JsonSerializer.SerializeToElement(new { models = _modelsCache }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private ResponseFrame HandleConfigGetModels(RequestFrame request)
+    {
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            @base = DefaultModelId,
+            thinking = DefaultThinkingModelId,
+        }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    private async Task<ResponseFrame> HandleConfigSetModelsAsync(RequestFrame request, CancellationToken ct)
+    {
+        var p = request.Params;
+
+        string? baseModel = null;
+        var baseSet = false;
+        string? thinkingModel = null;
+        var thinkingSet = false;
+
+        if (p.ValueKind == JsonValueKind.Object)
+        {
+            if (p.TryGetProperty("base", out var baseEl) &&
+                baseEl.ValueKind is JsonValueKind.String or JsonValueKind.Null)
+            {
+                baseSet = true;
+                baseModel = baseEl.ValueKind == JsonValueKind.String ? baseEl.GetString() : null;
+            }
+
+            if (p.TryGetProperty("thinking", out var thinkingEl) &&
+                thinkingEl.ValueKind is JsonValueKind.String or JsonValueKind.Null)
+            {
+                thinkingSet = true;
+                thinkingModel = thinkingEl.ValueKind == JsonValueKind.String ? thinkingEl.GetString() : null;
+            }
+        }
+
+        if (SetDefaultModelsFunc is not null && (baseSet || thinkingSet))
+            await SetDefaultModelsFunc(baseModel, baseSet, thinkingModel, thinkingSet, ct);
+
+        var payload = JsonSerializer.SerializeToElement(new { ok = true }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
     }
 

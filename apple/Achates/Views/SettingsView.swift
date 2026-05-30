@@ -108,6 +108,12 @@ struct SettingsView: View {
                     } label: {
                         Label("Scheduled Jobs", systemImage: "calendar.badge.clock")
                     }
+
+                    NavigationLink {
+                        DefaultModelsView()
+                    } label: {
+                        Label("Default Models", systemImage: "cpu")
+                    }
                 }
             }
 

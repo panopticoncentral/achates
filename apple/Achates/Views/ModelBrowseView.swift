@@ -11,6 +11,9 @@ struct ModelBrowseView: View {
     @Binding var selectedModel: String?
     let title: String
     let defaultModel: String?
+    /// When true, a nil selection means "no model at all" (used by the global
+    /// default-models editor) rather than "fall back to a higher-level default".
+    var nilMeansNone: Bool = false
 
     @State private var models: [ModelInfo] = []
     @State private var isLoading = true
@@ -52,14 +55,14 @@ struct ModelBrowseView: View {
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Default")
+                                    Text(nilMeansNone ? "None" : "Default")
                                         .foregroundStyle(.primary)
                                     if let d = defaultModel {
                                         Text(shortModelName(d))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     } else {
-                                        Text("No default configured")
+                                        Text(nilMeansNone ? "No model — agents must set their own" : "No default configured")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -72,7 +75,9 @@ struct ModelBrowseView: View {
                             }
                         }
                     } footer: {
-                        Text("Falls back to models.base in ~/.achates/config.yaml.")
+                        Text(nilMeansNone
+                            ? "Agents without their own model setting will have no model."
+                            : "Falls back to models.base in ~/.achates/config.yaml.")
                     }
 
                     ForEach(groupedModels, id: \.provider) { group in

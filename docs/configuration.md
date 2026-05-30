@@ -55,6 +55,8 @@ Defaults used when an agent's AGENT.md doesn't declare its own `**Model:**` / `*
 | `base` | string | _(none)_ | Fallback base model when an agent doesn't declare `**Model:**`. At least one source (per-agent or global) must be set or the agent fails to load. |
 | `thinking` | string | _(none)_ | Fallback thinking model when an agent doesn't declare `**Thinking Model:**`. Without one from either source, agents with the `think` tool simply skip the tool. |
 
+These defaults can also be edited from the Apple app under **Settings → System → Default Models** without restarting the server — the change is written back to `config.yaml` and any agent that doesn't override the model is reloaded automatically.
+
 ### `tools`
 
 Shared tool configuration at the top level. Individual tools are enabled per-agent via the agent's `tools` list in AGENT.md.

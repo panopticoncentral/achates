@@ -418,6 +418,21 @@ final class AppState {
         return ModelInfo.fromList(payload)
     }
 
+    func loadDefaultModels() async throws -> (base: String?, thinking: String?) {
+        guard let payload = try await client?.sendRequest(method: "config.get_models") else {
+            throw AgentEditError.notConnected
+        }
+        return (payload["base"]?.stringValue, payload["thinking"]?.stringValue)
+    }
+
+    func saveDefaultModels(base: String?, thinking: String?) async throws {
+        guard let client else { throw AgentEditError.notConnected }
+        _ = try await client.sendRequest(method: "config.set_models", params: [
+            "base": .string(base ?? ""),
+            "thinking": .string(thinking ?? ""),
+        ])
+    }
+
     /// Cached cost summaries keyed by "agent:period". Filled by `loadCostSummary`.
     var costSummaries: [String: CostSummary] = [:]
 
