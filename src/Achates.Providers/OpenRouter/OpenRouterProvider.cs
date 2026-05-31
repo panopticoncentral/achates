@@ -1,4 +1,7 @@
+using System.Diagnostics;
 using System.Globalization;
+using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 using Achates.Providers.Completions;
 using Achates.Providers.Completions.Content;
@@ -8,24 +11,36 @@ using Achates.Providers.Models;
 using Achates.Providers.OpenRouter.Chat;
 using Achates.Providers.OpenRouter.Models;
 using Achates.Providers.Util;
+using Microsoft.Extensions.Logging;
 
 namespace Achates.Providers.OpenRouter;
 
 internal sealed class OpenRouterProvider : IModelProvider
 {
+    /// <summary>
+    /// Max number of full-turn stream attempts (1 initial + retries) before a
+    /// transient mid-stream failure is surfaced as an error. Combined with the
+    /// client-side idle-read timeout, a stalled turn fails in seconds × attempts
+    /// rather than minutes, staying well under the cron per-job wall-clock budget.
+    /// </summary>
+    private const int MaxStreamAttempts = 3;
+
     public string Id => "openrouter";
 
     public string EnvironmentKey => "OPENROUTER_API_KEY";
 
     public HttpClient HttpClient { private get; set; } = null!;
 
+    public ILogger? Logger { private get; set; }
+
     public string Key { private get; set; } = string.Empty;
 
     public CompletionEventStream GetCompletions(Model model, CompletionContext completionContext, CompletionOptions? options = null, CancellationToken cancellationToken = default)
     {
         var client = new OpenRouterClient(HttpClient, Key);
+        var logger = Logger;
         return CompletionEventStream.Create(stream =>
-            ProcessStreamAsync(client, stream, model, completionContext, options, cancellationToken));
+            ProcessStreamAsync(client, stream, model, completionContext, options, logger, cancellationToken));
     }
 
     public async Task<IReadOnlyList<Model>> GetModelsAsync(ModelModalities? outputModalities = null, CancellationToken cancellationToken = default)
@@ -168,88 +183,236 @@ internal sealed class OpenRouterProvider : IModelProvider
         Model model,
         CompletionContext completionContext,
         CompletionOptions? options,
+        ILogger? logger,
         CancellationToken cancellationToken)
     {
-        var tracker = new BlockTracker();
-
-        var output = new CompletionAssistantMessage
+        // Each attempt streams a fresh response. A transient upstream stall that
+        // dies AFTER we've already yielded content can't be recovered by the client's
+        // own retry (it only covers pre-yield handshake failures, since it has handed
+        // chunks to us). So we replay the whole turn here: discard the partial message
+        // and re-request. The two layers cover disjoint cases — pre-yield in the
+        // client, post-yield here — so they never nest.
+        for (var attempt = 0; ; attempt++)
         {
-            Content = tracker.Blocks,
-            Model = model.Id,
-            CompletionUsage = CompletionUsage.Empty,
-            CompletionStopReason = CompletionStopReason.Stop,
-            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        };
+            var tracker = new BlockTracker();
 
-        try
-        {
-            var request = BuildOpenRouterChatRequest(model, completionContext, options);
-            stream.Push(new CompletionStartEvent { Partial = output });
-
-            await foreach (var chunk in client.StreamOpenRouterChatCompletionAsync(request, cancellationToken).ConfigureAwait(false))
+            var output = new CompletionAssistantMessage
             {
-                if (chunk.Usage is { } usage)
+                Content = tracker.Blocks,
+                Model = model.Id,
+                CompletionUsage = CompletionUsage.Empty,
+                CompletionStopReason = CompletionStopReason.Stop,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            };
+
+            // Streaming diagnostics: elapsed time, chunk count, largest inter-chunk
+            // gap, and the gap at the moment of failure. A large gap-at-failure marks
+            // a silent upstream stall — the signature that drove the root-cause work.
+            var sw = Stopwatch.StartNew();
+            var chunkCount = 0;
+            long lastChunkAtMs = 0;
+            long maxGapMs = 0;
+            var yieldedThisAttempt = false;
+
+            try
+            {
+                var request = BuildOpenRouterChatRequest(model, completionContext, options);
+                stream.Push(new CompletionStartEvent { Partial = output });
+
+                await foreach (var chunk in client.StreamOpenRouterChatCompletionAsync(request, cancellationToken).ConfigureAwait(false))
                 {
-                    output = output with { CompletionUsage = MapUsage(usage, model) };
+                    yieldedThisAttempt = true;
+
+                    var nowMs = sw.ElapsedMilliseconds;
+                    if (chunkCount > 0)
+                    {
+                        var gap = nowMs - lastChunkAtMs;
+                        if (gap > maxGapMs) maxGapMs = gap;
+                    }
+                    lastChunkAtMs = nowMs;
+                    chunkCount++;
+
+                    if (chunk.Usage is { } usage)
+                    {
+                        output = output with { CompletionUsage = MapUsage(usage, model) };
+                    }
+
+                    if (chunk.Choices is not { Count: > 0 })
+                    {
+                        continue;
+                    }
+
+                    var choice = chunk.Choices[0];
+
+                    if (choice.FinishReason is not null)
+                    {
+                        output = output with { CompletionStopReason = MapStopReason(choice.FinishReason) };
+                    }
+
+                    var delta = choice.Delta;
+
+                    if (delta.Content is { Length: > 0 } text)
+                    {
+                        ProcessTextDelta(stream, tracker, output, text);
+                    }
+
+                    if (delta.Reasoning is { Length: > 0 } reasoning)
+                    {
+                        ProcessThinkingDelta(stream, tracker, output, reasoning);
+                    }
+
+                    if (delta.ToolCalls is { Count: > 0 } toolCalls)
+                    {
+                        ProcessToolCallDeltas(stream, tracker, output, toolCalls);
+                    }
+
+                    if (delta.Images is { Count: > 0 } images)
+                    {
+                        ProcessImageBlocks(stream, tracker, output, images);
+                    }
+
+                    if (delta.Audio is { } audio)
+                    {
+                        ProcessAudioDelta(stream, tracker, output, audio, options);
+                    }
                 }
 
-                if (chunk.Choices is not { Count: > 0 })
+                // Close any in-progress block and finalize the stream
+                FinishCurrentBlock(stream, tracker, output);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                logger?.LogDebug(
+                    "OpenRouter stream OK model={Model} elapsed={ElapsedMs}ms chunks={Chunks} maxGap={MaxGapMs}ms stop={Stop} textChars={TextChars} attempt={Attempt}",
+                    model.Id, sw.ElapsedMilliseconds, chunkCount, maxGapMs,
+                    output.CompletionStopReason, CountTextChars(tracker), attempt + 1);
+
+                stream.Push(new CompletionDoneEvent { Reason = output.CompletionStopReason, CompletionMessage = output });
+                stream.End();
+                return;
+            }
+            catch (Exception ex)
+            {
+                var aborted = ex is OperationCanceledException;
+
+                if (!aborted && yieldedThisAttempt && IsRetryableTransient(ex)
+                    && attempt < MaxStreamAttempts - 1)
                 {
-                    continue;
+                    logger?.LogWarning(ex,
+                        "OpenRouter stream transient mid-stream failure (attempt {Attempt}/{Max}) " +
+                        "after {ElapsedMs}ms, {Chunks} chunks — replaying turn. exceptionChain=[{Chain}]",
+                        attempt + 1, MaxStreamAttempts, sw.ElapsedMilliseconds, chunkCount,
+                        DescribeExceptionChain(ex));
+                    try
+                    {
+                        await Task.Delay(OpenRouterClient.RetryDelay(attempt), cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        aborted = true; // cancelled during backoff — fall through to terminal
+                    }
                 }
 
-                var choice = chunk.Choices[0];
-
-                if (choice.FinishReason is not null)
+                output = output with
                 {
-                    output = output with { CompletionStopReason = MapStopReason(choice.FinishReason) };
+                    CompletionStopReason = aborted ? CompletionStopReason.Aborted : CompletionStopReason.Error,
+                    ErrorMessage = ex.Message,
+                };
+
+                if (!aborted)
+                {
+                    var gapAtFailureMs = sw.ElapsedMilliseconds - lastChunkAtMs;
+                    logger?.LogWarning(ex,
+                        "OpenRouter stream FAILED model={Model} elapsed={ElapsedMs}ms chunks={Chunks} " +
+                        "maxGap={MaxGapMs}ms gapAtFailure={GapAtFailureMs}ms lastStop={Stop} " +
+                        "textChars={TextChars} partialToolArgs={PartialArgs}chars currentBlock={CurrentBlock} " +
+                        "attempts={Attempts} exceptionChain=[{Chain}]",
+                        model.Id, sw.ElapsedMilliseconds, chunkCount, maxGapMs, gapAtFailureMs,
+                        output.CompletionStopReason, CountTextChars(tracker),
+                        tracker.PartialArgs?.Length ?? 0,
+                        tracker.Current?.GetType().Name ?? "none",
+                        attempt + 1,
+                        DescribeExceptionChain(ex));
                 }
 
-                var delta = choice.Delta;
+                stream.Push(new CompletionErrorEvent { Reason = output.CompletionStopReason, Error = output });
+                stream.End();
+                return;
+            }
+        }
+    }
 
-                if (delta.Content is { Length: > 0 } text)
-                {
-                    ProcessTextDelta(stream, tracker, output, text);
-                }
-
-                if (delta.Reasoning is { Length: > 0 } reasoning)
-                {
-                    ProcessThinkingDelta(stream, tracker, output, reasoning);
-                }
-
-                if (delta.ToolCalls is { Count: > 0 } toolCalls)
-                {
-                    ProcessToolCallDeltas(stream, tracker, output, toolCalls);
-                }
-
-                if (delta.Images is { Count: > 0 } images)
-                {
-                    ProcessImageBlocks(stream, tracker, output, images);
-                }
-
-                if (delta.Audio is { } audio)
-                {
-                    ProcessAudioDelta(stream, tracker, output, audio, options);
-                }
+    /// <summary>
+    /// Whether a mid-stream failure looks like a transient upstream/network condition
+    /// worth replaying the turn for — as opposed to a genuine model/request error.
+    /// Covers our own idle-read timeout, raw connection drops, and the upstream-stall
+    /// signatures OpenRouter forwards: HTTP 502, <c>error_type "provider_unavailable"</c>,
+    /// and the bare "idle timeout" / "connection lost" messages observed in the wild.
+    /// </summary>
+    private static bool IsRetryableTransient(Exception ex)
+    {
+        if (ex is StreamIdleTimeoutException) return true;
+        if (ex is HttpRequestException or IOException) return true;
+        if (ex is OpenRouterException ore)
+        {
+            if (ore.Code == 502) return true;
+            if (ore.Metadata is { ValueKind: JsonValueKind.Object } meta
+                && meta.TryGetProperty("error_type", out var t)
+                && t.ValueKind == JsonValueKind.String
+                && t.GetString() == "provider_unavailable")
+            {
+                return true;
             }
 
-            // Close any in-progress block and finalize the stream
-            FinishCurrentBlock(stream, tracker, output);
-            cancellationToken.ThrowIfCancellationRequested();
-
-            stream.Push(new CompletionDoneEvent { Reason = output.CompletionStopReason, CompletionMessage = output });
-            stream.End();
-        }
-        catch (Exception ex)
-        {
-            output = output with
+            var msg = ore.Message;
+            if (msg.Contains("idle timeout", StringComparison.OrdinalIgnoreCase)
+                || msg.Contains("connection lost", StringComparison.OrdinalIgnoreCase)
+                || msg.Contains("timed out", StringComparison.OrdinalIgnoreCase))
             {
-                CompletionStopReason = ex is OperationCanceledException ? CompletionStopReason.Aborted : CompletionStopReason.Error,
-                ErrorMessage = ex.Message,
-            };
-            stream.Push(new CompletionErrorEvent { Reason = output.CompletionStopReason, Error = output });
-            stream.End();
+                return true;
+            }
         }
+        return false;
+    }
+
+    /// <summary>Total characters of streamed text content accumulated so far (diagnostics).</summary>
+    private static int CountTextChars(BlockTracker tracker)
+    {
+        var total = 0;
+        foreach (var block in tracker.Blocks)
+        {
+            if (block is CompletionTextContent tc) total += tc.Text.Length;
+        }
+        return total;
+    }
+
+    /// <summary>
+    /// Flattens an exception's inner-exception chain into a single line, surfacing each
+    /// type, message, and (for socket errors) the underlying error code / errno — which
+    /// is what distinguishes a connection reset (ECONNRESET) from a timeout or DNS failure.
+    /// </summary>
+    private static string DescribeExceptionChain(Exception ex)
+    {
+        var sb = new StringBuilder();
+        Exception? current = ex;
+        var depth = 0;
+        while (current is not null && depth < 8)
+        {
+            if (depth > 0) sb.Append(" <-- ");
+            sb.Append(current.GetType().FullName).Append(": ").Append(current.Message);
+            if (current is SocketException se)
+                sb.Append(" {SocketError=").Append(se.SocketErrorCode)
+                  .Append(", errno=").Append(se.ErrorCode).Append('}');
+            if (current is OpenRouterException ore)
+            {
+                var md = ore.Metadata is { ValueKind: not JsonValueKind.Undefined } m
+                    ? m.GetRawText() : "none";
+                sb.Append(" {orCode=").Append(ore.Code).Append(", orMetadata=").Append(md).Append('}');
+            }
+            current = current.InnerException;
+            depth++;
+        }
+        return sb.ToString();
     }
 
     // ---- Chunk processing ----

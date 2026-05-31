@@ -30,6 +30,11 @@ public sealed class CronService : IAsyncDisposable
     private const int MaxJobTurns = 20;
     private static readonly TimeSpan MaxJobDuration = TimeSpan.FromMinutes(15);
 
+    // Upper bound on how far back a single dreamtime run reviews. Caps the load when
+    // LastRunAt is stuck after a failure streak; normal daily runs and short backlogs
+    // are well under this and unaffected.
+    private static readonly TimeSpan MaxDreamtimeReviewWindow = TimeSpan.FromDays(14);
+
     private const string DreamtimeInstructions = """
 
         --- Dreamtime Mode ---
@@ -43,9 +48,12 @@ public sealed class CronService : IAsyncDisposable
         2. Scan the list and decide which sessions contain information worth remembering.
         3. Read those sessions in full.
         4. Read your current memory.
-        5. Update your memory to incorporate new learnings — add new facts, correct
-           outdated ones, remove things that are no longer true, and consolidate where
-           appropriate.
+        5. Update your memory to incorporate new learnings. Prefer INCREMENTAL edits:
+           use the memory tool's `append` action to add new facts and its `edit` action
+           to correct or remove specific outdated lines. Reserve a full `save` rewrite
+           for when the memory has genuinely become disorganized and needs restructuring
+           — a full save regenerates the entire file in one shot and is slow and failure-
+           prone once the memory is large.
 
         Focus on:
         - User preferences, habits, and facts you've learned
@@ -499,8 +507,16 @@ public sealed class CronService : IAsyncDisposable
     {
         var tools = new List<AgentTool>();
 
-        // Session browser — uses LastRunAt from the job itself as the "since" timestamp
-        tools.Add(new SessionsTool(_sessionStore, agentName, currentSessionId: null, job.State.LastRunAt));
+        // Session browser — review since the last run, but never look back further than
+        // MaxDreamtimeReviewWindow so a stuck LastRunAt (after repeated failures) can't
+        // make one run grind through weeks of sessions. A null (never-run) or recent
+        // LastRunAt is left untouched.
+        var since = job.State.LastRunAt;
+        if (since is { } last && last < DateTimeOffset.UtcNow - MaxDreamtimeReviewWindow)
+        {
+            since = DateTimeOffset.UtcNow - MaxDreamtimeReviewWindow;
+        }
+        tools.Add(new SessionsTool(_sessionStore, agentName, currentSessionId: null, since));
 
         var sharedMemoryPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");

@@ -821,6 +821,7 @@ public sealed class GatewayService(
 
         provider.Key = apiKey;
         provider.HttpClient = httpClientFactory.CreateClient("achates");
+        provider.Logger = loggerFactory.CreateLogger("Achates.Providers.OpenRouter");
 
         var models = await provider.GetModelsAsync(cancellationToken: cancellationToken);
         return models.FirstOrDefault(m => m.Id.Equals(modelId, StringComparison.OrdinalIgnoreCase))

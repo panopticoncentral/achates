@@ -2,6 +2,7 @@ using Achates.Providers.Completions;
 using Achates.Providers.Completions.Events;
 using Achates.Providers.Completions.Messages;
 using Achates.Providers.Models;
+using Microsoft.Extensions.Logging;
 
 namespace Achates.Providers;
 
@@ -24,6 +25,12 @@ public interface IModelProvider
     /// The HTTP client used for this provider's API calls.
     /// </summary>
     HttpClient HttpClient { set; }
+
+    /// <summary>
+    /// Optional logger for diagnostics (e.g. stream lifecycle and failures).
+    /// Defaults to a no-op so providers (and test stubs) may ignore it.
+    /// </summary>
+    ILogger? Logger { set { } }
 
     /// <summary>
     /// The API key for this provider.

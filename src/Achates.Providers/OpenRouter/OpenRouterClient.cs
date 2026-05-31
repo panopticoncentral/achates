@@ -14,6 +14,17 @@ internal sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
 
     internal static Func<int, TimeSpan> RetryDelay { get; set; } = DefaultRetryDelay;
 
+    /// <summary>
+    /// Maximum time an in-progress SSE stream may go FULLY silent — no bytes at all,
+    /// not even an OpenRouter ": PROCESSING" keepalive — before it is aborted as a dead
+    /// connection (see <see cref="StreamIdleTimeoutException"/>). Keepalives reset it,
+    /// so a keepalived-but-slow upstream is deliberately NOT aborted here (live data
+    /// showed a recovering turn can pause 6+ min between chunks and still finish). Genuine
+    /// upstream deaths are reported by OpenRouter as an error and recovered via the
+    /// provider's turn-replay retry; this is only a black-hole backstop.
+    /// </summary>
+    internal static TimeSpan StreamIdleTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
     private static TimeSpan DefaultRetryDelay(int attempt)
     {
         // 500ms, 2s, 8s base, multiplied by a jitter factor uniform on [0.75, 1.25].
@@ -189,9 +200,38 @@ internal sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
 
         using var reader = new StreamReader(stream);
 
-        while (await reader.ReadLineAsync(cancellationToken)
-                   .ConfigureAwait(false) is { } line)
+        while (true)
         {
+            string? line;
+
+            // Per-read idle timeout — a TRUE-silence backstop only. It aborts the
+            // stream when *no bytes at all* arrive for StreamIdleTimeout. Crucially,
+            // OpenRouter's ": OPENROUTER PROCESSING" keepalive comments DO reset it
+            // (every line resets it), so a keepalived-but-slow upstream is NOT
+            // aborted here — live data showed a recovering turn can go silent for
+            // 6+ minutes between chunks and still complete. Genuinely dead upstreams
+            // are reported by OpenRouter as an error and recovered by the provider's
+            // turn-replay retry; this timer only catches a black hole that sends
+            // nothing whatsoever (mainly relevant to interactive turns with no
+            // cron wall-clock cap).
+            using (var idleCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                idleCts.CancelAfter(StreamIdleTimeout);
+                try
+                {
+                    line = await reader.ReadLineAsync(idleCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw new StreamIdleTimeoutException(StreamIdleTimeout);
+                }
+            }
+
+            if (line is null)
+            {
+                break;
+            }
+
             if (string.IsNullOrWhiteSpace(line))
             {
                 continue;

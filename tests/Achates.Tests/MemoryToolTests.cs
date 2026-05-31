@@ -126,4 +126,126 @@ public sealed class MemoryToolTests : IDisposable
         Assert.False(File.Exists(_sharedPath));
         Assert.Equal("intended for shared", await File.ReadAllTextAsync(_agentPath));
     }
+
+    // ---------------- Incremental writes: append & edit ----------------
+
+    [Fact]
+    public void SchemaIncludesAppendAndEdit()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true);
+        var schemaJson = tool.Parameters.GetRawText();
+        Assert.Contains("\"append\"", schemaJson);
+        Assert.Contains("\"edit\"", schemaJson);
+    }
+
+    [Fact]
+    public async Task Append_AddsToExistingContentWithNewlineBoundary()
+    {
+        await File.WriteAllTextAsync(_agentPath, "first line");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        await tool.ExecuteAsync("t", Args(
+            ("action", JE("append")),
+            ("content", JE("second line"))));
+
+        Assert.Equal("first line\nsecond line", await File.ReadAllTextAsync(_agentPath));
+    }
+
+    [Fact]
+    public async Task Append_PreservesTrailingNewline_NoDoubleBlank()
+    {
+        await File.WriteAllTextAsync(_agentPath, "first line\n");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        await tool.ExecuteAsync("t", Args(
+            ("action", JE("append")),
+            ("content", JE("second line"))));
+
+        Assert.Equal("first line\nsecond line", await File.ReadAllTextAsync(_agentPath));
+    }
+
+    [Fact]
+    public async Task Append_ToMissingFile_CreatesIt()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        await tool.ExecuteAsync("t", Args(
+            ("action", JE("append")),
+            ("content", JE("brand new"))));
+
+        Assert.Equal("brand new", await File.ReadAllTextAsync(_agentPath));
+    }
+
+    [Fact]
+    public async Task Edit_ReplacesUniqueText()
+    {
+        await File.WriteAllTextAsync(_agentPath, "Paul likes tea and coffee");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        var result = await tool.ExecuteAsync("t", Args(
+            ("action", JE("edit")),
+            ("old", JE("tea and coffee")),
+            ("new", JE("espresso"))));
+
+        Assert.Equal("Paul likes espresso", await File.ReadAllTextAsync(_agentPath));
+        Assert.Contains("updated", Text(result));
+    }
+
+    [Fact]
+    public async Task Edit_WithEmptyNew_DeletesText()
+    {
+        await File.WriteAllTextAsync(_agentPath, "keep this. remove this.");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        await tool.ExecuteAsync("t", Args(
+            ("action", JE("edit")),
+            ("old", JE(" remove this.")),
+            ("new", JE(""))));
+
+        Assert.Equal("keep this.", await File.ReadAllTextAsync(_agentPath));
+    }
+
+    [Fact]
+    public async Task Edit_TextNotFound_ReturnsErrorAndLeavesFileUnchanged()
+    {
+        await File.WriteAllTextAsync(_agentPath, "original content");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        var result = await tool.ExecuteAsync("t", Args(
+            ("action", JE("edit")),
+            ("old", JE("nonexistent")),
+            ("new", JE("x"))));
+
+        Assert.Contains("not found", Text(result));
+        Assert.Equal("original content", await File.ReadAllTextAsync(_agentPath));
+    }
+
+    [Fact]
+    public async Task Edit_AmbiguousMatch_ReturnsErrorAndLeavesFileUnchanged()
+    {
+        await File.WriteAllTextAsync(_agentPath, "note note note");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        var result = await tool.ExecuteAsync("t", Args(
+            ("action", JE("edit")),
+            ("old", JE("note")),
+            ("new", JE("x"))));
+
+        Assert.Contains("appears", Text(result));
+        Assert.Equal("note note note", await File.ReadAllTextAsync(_agentPath));
+    }
+
+    [Fact]
+    public async Task Append_RoutesToAgent_WhenSharedDisabled()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        await tool.ExecuteAsync("t", Args(
+            ("action", JE("append")),
+            ("scope", JE("shared")),
+            ("content", JE("should not reach shared"))));
+
+        Assert.False(File.Exists(_sharedPath));
+        Assert.Equal("should not reach shared", await File.ReadAllTextAsync(_agentPath));
+    }
 }
