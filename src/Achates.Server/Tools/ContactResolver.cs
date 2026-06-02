@@ -64,7 +64,7 @@ internal sealed class ContactResolver(
 
         var normalized = handleId.Contains('@')
             ? handleId.ToLowerInvariant()
-            : NormalizePhone(handleId);
+            : PhoneKey(handleId);
 
         return _handleIndex.TryGetValue(normalized, out var name) ? name : handleId;
     }
@@ -178,7 +178,7 @@ internal sealed class ContactResolver(
                     if (!string.IsNullOrWhiteSpace(mobile))
                     {
                         phones.Add(mobile);
-                        index.TryAdd(NormalizePhone(mobile), displayName);
+                        index.TryAdd(PhoneKey(mobile), displayName);
                     }
 
                     all.Add(new Contact(account, id, displayName, emails, phones));
@@ -223,6 +223,18 @@ internal sealed class ContactResolver(
     private static string NormalizePhone(string phone) =>
         new(phone.Where(char.IsDigit).ToArray());
 
+    /// <summary>
+    /// Canonical lookup key for a phone number: the last 10 significant digits, so a
+    /// contact stored without a country code matches an iMessage handle that carries one
+    /// (e.g. "(555) 341-1515" and "+15553411515" both key to "5553411515"). Numbers with
+    /// fewer than 10 digits (short codes) are kept whole.
+    /// </summary>
+    internal static string PhoneKey(string phone)
+    {
+        var digits = NormalizePhone(phone);
+        return digits.Length >= 10 ? digits[^10..] : digits;
+    }
+
     private static void AddPhones(JsonElement contact, string property, List<string> phones,
         Dictionary<string, string> index, string displayName)
     {
@@ -235,7 +247,7 @@ internal sealed class ContactResolver(
             var number = item.GetString();
             if (string.IsNullOrWhiteSpace(number)) continue;
             phones.Add(number);
-            index.TryAdd(NormalizePhone(number), displayName);
+            index.TryAdd(PhoneKey(number), displayName);
         }
     }
 }
