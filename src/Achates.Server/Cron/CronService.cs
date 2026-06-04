@@ -47,7 +47,12 @@ public sealed class CronService : IAsyncDisposable
         1. Use the sessions tool to list recent sessions.
         2. Scan the list and decide which sessions contain information worth remembering.
         3. Read those sessions in full.
-        4. Read your current memory.
+        4. Read your current memory ONCE, up front. Do not re-read the whole memory
+           after each edit — the memory file can be large, and every full read is
+           persisted into this session, bloating it. You already know the text you're
+           editing from this initial read and from the `old` value you pass to `edit`,
+           so re-reading is unnecessary. Only read again if a `save`/`append`/`edit`
+           reports failure and you genuinely need to re-orient.
         5. Update your memory to incorporate new learnings. Prefer INCREMENTAL edits:
            use the memory tool's `append` action to add new facts and its `edit` action
            to correct or remove specific outdated lines. Reserve a full `save` rewrite

@@ -12,6 +12,7 @@ namespace Achates.Providers.OpenRouter;
 [JsonSerializable(typeof(OpenRouterChatCompletionError))]
 [JsonSerializable(typeof(OpenRouterChatErrorDetail))]
 [JsonSerializable(typeof(IReadOnlyList<OpenRouterChatContentPart>))]
+[JsonSerializable(typeof(OpenRouterChatCacheControl))]
 [JsonSerializable(typeof(OpenRouterChatInputAudio))]
 [JsonSerializable(typeof(OpenRouterChatAudioConfig))]
 [JsonSerializable(typeof(OpenRouterChatAudioDelta))]

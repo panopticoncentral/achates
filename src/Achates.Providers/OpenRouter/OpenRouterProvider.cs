@@ -420,12 +420,25 @@ internal sealed class OpenRouterProvider : IModelProvider
     private static CompletionUsage MapUsage(OpenRouterChatUsage usage, Model model)
     {
         var cachedTokens = 0;
+        var cacheWriteTokens = 0;
         var reasoningTokens = 0;
 
-        if (usage.PromptTokensDetails is { ValueKind: JsonValueKind.Object } ptd
-            && ptd.TryGetProperty("cached_tokens", out var ct))
+        if (usage.PromptTokensDetails is { ValueKind: JsonValueKind.Object } ptd)
         {
-            cachedTokens = ct.GetInt32();
+            if (ptd.TryGetProperty("cached_tokens", out var ct))
+            {
+                cachedTokens = ct.GetInt32();
+            }
+
+            // OpenRouter reports cache-creation tokens only for providers with explicit
+            // caching + cache-write pricing (Anthropic). It has used both names across
+            // versions, so accept either; absence is a harmless no-op for auto-caching
+            // providers. These are a subset of prompt_tokens, like cached_tokens.
+            if (ptd.TryGetProperty("cache_write_tokens", out var cw)
+                || ptd.TryGetProperty("cache_creation_input_tokens", out cw))
+            {
+                cacheWriteTokens = cw.GetInt32();
+            }
         }
 
         if (usage.CompletionTokensDetails is { ValueKind: JsonValueKind.Object } ctd
@@ -434,7 +447,7 @@ internal sealed class OpenRouterProvider : IModelProvider
             reasoningTokens = rt.GetInt32();
         }
 
-        var inputTokens = usage.PromptTokens - cachedTokens;
+        var inputTokens = usage.PromptTokens - cachedTokens - cacheWriteTokens;
         var outputTokens = usage.CompletionTokens + reasoningTokens;
 
         var result = new CompletionUsage
@@ -442,8 +455,8 @@ internal sealed class OpenRouterProvider : IModelProvider
             Input = inputTokens,
             Output = outputTokens,
             CacheRead = cachedTokens,
-            CacheWrite = 0,
-            TotalTokens = inputTokens + outputTokens + cachedTokens,
+            CacheWrite = cacheWriteTokens,
+            TotalTokens = inputTokens + outputTokens + cachedTokens + cacheWriteTokens,
             Cost = new CompletionUsageCost(),
         };
         return result with { Cost = result.CalculateCost(model) };
@@ -859,7 +872,72 @@ internal sealed class OpenRouterProvider : IModelProvider
             }
         }
 
+        ApplyAnthropicCacheBreakpoints(result, model);
         return result;
+    }
+
+    /// <summary>
+    /// Anthropic models on OpenRouter only cache a prompt prefix when the request marks it
+    /// with an explicit <c>cache_control</c> breakpoint; OpenAI, DeepSeek, and Gemini cache
+    /// automatically and need no markers. This places two ephemeral breakpoints for
+    /// <c>anthropic/*</c> models: one at the end of the (byte-stable) system prompt, and a
+    /// rolling one on the final message so the growing conversation prefix — including any
+    /// large memory tool results re-sent on every within-turn tool iteration — is cached.
+    /// </summary>
+    private static void ApplyAnthropicCacheBreakpoints(List<OpenRouterChatMessage> messages, Model model)
+    {
+        if (!model.Id.StartsWith("anthropic/", StringComparison.OrdinalIgnoreCase) || messages.Count == 0)
+        {
+            return;
+        }
+
+        if (messages[0].Role is "system" or "developer")
+        {
+            messages[0] = WithCacheBreakpoint(messages[0]);
+        }
+
+        var lastIndex = messages.Count - 1;
+        messages[lastIndex] = WithCacheBreakpoint(messages[lastIndex]);
+    }
+
+    /// <summary>
+    /// Returns a copy of the message whose last content part carries an ephemeral cache
+    /// breakpoint, normalizing string content into a single-element text-part array so the
+    /// marker has somewhere to attach. Messages with no attachable content (e.g. an
+    /// assistant message that is only tool calls) are returned unchanged.
+    /// </summary>
+    private static OpenRouterChatMessage WithCacheBreakpoint(OpenRouterChatMessage message)
+    {
+        if (message.Content is not { } content)
+        {
+            return message;
+        }
+
+        List<OpenRouterChatContentPart> parts;
+        switch (content.ValueKind)
+        {
+            case JsonValueKind.String:
+                parts = [new OpenRouterChatContentPart { Type = "text", Text = content.GetString() ?? string.Empty }];
+                break;
+            case JsonValueKind.Array:
+                parts = content.Deserialize(OpenRouterJsonContext.Default.IReadOnlyListOpenRouterChatContentPart)?.ToList() ?? [];
+                if (parts.Count == 0)
+                {
+                    return message;
+                }
+
+                break;
+            default:
+                return message;
+        }
+
+        parts[^1] = parts[^1] with { CacheControl = OpenRouterChatCacheControl.Ephemeral };
+        return message with
+        {
+            Content = JsonSerializer.SerializeToElement(
+                (IReadOnlyList<OpenRouterChatContentPart>)parts,
+                OpenRouterJsonContext.Default.IReadOnlyListOpenRouterChatContentPart),
+        };
     }
 
     private static OpenRouterChatMessage ConvertUserTextMessage(CompletionUserTextMessage textMsg)

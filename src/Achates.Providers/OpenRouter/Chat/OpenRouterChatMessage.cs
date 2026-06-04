@@ -64,6 +64,22 @@ internal sealed record OpenRouterChatContentPart
 
     [JsonPropertyName("input_audio")]
     public OpenRouterChatInputAudio? InputAudio { get; init; }
+
+    /// <summary>
+    /// Anthropic prompt-cache breakpoint. When set, OpenRouter tells Anthropic to cache
+    /// the prompt prefix up to and including this content part. Omitted for providers that
+    /// cache automatically (OpenAI, DeepSeek, Gemini).
+    /// </summary>
+    [JsonPropertyName("cache_control")]
+    public OpenRouterChatCacheControl? CacheControl { get; init; }
+}
+
+internal sealed record OpenRouterChatCacheControl
+{
+    [JsonPropertyName("type")]
+    public required string Type { get; init; }
+
+    public static OpenRouterChatCacheControl Ephemeral { get; } = new() { Type = "ephemeral" };
 }
 
 internal sealed record OpenRouterChatInputAudio
