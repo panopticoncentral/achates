@@ -185,6 +185,68 @@ public sealed class AttachmentParserTests
     }
 
     [Fact]
+    public void Csv_attachment_parses_to_text_content()
+    {
+        var csv = "name,score\nAlice,10\nBob,7";
+        var data = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(csv));
+        var p = Parse($$"""{"attachments":[{"mime":"text/csv","data":"{{data}}","filename":"scores.csv"}]}""");
+        var result = AttachmentParser.Parse(p, out var error);
+        Assert.Null(error);
+        Assert.NotNull(result);
+        var text = Assert.IsType<CompletionTextContent>(Assert.Single(result!));
+        Assert.Contains("scores.csv", text.Text);   // filename surfaced to the model
+        Assert.Contains(csv, text.Text);             // raw contents inlined verbatim
+    }
+
+    [Theory]
+    [InlineData("text/plain", "notes.txt")]
+    [InlineData("text/markdown", "README.md")]
+    [InlineData("application/json", "config.json")]
+    public void Text_family_attachments_parse_to_text_content(string mime, string filename)
+    {
+        var body = "hello\nworld";
+        var data = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(body));
+        var p = Parse($$"""{"attachments":[{"mime":"{{mime}}","data":"{{data}}","filename":"{{filename}}"}]}""");
+        var result = AttachmentParser.Parse(p, out var error);
+        Assert.Null(error);
+        var text = Assert.IsType<CompletionTextContent>(Assert.Single(result!));
+        Assert.Contains(filename, text.Text);
+        Assert.Contains(body, text.Text);
+    }
+
+    [Fact]
+    public void Oversize_text_returns_error()
+    {
+        var bytes = new byte[2 * 1024 * 1024]; // 2 MB > 1 MB text cap
+        Array.Fill(bytes, (byte)'a');
+        var data = Convert.ToBase64String(bytes);
+        var p = Parse($$"""{"attachments":[{"mime":"text/plain","data":"{{data}}"}]}""");
+        var result = AttachmentParser.Parse(p, out var error);
+        Assert.Null(result);
+        Assert.NotNull(error);
+        Assert.Contains("too large", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Mixed_image_and_csv_attachments_parse()
+    {
+        var imgData = Convert.ToBase64String(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 });
+        var csvData = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("a,b\n1,2"));
+        var p = Parse($$"""
+        {"attachments":[
+            {"mime":"image/jpeg","data":"{{imgData}}"},
+            {"mime":"text/csv","data":"{{csvData}}","filename":"d.csv"}
+        ]}
+        """);
+        var result = AttachmentParser.Parse(p, out var error);
+        Assert.Null(error);
+        Assert.NotNull(result);
+        Assert.Equal(2, result!.Count);
+        Assert.IsType<CompletionImageContent>(result[0]);
+        Assert.IsType<CompletionTextContent>(result[1]);
+    }
+
+    [Fact]
     public void Mixed_image_and_pdf_attachments_parse()
     {
         var imgData = Convert.ToBase64String(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 });

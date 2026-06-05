@@ -54,6 +54,7 @@ struct ComposerView: View {
 
     private let maxAttachments = 4
     private static let maxPdfBytes = 32 * 1024 * 1024
+    private static let maxTextBytes = 1 * 1024 * 1024
 
     var body: some View {
         VStack(spacing: 0) {
@@ -108,7 +109,7 @@ struct ComposerView: View {
         #endif
         .fileImporter(
             isPresented: $showDocumentPicker,
-            allowedContentTypes: [.pdf],
+            allowedContentTypes: [.pdf, .text],
             allowsMultipleSelection: true
         ) { result in
             switch result {
@@ -354,15 +355,49 @@ struct ComposerView: View {
             let didStart = url.startAccessingSecurityScopedResource()
             defer { if didStart { url.stopAccessingSecurityScopedResource() } }
             guard let data = try? Data(contentsOf: url) else { continue }
-            guard data.count <= Self.maxPdfBytes else {
-                print("Skipping \(url.lastPathComponent): \(data.count) bytes exceeds 32 MB cap")
-                continue
+
+            let type = UTType(filenameExtension: url.pathExtension)
+            let isPdf = type?.conforms(to: .pdf) ?? (url.pathExtension.lowercased() == "pdf")
+            if isPdf {
+                guard data.count <= Self.maxPdfBytes else {
+                    print("Skipping \(url.lastPathComponent): \(data.count) bytes exceeds 32 MB cap")
+                    continue
+                }
+                attachments.append(DraftAttachment(
+                    data: data,
+                    mime: "application/pdf",
+                    displayName: url.lastPathComponent
+                ))
+            } else {
+                // Treat everything else the picker allowed (public.text) as a text
+                // file: it's inlined into the prompt server-side, so cap it small.
+                guard data.count <= Self.maxTextBytes else {
+                    print("Skipping \(url.lastPathComponent): \(data.count) bytes exceeds 1 MB text cap")
+                    continue
+                }
+                attachments.append(DraftAttachment(
+                    data: data,
+                    mime: textMime(for: url),
+                    displayName: url.lastPathComponent
+                ))
             }
-            attachments.append(DraftAttachment(
-                data: data,
-                mime: "application/pdf",
-                displayName: url.lastPathComponent
-            ))
+        }
+    }
+
+    /// Resolves a server-acceptable text mime for a picked file. The server accepts
+    /// any `text/*` plus `application/json` / `application/xml`; anything else falls
+    /// back to `text/plain` so the file is still inlined as text.
+    private func textMime(for url: URL) -> String {
+        if let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType,
+           mime.hasPrefix("text/") || mime == "application/json" || mime == "application/xml" {
+            return mime
+        }
+        switch url.pathExtension.lowercased() {
+        case "csv": return "text/csv"
+        case "json": return "application/json"
+        case "xml": return "application/xml"
+        case "md", "markdown": return "text/markdown"
+        default: return "text/plain"
         }
     }
 
