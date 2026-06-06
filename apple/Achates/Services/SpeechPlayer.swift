@@ -16,6 +16,15 @@ final class SpeechPlayer {
     private var turnArchive: [String: [URL]] = [:]
     private(set) var currentTurnId: String?
 
+    /// True while the queue is actively playing the current turn. Flips to
+    /// false when the queue drains (`currentItem` becomes nil). The
+    /// ConversationController watches this to know when the agent's spoken
+    /// reply has finished so it can resume listening.
+    private(set) var isPlaying = false
+
+    /// KVO on the queue player's `currentItem`; nil means the queue drained.
+    private var currentItemObservation: NSKeyValueObservation?
+
     init() {
         configureAudioSession()
     }
@@ -59,12 +68,15 @@ final class SpeechPlayer {
         let item = AVPlayerItem(url: url)
         if let player {
             player.insert(item, after: nil)
+            isPlaying = true
             if player.timeControlStatus != .playing {
                 player.play()
             }
         } else {
             let p = AVQueuePlayer(items: [item])
             player = p
+            observeDrain(of: p)
+            isPlaying = true
             p.play()
         }
     }
@@ -81,6 +93,8 @@ final class SpeechPlayer {
         let p = AVQueuePlayer(items: items)
         player = p
         currentTurnId = turnId
+        observeDrain(of: p)
+        isPlaying = true
         p.play()
         return true
     }
@@ -91,6 +105,9 @@ final class SpeechPlayer {
         player?.pause()
         player?.removeAllItems()
         player = nil
+        currentItemObservation?.invalidate()
+        currentItemObservation = nil
+        isPlaying = false
     }
 
     /// Drop archived temp files for a turn (e.g. when its session is deleted).
@@ -113,6 +130,22 @@ final class SpeechPlayer {
         }
         turnArchive.removeAll()
         currentTurnId = nil
+    }
+
+    /// Watch the queue player's currentItem; when it becomes nil the queue has
+    /// drained and the turn's audio is finished playing.
+    private func observeDrain(of p: AVQueuePlayer) {
+        currentItemObservation?.invalidate()
+        currentItemObservation = p.observe(\.currentItem, options: [.new]) { [weak self] player, _ in
+            Task { @MainActor in
+                guard let self else { return }
+                // Only react to *this* player draining.
+                guard self.player === player else { return }
+                if player.currentItem == nil {
+                    self.isPlaying = false
+                }
+            }
+        }
     }
 
     private func makeTempURL(turnId: String, sentenceIndex: Int) -> URL {

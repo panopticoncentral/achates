@@ -7,6 +7,8 @@ struct ChatView: View {
     @State private var isAtBottom = true
     @State private var scrollPos = ScrollPosition(idType: String.self)
     @State private var pendingEdit: ComposerView.PendingEdit?
+    @State private var showConversation = false
+    @State private var priorSpeechEnabled = false
 
     /// Live agent data from AppState, falls back to the navigation snapshot.
     private var liveAgent: Agent {
@@ -172,7 +174,10 @@ struct ChatView: View {
                 .accessibilityLabel(connectionLabel.map { "\(liveAgent.displayName), \($0)" } ?? liveAgent.displayName)
             }
             ToolbarItem(placement: .topBarTrailing) {
-                speechToggleButton
+                HStack(spacing: 12) {
+                    conversationButton
+                    speechToggleButton
+                }
             }
             #else
             ToolbarItem(placement: .principal) {
@@ -196,7 +201,46 @@ struct ChatView: View {
             }
             #endif
         }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $showConversation, onDismiss: {
+            Task { @MainActor in await appState.setSpeechForCurrentSession(priorSpeechEnabled) }
+        }) {
+            NavigationStack {
+                ConversationView(agent: agent)
+            }
+            .environment(appState)
+        }
+        #endif
     }
+
+    #if os(iOS)
+    @ViewBuilder
+    private var conversationButton: some View {
+        Button {
+            startConversation()
+        } label: {
+            Image(systemName: "waveform.circle")
+                .accessibilityLabel("Start voice conversation")
+        }
+        .disabled(appState.connectionStatus != .connected)
+    }
+
+    /// Ensure a session exists, force speech on for the call, and present the
+    /// full-screen conversation view. The prior speech setting is restored when
+    /// the cover is dismissed.
+    private func startConversation() {
+        Task {
+            if appState.currentSessionId == nil,
+               let id = await appState.createSession(for: agent) {
+                await appState.openSession(id, for: agent)
+            }
+            guard appState.currentSessionId != nil else { return }
+            priorSpeechEnabled = appState.currentSpeechEnabled
+            await appState.setSpeechForCurrentSession(true)
+            showConversation = true
+        }
+    }
+    #endif
 
     @ViewBuilder
     private var speechToggleButton: some View {

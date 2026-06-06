@@ -306,6 +306,27 @@ final class AppState {
         }
     }
 
+    /// Set speech on/off for the currently open session via `session.set_speech`.
+    /// Used by conversation mode to force speech on while a call is active and
+    /// restore the prior value on exit.
+    func setSpeechForCurrentSession(_ enabled: Bool) async {
+        guard let agent = currentAgent,
+              let sessionId = currentSessionId,
+              let client else { return }
+        do {
+            _ = try await client.sendRequest(method: "session.set_speech", params: [
+                "agent": .string(agent.id),
+                "session_id": .string(sessionId),
+                "enabled": .bool(enabled),
+            ])
+            if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
+                sessions[index].speechEnabled = enabled
+            }
+        } catch {
+            self.error = "Failed to set speech: \(error.localizedDescription)"
+        }
+    }
+
     /// Upsert a session into the visible list. Updates fields if it already exists,
     /// inserts at the top otherwise. Re-sorts by `updated` desc so the list always
     /// reflects most-recent activity first. Only mutates state for the agent the
