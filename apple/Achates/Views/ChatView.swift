@@ -47,87 +47,92 @@ struct ChatView: View {
             }
 
             ScrollView {
-                        LazyVStack(spacing: 2) {
-                            let items = visibleMessages
-                            if items.isEmpty && !appState.isStreaming {
-                                emptyState
-                            }
+                // Eager VStack (not LazyVStack): real bubble heights keep the
+                // content size stable. A LazyVStack estimates off-screen heights,
+                // and that estimate lurches when the composer/keyboard resizes the
+                // viewport — flinging the bottom-anchored offset into blank space
+                // mid-conversation. Eager layout costs more on very long sessions
+                // but is correct; window the history later if it ever bites.
+                VStack(spacing: 2) {
+                    let items = visibleMessages
+                    if items.isEmpty && !appState.isStreaming {
+                        emptyState
+                    }
 
-                            ForEach(Array(items.enumerated()), id: \.element.id) { index, message in
-                                // Show timestamp if >5 min gap from previous message
-                                if let gap = timeGap(at: index, in: items), gap {
-                                    Text(items[index].timestamp.formatted(date: .omitted, time: .shortened))
-                                        .font(.caption2)
-                                        .foregroundStyle(.quaternary)
-                                        .padding(.top, 8)
-                                        .padding(.bottom, 2)
-                                }
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, message in
+                        // Show timestamp if >5 min gap from previous message
+                        if let gap = timeGap(at: index, in: items), gap {
+                            Text(items[index].timestamp.formatted(date: .omitted, time: .shortened))
+                                .font(.caption2)
+                                .foregroundStyle(.quaternary)
+                                .padding(.top, 8)
+                                .padding(.bottom, 2)
+                        }
 
-                                let position = bubblePosition(for: index, in: items)
-                                let isLast = isLastAssistantMessage(at: index, in: items)
-                                let isLastUser = isLastUserMessage(at: index, in: items)
-                                let isStreamingMsg = appState.isStreaming && appState.streamingMessageId == message.id
-                                let canResubmit = !appState.isStreaming && hasResubmittableUserMessage
-                                MessageBubble(
-                                    message: message,
-                                    position: position,
-                                    agent: agent,
-                                    isLastAssistantMessage: isLast,
-                                    isLastUserMessage: isLastUser,
-                                    isStreaming: isStreamingMsg,
-                                    onResubmit: resubmitAction(
-                                        for: message,
-                                        canResubmit: canResubmit,
-                                        isLastAssistant: isLast),
-                                    onBeginEdit: (canResubmit && isLastUser) ? {
-                                        beginEditingLastUserMessage()
-                                    } : nil
-                                )
-                                .id(message.id)
-                                .padding(.top, position.topPadding)
-                                .transition(.opacity.animation(.easeIn(duration: 0.15)))
-                            }
-                        }
-                        .scrollTargetLayout()
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 8)
+                        let position = bubblePosition(for: index, in: items)
+                        let isLast = isLastAssistantMessage(at: index, in: items)
+                        let isLastUser = isLastUserMessage(at: index, in: items)
+                        let isStreamingMsg = appState.isStreaming && appState.streamingMessageId == message.id
+                        let canResubmit = !appState.isStreaming && hasResubmittableUserMessage
+                        MessageBubble(
+                            message: message,
+                            position: position,
+                            agent: agent,
+                            isLastAssistantMessage: isLast,
+                            isLastUserMessage: isLastUser,
+                            isStreaming: isStreamingMsg,
+                            onResubmit: resubmitAction(
+                                for: message,
+                                canResubmit: canResubmit,
+                                isLastAssistant: isLast),
+                            onBeginEdit: (canResubmit && isLastUser) ? {
+                                beginEditingLastUserMessage()
+                            } : nil
+                        )
+                        .id(message.id)
+                        .padding(.top, position.topPadding)
+                        .transition(.opacity.animation(.easeIn(duration: 0.15)))
                     }
-                    .scrollPosition($scrollPos)
-                    .defaultScrollAnchor(.bottom, for: .sizeChanges)
-                    .onChange(of: appState.messages.count) { _, _ in
-                        // New message added — always scroll to bottom.
-                        // Defer one tick so the LazyVStack lays out the new
-                        // bubbles before the animation captures its target.
-                        guard appState.messages.last != nil else { return }
-                        Task { @MainActor in
-                            try? await Task.sleep(for: .milliseconds(16))
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                scrollPos.scrollTo(edge: .bottom)
-                            }
-                            isAtBottom = true
-                        }
+                }
+                .scrollTargetLayout()
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+            }
+            .scrollPosition($scrollPos)
+            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            .onChange(of: appState.messages.count) { _, _ in
+                // New message added — always scroll to bottom. Defer one tick so
+                // the new bubbles lay out before the animation captures its target.
+                guard appState.messages.last != nil else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(16))
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        scrollPos.scrollTo(edge: .bottom)
                     }
-                    .modifier(ScrollBottomDetector(isAtBottom: $isAtBottom))
-                    .overlay(alignment: .bottomTrailing) {
-                        if !isAtBottom {
-                            Button {
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    scrollPos.scrollTo(edge: .bottom)
-                                }
-                                isAtBottom = true
-                            } label: {
-                                Image(systemName: "chevron.down.circle.fill")
-                                    .font(.title2)
-                                    .symbolRenderingMode(.palette)
-                                    .foregroundStyle(.primary, Color(.systemGray5))
-                                    .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-                                }
-                            .buttonStyle(.plain)
-                            .padding(12)
-                            .transition(.opacity.animation(.easeInOut(duration: 0.2)))
-                            .accessibilityLabel("Scroll to bottom")
+                    isAtBottom = true
+                }
+            }
+            .modifier(ScrollBottomDetector(isAtBottom: $isAtBottom))
+            .overlay(alignment: .bottomTrailing) {
+                if !isAtBottom {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            scrollPos.scrollTo(edge: .bottom)
                         }
+                        isAtBottom = true
+                    } label: {
+                        Image(systemName: "chevron.down.circle.fill")
+                            .font(.title2)
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.primary, Color(.systemGray5))
+                            .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
                     }
+                    .buttonStyle(.plain)
+                    .padding(12)
+                    .transition(.opacity.animation(.easeInOut(duration: 0.2)))
+                    .accessibilityLabel("Scroll to bottom")
+                }
+            }
 
             ComposerView(
                 speechService: speechService,
