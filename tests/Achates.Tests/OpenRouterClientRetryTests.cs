@@ -40,7 +40,7 @@ public class OpenRouterClientRetryTests : IDisposable
         """;
 
     // Non-502 code but metadata flags provider_unavailable — exercises the
-    // metadata-only branch of IsTransient502.
+    // metadata-only branch of IsTransientServerError.
     private const string InlineProviderUnavailableBody =
         """
         data: {"error":{"code":429,"message":"upstream busy","metadata":{"error_type":"provider_unavailable"}}}
@@ -141,7 +141,7 @@ public class OpenRouterClientRetryTests : IDisposable
     public async Task Streaming_ProviderUnavailableMetadata_RetriesAndSucceeds()
     {
         // Code is 429 (not 502), but metadata.error_type == "provider_unavailable"
-        // — IsTransient502 should still match via the metadata branch.
+        // — IsTransientServerError should still match via the metadata branch.
         var handler = new QueuingHttpHandler(
             () => StreamOk(InlineProviderUnavailableBody),
             () => StreamOk(ValidStreamBody));
@@ -152,6 +152,43 @@ public class OpenRouterClientRetryTests : IDisposable
             chunks.Add(chunk);
 
         Assert.Single(chunks);
+        Assert.Equal(2, handler.CallCount);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.InternalServerError, 500)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, 503)]
+    [InlineData(HttpStatusCode.GatewayTimeout, 504)]
+    public async Task Streaming_5xxOnHandshake_RetriesAndSucceeds(
+        HttpStatusCode status, int errorCode)
+    {
+        // Observed in the wild: OpenRouter returns a bare 500 "Internal Server
+        // Error" (no metadata) on the initial handshake. Any 5xx before the
+        // first chunk is idempotent to replay and should be retried.
+        var handler = new QueuingHttpHandler(
+            () => Error(status, errorCode),
+            () => StreamOk(ValidStreamBody));
+        var client = MakeClient(handler);
+
+        var chunks = new List<OpenRouterChatCompletionChunk>();
+        await foreach (var chunk in client.StreamOpenRouterChatCompletionAsync(StubRequest()))
+            chunks.Add(chunk);
+
+        Assert.Single(chunks);
+        Assert.Equal(2, handler.CallCount);
+    }
+
+    [Fact]
+    public async Task NonStreaming_500OnFirstAttempt_RetriesAndSucceeds()
+    {
+        var handler = new QueuingHttpHandler(
+            () => Error(HttpStatusCode.InternalServerError, 500),
+            () => CompletionOk());
+        var client = MakeClient(handler);
+
+        var response = await client.CreateOpenRouterChatCompletionAsync(StubRequest());
+
+        Assert.NotNull(response);
         Assert.Equal(2, handler.CallCount);
     }
 

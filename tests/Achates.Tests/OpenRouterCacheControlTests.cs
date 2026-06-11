@@ -160,6 +160,97 @@ public class OpenRouterCacheControlTests
         Assert.Equal("ephemeral", content[1].GetProperty("cache_control").GetProperty("type").GetString());
     }
 
+    private static Model AnthropicFileModel(OpenRouterProvider provider) => new()
+    {
+        Id = "anthropic/claude-sonnet-4.6",
+        Name = "Test",
+        Provider = provider,
+        Cost = new ModelCost { Prompt = 0, Completion = 0 },
+        ContextWindow = 8000,
+        Input = ModelModalities.Text | ModelModalities.File,
+        Output = ModelModalities.Text,
+        Parameters = ModelParameters.Temperature,
+    };
+
+    private static CompletionContext ToolContinuationCtx(bool withFile) => new()
+    {
+        SystemPrompt = "You are Claire.",
+        Messages =
+        [
+            withFile
+                ? new CompletionUserContentMessage
+                {
+                    Content = [new CompletionFileContent { Data = "cGRm", MimeType = "application/pdf", FileName = "doc.pdf" }],
+                }
+                : new CompletionUserTextMessage { Text = "look at this" },
+            new CompletionAssistantMessage
+            {
+                Content = [new CompletionToolCall { Id = "c1", Name = "search", Arguments = [] }],
+                Model = "anthropic/claude-sonnet-4.6",
+                CompletionUsage = CompletionUsage.Empty,
+                CompletionStopReason = CompletionStopReason.ToolUse,
+            },
+            new CompletionToolResultMessage
+            {
+                ToolCallId = "c1", ToolName = "search", IsError = false,
+                Content = [new CompletionTextContent { Text = "found nothing" }],
+            },
+        ],
+    };
+
+    private static async Task<JsonDocument> CaptureToolContinuationAsync(bool withFile)
+    {
+        var handler = new CapturingHttpHandler();
+        var provider = new OpenRouterProvider
+        {
+            HttpClient = new HttpClient(handler) { BaseAddress = new Uri("https://example/api/v1/") },
+            Key = "test-key",
+        };
+        await DrainAsync(provider.GetCompletions(AnthropicFileModel(provider), ToolContinuationCtx(withFile)));
+        return JsonDocument.Parse(handler.LastBody!);
+    }
+
+    [Fact]
+    public async Task AnthropicModel_tool_continuation_without_files_marks_trailing_tool_message()
+    {
+        using var doc = await CaptureToolContinuationAsync(withFile: false);
+
+        var messages = doc.RootElement.GetProperty("messages");
+        var last = messages[messages.GetArrayLength() - 1];
+        Assert.Equal("tool", last.GetProperty("role").GetString());
+
+        var content = last.GetProperty("content");
+        Assert.Equal(JsonValueKind.Array, content.ValueKind);
+        var lastPart = content[content.GetArrayLength() - 1];
+        Assert.Equal("ephemeral", lastPart.GetProperty("cache_control").GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public async Task AnthropicModel_tool_continuation_with_file_parts_moves_breakpoint_to_last_user_message()
+    {
+        // OpenRouter's Anthropic adapter returns HTTP 500 when a request combines a
+        // file content part anywhere in the conversation with a cache_control marker
+        // on a tool message (verified live 2026-06-10). The rolling breakpoint must
+        // fall back to the last user message; marking its file part is accepted.
+        using var doc = await CaptureToolContinuationAsync(withFile: true);
+
+        var messages = doc.RootElement.GetProperty("messages");
+
+        var last = messages[messages.GetArrayLength() - 1];
+        Assert.Equal("tool", last.GetProperty("role").GetString());
+        Assert.DoesNotContain("cache_control", last.GetRawText());
+
+        JsonElement? user = null;
+        foreach (var m in messages.EnumerateArray())
+        {
+            if (m.GetProperty("role").GetString() == "user") user = m;
+        }
+        Assert.NotNull(user);
+        var content = user.Value.GetProperty("content");
+        var lastPart = content[content.GetArrayLength() - 1];
+        Assert.Equal("ephemeral", lastPart.GetProperty("cache_control").GetProperty("type").GetString());
+    }
+
     [Fact]
     public async Task NonAnthropicModel_has_no_cache_control()
     {

@@ -896,8 +896,51 @@ internal sealed class OpenRouterProvider : IModelProvider
             messages[0] = WithCacheBreakpoint(messages[0]);
         }
 
+        // OpenRouter's Anthropic adapter returns a bare HTTP 500 when a request combines
+        // a file content part anywhere in the conversation with a cache_control marker on
+        // a tool message (verified live 2026-06-10; images and user-message markers are
+        // fine, including on the file part itself). When that combination would occur,
+        // anchor the rolling breakpoint on the last user message instead — the expensive
+        // prefix (system prompt, files, prior turns) stays cached; only the current turn's
+        // tool iterations go unmarked.
         var lastIndex = messages.Count - 1;
+        if (messages[lastIndex].Role == "tool" && HasFileParts(messages))
+        {
+            while (lastIndex > 0 && messages[lastIndex].Role != "user")
+            {
+                lastIndex--;
+            }
+
+            if (messages[lastIndex].Role != "user")
+            {
+                return;
+            }
+        }
+
         messages[lastIndex] = WithCacheBreakpoint(messages[lastIndex]);
+    }
+
+    private static bool HasFileParts(List<OpenRouterChatMessage> messages)
+    {
+        foreach (var message in messages)
+        {
+            if (message.Content is not { ValueKind: JsonValueKind.Array } content)
+            {
+                continue;
+            }
+
+            foreach (var part in content.EnumerateArray())
+            {
+                if (part.TryGetProperty("type", out var type)
+                    && type.ValueKind == JsonValueKind.String
+                    && type.GetString() == "file")
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

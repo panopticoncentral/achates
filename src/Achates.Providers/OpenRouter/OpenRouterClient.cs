@@ -33,9 +33,13 @@ internal sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
         return TimeSpan.FromMilliseconds(baseMs * jitter);
     }
 
-    private static bool IsTransient502(OpenRouterException ex)
+    // Transient server-side failures worth retrying before any content has been
+    // consumed: the whole 5xx range (500s with no metadata have been observed from
+    // OpenRouter itself on the handshake), plus the provider_unavailable metadata
+    // signature, which can arrive under a non-5xx code.
+    private static bool IsTransientServerError(OpenRouterException ex)
     {
-        if (ex.Code == 502) return true;
+        if (ex.Code is >= 500 and <= 504) return true;
         if (ex.Metadata is not { ValueKind: JsonValueKind.Object } meta) return false;
         if (!meta.TryGetProperty("error_type", out var t)) return false;
         return t.ValueKind == JsonValueKind.String
@@ -99,7 +103,7 @@ internal sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
                     .ConfigureAwait(false);
             }
             catch (OpenRouterException ex) when (
-                IsTransient502(ex) && attempt < MaxAttempts - 1)
+                IsTransientServerError(ex) && attempt < MaxAttempts - 1)
             {
                 await Task.Delay(RetryDelay(attempt), cancellationToken)
                     .ConfigureAwait(false);
@@ -154,7 +158,7 @@ internal sealed class OpenRouterClient(HttpClient httpClient, string apiKey)
                     hasNext = await inner.MoveNextAsync().ConfigureAwait(false);
                 }
                 catch (OpenRouterException ex) when (
-                    IsTransient502(ex)
+                    IsTransientServerError(ex)
                     && !yieldedAny
                     && attempt < MaxAttempts - 1)
                 {
