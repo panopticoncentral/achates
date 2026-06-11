@@ -1251,12 +1251,18 @@ public sealed class MobileTransport
             // Any other value type leaves config.SharedMemory at its default (null).
         }
 
-        var displayName = char.ToUpper(agentName[0]) + agentName[1..];
-        var markdown = AgentLoader.Serialize(displayName, config);
-
         var agentFile = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".achates", "agents", agentName, "AGENT.md");
+
+        // Preserve the existing display name (the H1 title) — agent.update carries no
+        // name param, so reconstructing one from the id would clobber e.g. "Dr. Maya"
+        // into "Dr-maya". Renames go through agent.rename, not here.
+        var existingTitle = File.Exists(agentFile)
+            ? AgentLoader.Parse(await File.ReadAllTextAsync(agentFile, ct))?.Title
+            : null;
+        var displayName = existingTitle ?? (char.ToUpper(agentName[0]) + agentName[1..]);
+        var markdown = AgentLoader.Serialize(displayName, config);
 
         var tempPath = agentFile + ".tmp";
         await File.WriteAllTextAsync(tempPath, markdown, ct);
