@@ -41,6 +41,16 @@ public sealed class MobileTransport
     private readonly ChatRoomManager _chatRoomManager;
     private IReadOnlyList<object>? _modelsCache;
 
+    /// <summary>
+    /// Absolute wall-clock cap for a single interactive turn. Backstop against a stalled
+    /// upstream that the SSE idle timeout can't catch — OpenRouter keepalive comments reset
+    /// that timer, so a keepalived-but-dead stream would otherwise hang forever (cron turns
+    /// have their own MaxJobDuration; interactive turns had none). Sized well above the
+    /// longest legitimately-slow turn so it never clips real work; on expiry the runtime is
+    /// aborted, which unwinds gracefully (StopReason.Aborted) and persists what was produced.
+    /// </summary>
+    private static readonly TimeSpan MaxInteractiveTurnDuration = TimeSpan.FromMinutes(12);
+
     public MobileTransport(
         IReadOnlyDictionary<string, AgentDefinition> initialAgents,
         MobileSessionStore sessionStore,
@@ -1774,10 +1784,45 @@ public sealed class MobileTransport
 
     // --- Streaming ---
 
-    private async Task StreamAgentResponseAsync(
-        AgentRuntime runtime, string agentName, string sessionId, UserMessage userMessage, CancellationToken ct)
+    internal async Task StreamAgentResponseAsync(
+        AgentRuntime runtime, string agentName, string sessionId, UserMessage userMessage, CancellationToken connectionCt)
     {
+        // The turn's event consumption and — critically — its persistence are deliberately
+        // INDEPENDENT of the initiating WebSocket connection. The agent runtime runs on its
+        // own cancellation token (cancelled only by chat.cancel -> runtime.Abort()), so it
+        // completes whether or not the client stays connected. Binding consumption/SaveAsync
+        // to the connection token meant a client that dropped mid-turn (backgrounding,
+        // navigation, a network blip) aborted the consuming loop before AgentEndEvent — and a
+        // fully-generated reply was lost from disk, so the nudge + reply "disappeared" on
+        // reopen. Use a connection-independent token throughout; broadcasts stay best-effort
+        // and still reach any client that is (re)connected. connectionCt is retained only for
+        // diagnostics (logging whether the initiator was still connected at turn end).
+        var ct = CancellationToken.None;
+
         var chatBuffer = _chatBuffers.GetOrAdd($"{agentName}:{sessionId}", _ => new ChatTranscriptBuffer());
+
+        // Backstop persistence for the error paths: a server-side-completed turn must never
+        // be lost just because consumption/broadcast faulted. Connection-independent (ct=None).
+        // Best-effort — a persist failure here must not mask the original error.
+        async Task TryPersistAsync()
+        {
+            try
+            {
+                var existing = await sessionStore.LoadAsync(agentName, sessionId, ct);
+                var persisted = MobileSession.WithMessages(existing, sessionId,
+                    chatBuffer.Merge([.. runtime.Messages]));
+                await sessionStore.SaveAsync(agentName, persisted, ct);
+                await BroadcastSessionUpdatedAsync(agentName, persisted, ct);
+                _logger.LogInformation(
+                    "Turn persisted via error-path backstop for {Agent}/{Session}: {Count} messages",
+                    agentName, sessionId, persisted.Messages.Count);
+            }
+            catch (Exception persistEx)
+            {
+                _logger.LogError(persistEx,
+                    "Backstop persist failed for {Agent}/{Session}", agentName, sessionId);
+            }
+        }
         try
         {
             chatBuffer.Clear();
@@ -1809,6 +1854,31 @@ public sealed class MobileTransport
             }
 
             var stream = runtime.PromptAsync(userMessage);
+
+            // Wall-clock backstop: abort a turn that runs past the cap (a stalled upstream
+            // the idle timeout can't catch). Abort unwinds the runtime gracefully, so the
+            // partial result is still persisted and the client gets a `done`. Disposed when
+            // the turn finishes, so a normal turn is never affected.
+            using var turnDeadline = new CancellationTokenSource(MaxInteractiveTurnDuration);
+            using var turnDeadlineReg = turnDeadline.Token.Register(() =>
+            {
+                _logger.LogWarning(
+                    "Interactive turn exceeded {Cap} for {Agent}/{Session} — aborting (likely a stalled upstream).",
+                    MaxInteractiveTurnDuration, agentName, sessionId);
+                runtime.Abort();
+            });
+
+            // Eagerly persist the user's message so it survives a hard crash or any turn
+            // that never reaches a terminal event. Built explicitly (not from runtime.Messages,
+            // which the loop appends to asynchronously) so there's no race. The authoritative
+            // save at AgentEndEvent overwrites this with the full message list.
+            {
+                var existingForUser = await sessionStore.LoadAsync(agentName, sessionId, ct);
+                var withUser = MobileSession.WithMessages(existingForUser, sessionId,
+                    [.. existingForUser?.Messages ?? [], userMessage]);
+                await sessionStore.SaveAsync(agentName, withUser, ct);
+                await BroadcastSessionUpdatedAsync(agentName, withUser, ct);
+            }
 
             await foreach (var evt in stream.WithCancellation(ct))
             {
@@ -1953,6 +2023,15 @@ public sealed class MobileTransport
                             chatBuffer.Merge([.. runtime.Messages]));
                         await sessionStore.SaveAsync(agentName, session, ct);
 
+                        // Diagnostic: surfaces turns that completed server-side after the
+                        // initiating client had already dropped — the exact case that used
+                        // to silently lose the reply. (connectionCt is the initiating
+                        // connection's token; cancelled == that client is gone.)
+                        _logger.LogInformation(
+                            "Turn persisted for {Agent}/{Session}: {Count} messages, initiator {ConnState}",
+                            agentName, sessionId, session.Messages.Count,
+                            connectionCt.IsCancellationRequested ? "DISCONNECTED" : "connected");
+
                         // Notify clients so the session list refreshes immediately
                         await BroadcastSessionUpdatedAsync(agentName, session, ct);
 
@@ -1982,6 +2061,10 @@ public sealed class MobileTransport
         catch (OperationCanceledException)
         {
             _logger.LogDebug("Agent stream cancelled for {Agent}/{Session}", agentName, sessionId);
+            // Persist before clearing: the runtime may have produced messages we'd
+            // otherwise lose. AgentEndEvent normally handles this; this is the backstop
+            // for a stream that ended without one.
+            await TryPersistAsync();
             chatBuffer.Clear();
             stateCache.Invalidate(agentName);
             try
@@ -1997,6 +2080,7 @@ public sealed class MobileTransport
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error streaming agent response for {Agent}/{Session}", agentName, sessionId);
+            await TryPersistAsync();
             chatBuffer.Clear();
             stateCache.Invalidate(agentName);
             try
