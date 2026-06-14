@@ -252,6 +252,39 @@ public class OpenRouterCacheControlTests
     }
 
     [Fact]
+    public async Task AnthropicModel_empty_string_message_does_not_synthesize_empty_text_block()
+    {
+        // WithCacheBreakpoint normalizes a string-content message into a [text] part so the
+        // breakpoint has somewhere to attach. If that string is empty it must NOT synthesize
+        // an empty text block — Anthropic rejects "text content blocks must be non-empty".
+        var handler = new CapturingHttpHandler();
+        var (provider, model) = MakeProvider(handler, "anthropic/claude-sonnet-4.6");
+        var ctx = new CompletionContext
+        {
+            SystemPrompt = "You are Claire.",
+            Messages = [new CompletionUserTextMessage { Text = "" }],
+        };
+
+        await DrainAsync(provider.GetCompletions(model, ctx));
+        using var doc = JsonDocument.Parse(handler.LastBody!);
+
+        foreach (var m in doc.RootElement.GetProperty("messages").EnumerateArray())
+        {
+            var content = m.GetProperty("content");
+            if (content.ValueKind != JsonValueKind.Array) continue;
+            foreach (var part in content.EnumerateArray())
+            {
+                if (part.TryGetProperty("type", out var t) && t.GetString() == "text")
+                {
+                    Assert.False(
+                        string.IsNullOrEmpty(part.GetProperty("text").GetString()),
+                        "request contains an empty text content block");
+                }
+            }
+        }
+    }
+
+    [Fact]
     public async Task NonAnthropicModel_has_no_cache_control()
     {
         using var doc = await CaptureRequestAsync("openai/gpt-5");

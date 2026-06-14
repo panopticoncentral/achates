@@ -960,7 +960,16 @@ internal sealed class OpenRouterProvider : IModelProvider
         switch (content.ValueKind)
         {
             case JsonValueKind.String:
-                parts = [new OpenRouterChatContentPart { Type = "text", Text = content.GetString() ?? string.Empty }];
+                var text = content.GetString();
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    // Nothing to attach a breakpoint to, and synthesizing an empty text
+                    // block would make Anthropic reject the request ("text content blocks
+                    // must be non-empty"). Leave the message unchanged.
+                    return message;
+                }
+
+                parts = [new OpenRouterChatContentPart { Type = "text", Text = text }];
                 break;
             case JsonValueKind.Array:
                 parts = content.Deserialize(OpenRouterJsonContext.Default.IReadOnlyListOpenRouterChatContentPart)?.ToList() ?? [];

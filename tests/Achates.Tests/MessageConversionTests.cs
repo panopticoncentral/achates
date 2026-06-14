@@ -52,6 +52,43 @@ public sealed class MessageConversionTests
         Assert.IsType<CompletionImageContent>(contentMsg.Content[1]);
     }
 
+    [Fact]
+    public void UserMessage_with_content_but_empty_text_omits_leading_text_block()
+    {
+        // An uncaptioned image (Text == "") must not emit an empty text content
+        // block — Anthropic rejects "text content blocks must be non-empty".
+        var imageContent = new CompletionImageContent { Data = "base64data", MimeType = "image/png" };
+        var messages = new AgentMessage[]
+        {
+            new UserMessage { Text = "", Content = [imageContent], Timestamp = 2500 },
+        };
+
+        var result = MessageConversion.DefaultConvertToLlm(messages);
+
+        var msg = Assert.Single(result);
+        var contentMsg = Assert.IsType<CompletionUserContentMessage>(msg);
+
+        Assert.DoesNotContain(contentMsg.Content, b => b is CompletionTextContent);
+        var imageBlock = Assert.Single(contentMsg.Content);
+        Assert.IsType<CompletionImageContent>(imageBlock);
+    }
+
+    [Fact]
+    public void UserMessage_with_content_but_whitespace_text_omits_leading_text_block()
+    {
+        var imageContent = new CompletionImageContent { Data = "base64data", MimeType = "image/png" };
+        var messages = new AgentMessage[]
+        {
+            new UserMessage { Text = "   ", Content = [imageContent], Timestamp = 2600 },
+        };
+
+        var result = MessageConversion.DefaultConvertToLlm(messages);
+
+        var msg = Assert.Single(result);
+        var contentMsg = Assert.IsType<CompletionUserContentMessage>(msg);
+        Assert.DoesNotContain(contentMsg.Content, b => b is CompletionTextContent);
+    }
+
     // --- AssistantMessage ---
 
     [Fact]

@@ -22,10 +22,15 @@ internal static class MessageConversion
                 case UserMessage user:
                     if (user.Content is { Count: > 0 })
                     {
-                        var blocks = new List<CompletionUserContent>(user.Content.Count + 1)
+                        // Only prepend a text block when there's actual caption text —
+                        // an uncaptioned image would otherwise emit an empty text block,
+                        // which Anthropic rejects ("text content blocks must be non-empty").
+                        var blocks = new List<CompletionUserContent>(user.Content.Count + 1);
+                        if (!string.IsNullOrWhiteSpace(user.Text))
                         {
-                            new CompletionTextContent { Text = user.Text }
-                        };
+                            blocks.Add(new CompletionTextContent { Text = user.Text });
+                        }
+
                         blocks.AddRange(user.Content);
                         result.Add(new CompletionUserContentMessage
                         {
