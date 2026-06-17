@@ -124,6 +124,23 @@ public sealed class SystemPromptTests
     }
 
     [Fact]
+    public void Includes_library_section_when_enabled()
+    {
+        var result = SystemPrompt.Build(hasLibrary: true);
+
+        Assert.Contains("## Library", result);
+        Assert.Contains("read-only", result);
+    }
+
+    [Fact]
+    public void Omits_library_section_when_disabled()
+    {
+        var result = SystemPrompt.Build(hasLibrary: false);
+
+        Assert.DoesNotContain("## Library", result);
+    }
+
+    [Fact]
     public void Notes_section_included_when_enabled()
     {
         var result = SystemPrompt.Build(hasNotes: true);

@@ -113,6 +113,7 @@ public sealed class AgentConfig
 public sealed class ToolsConfig
 {
     public NotebookConfig? Notebook { get; set; }
+    public LibraryConfig? Library { get; set; }
     public WebSearchConfig? WebSearch { get; set; }
     public TranscribeConfig? Transcribe { get; set; }
     public AvatarConfig? Avatar { get; set; }
@@ -176,6 +177,11 @@ public sealed class TitleConfig
 }
 
 public sealed class NotebookConfig
+{
+    public string? Root { get; set; }
+}
+
+public sealed class LibraryConfig
 {
     public string? Root { get; set; }
 }

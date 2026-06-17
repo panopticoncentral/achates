@@ -60,4 +60,29 @@ public class ConfigLoaderTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Library_Root_RoundTrips()
+    {
+        var path = TempConfigPath();
+        try
+        {
+            var config = new AchatesConfig
+            {
+                Provider = new ProviderConfig { Name = "openrouter" },
+                Tools = new ToolsConfig { Library = new LibraryConfig { Root = "~/library" } },
+            };
+            Environment.SetEnvironmentVariable("ACHATES_CONFIG_PATH", path);
+
+            ConfigLoader.Save(config);
+            var loaded = ConfigLoader.Load();
+
+            Assert.Equal("~/library", loaded.Tools?.Library?.Root);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ACHATES_CONFIG_PATH", null);
+            File.Delete(path);
+        }
+    }
 }

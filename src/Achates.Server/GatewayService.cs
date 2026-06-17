@@ -574,6 +574,7 @@ public sealed class GatewayService(
         var graphAccountNames = graphClients.Keys.ToList();
         var systemPrompt = SystemPrompt.Build(agentConfig.Description, prompt, tools,
             hasNotebook: tools.Any(t => t.Name == "notebook"),
+            hasLibrary: tools.Any(t => t.Name == "library"),
             hasNotes: hasTools.Contains("notes"),
             hasMail: hasTools.Contains("mail"),
             hasCalendar: hasTools.Contains("calendar"),
@@ -683,6 +684,12 @@ public sealed class GatewayService(
                     if (notebookRoot is null || !Directory.Exists(notebookRoot))
                     { logger.LogWarning("Agent '{Agent}': notebook tool skipped — tools.notebook.root not set or not a directory", agentName); break; }
                     tools.Add(new NotebookTool(notebookRoot));
+                    break;
+                case "library":
+                    var libraryRoot = ExpandHome(toolsConfig?.Library?.Root);
+                    if (libraryRoot is null || !Directory.Exists(libraryRoot))
+                    { logger.LogWarning("Agent '{Agent}': library tool skipped — tools.library.root not set or not a directory", agentName); break; }
+                    tools.Add(new LibraryTool(libraryRoot, model.Input.HasFlag(ModelModalities.File)));
                     break;
                 case "calendar":
                     if (graphClients.Count == 0)

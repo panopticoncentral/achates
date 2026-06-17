@@ -67,6 +67,12 @@ Shared tool configuration at the top level. Individual tools are enabled per-age
 |-----|------|---------|-------------|
 | `root` | string | _(none)_ | Path to the agent's notebook directory. Supports `~` expansion. The directory must already exist — the tool is skipped with a warning if it doesn't. |
 
+#### `tools.library`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `root` | string | _(none)_ | Path to the read-only library directory of reference documents (`.md`, text, `.pdf`). Supports `~` expansion. The directory must already exist — the tool is skipped with a warning if it doesn't. |
+
 #### `tools.web_search`
 
 | Key | Type | Default | Description |
@@ -172,7 +178,7 @@ Each capability is a `**Key:** value` line. List values (tools, allowed chats) u
 | `Provider` | string | _(global)_ | Override the provider for this agent. |
 | `Model` | string | _(`models.base`)_ | Base model id for this agent. Falls back to `models.base` in config.yaml. |
 | `Thinking Model` | string | _(`models.thinking`)_ | Thinking model id used by the `think` tool. Falls back to `models.thinking`. Only consulted when `think` is enabled. |
-| `Tools` | list | _(none)_ | Tool names to enable. Available: `session`, `notebook`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cron`, `imessage`, `transcribe`, `think`, `health`, `chat`, `location`, `camera`, `image`, `profile`, `agent_manager`. Note: `memory` and `cost` are always available to every agent; listing them here is accepted but ignored. |
+| `Tools` | list | _(none)_ | Tool names to enable. Available: `session`, `notebook`, `library`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cron`, `imessage`, `transcribe`, `think`, `health`, `chat`, `location`, `camera`, `image`, `profile`, `agent_manager`. Note: `memory` and `cost` are always available to every agent; listing them here is accepted but ignored. |
 | `Allowed Chats` | list | _(all)_ | Allowlist of agent names this agent can chat with. Omit to allow all. Only relevant when `chat` is in tools. |
 | `Reasoning Effort` | string | `medium` | Reasoning effort level. Only sent if the model supports it. |
 | `Temperature` | number | _(none)_ | Sampling temperature. |
@@ -198,6 +204,8 @@ models:
 tools:
   notebook:
     root: ~/notebook
+  library:
+    root: ~/library
   web_search:
     brave_api_key: BSA...
   graph:
@@ -229,6 +237,7 @@ Personal assistant.
 **Tools:**
   - session
   - notebook
+  - library
   - mail
   - calendar
   - web_search

@@ -186,6 +186,8 @@ In `~/.achates/config.yaml`:
 tools:
   notebook:
     root: ~/path/to/notebook
+  library:
+    root: ~/path/to/library
 ```
 
 Then add `notebook` to the agent's tools in `AGENT.md`:
@@ -195,6 +197,7 @@ Then add `notebook` to the agent's tools in `AGENT.md`:
   - session
   - memory
   - notebook
+  - library
 ```
 
 Actions: `list` (browse directories), `read` (open a `.md` file), `write` (create or replace a `.md` file in full), `mkdir` (create a subfolder). Non-`.md` files are ignored on list and rejected on read/write.
@@ -337,6 +340,7 @@ Agents can speak their replies via a locally-hosted [Kokoro-FastAPI](https://git
 | `sessions` | Browse the agent's own past sessions — `list`, `read`, `search` (excludes the current session) | None |
 | `memory` | Persistent agent memory across sessions | None |
 | `notebook` | Read/write markdown files in a configured folder | `tools.notebook.root` path |
+| `library` | Read-only reference documents (.md, text, PDF) in a configured folder | `tools.library.root` path |
 | `notes` | Access Apple Notes (macOS only) — `folders`, `list`, `read`, `create` | Notes automation permission on first use |
 | `mail` | Read Outlook email | `tools.graph` account(s) |
 | `calendar` | View Outlook calendar and create events | `tools.graph` account(s) |

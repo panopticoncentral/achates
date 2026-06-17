@@ -221,6 +221,15 @@ internal static class AgentLoop
                         }
                     }
                 }
+
+                var injectedMessage = BuildInjectedUserMessage(toolResults);
+                if (injectedMessage is not null)
+                {
+                    messages.Add(injectedMessage);
+                    newMessages.Add(injectedMessage);
+                    agentStream.Push(new MessageStartEvent(injectedMessage));
+                    agentStream.Push(new MessageEndEvent(injectedMessage));
+                }
             }
 
             agentStream.Push(new TurnEndEvent(assistantMessage, toolResults));
@@ -339,7 +348,39 @@ internal static class AgentLoop
             IsError = isError,
             ImageUrl = result.ImageUrl,
             Details = result.Details,
+            InjectedUserContent = result.InjectedUserContent,
         };
+
+    /// <summary>
+    /// Collects any <see cref="ToolResultMessage.InjectedUserContent"/> from the
+    /// turn's tool results into a single follow-up user message, or null if none.
+    /// Built once after all tool results are collected so tool_call/tool_result
+    /// pairing is never interleaved.
+    /// </summary>
+    internal static UserMessage? BuildInjectedUserMessage(IReadOnlyList<ToolResultMessage> toolResults)
+    {
+        var blocks = new List<CompletionUserContent>();
+        foreach (var result in toolResults)
+        {
+            if (result.InjectedUserContent is { Count: > 0 } injected)
+                blocks.AddRange(injected);
+        }
+
+        if (blocks.Count == 0)
+            return null;
+
+        var names = blocks.OfType<CompletionFileContent>()
+            .Select(f => f.FileName ?? "document")
+            .ToList();
+        var label = names.Count switch
+        {
+            0 => "Library document loaded for reference.",
+            1 => $"Library document loaded for reference: {names[0]}",
+            _ => $"Library documents loaded for reference: {string.Join(", ", names)}",
+        };
+
+        return new UserMessage { Text = label, Content = blocks };
+    }
 
     private static ToolResultMessage CreateSkipResult(CompletionToolCall toolCall, string reason) =>
         new()

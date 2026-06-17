@@ -21,4 +21,12 @@ public sealed record ToolResultMessage : AgentMessage
 
     [JsonIgnore]
     public object? Details { get; init; }
+
+    /// <summary>
+    /// Transient: content the runtime re-homes into a trailing user message
+    /// (e.g. a PDF a tool loaded). Never persisted — the spliced UserMessage
+    /// carries the durable copy.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<CompletionUserContent>? InjectedUserContent { get; init; }
 }

@@ -12,6 +12,7 @@ public static class SystemPrompt
         string? agentPrompt = null,
         IReadOnlyList<AgentTool>? tools = null,
         bool hasNotebook = false,
+        bool hasLibrary = false,
         bool hasNotes = false,
         bool hasMail = false,
         bool hasCalendar = false,
@@ -84,6 +85,15 @@ public static class SystemPrompt
             lines.Add("Use `notebook list` to see what's there, `notebook read` to open a file, `notebook write` to save (writes replace the whole file, so include everything you want to keep), and `notebook mkdir` to organize into subfolders.");
             lines.Add("If the user wants you to track todos, keep them in `TODO.md` at the root of the notebook.");
             lines.Add("Only .md files can be read or written; other extensions are rejected.");
+            lines.Add("");
+        }
+
+        if (hasLibrary)
+        {
+            lines.Add("## Library");
+            lines.Add("You have a library — a read-only collection of reference documents the user has curated.");
+            lines.Add("Use `library list` to browse folders and `library read` to open a document. You cannot add, change, or delete anything.");
+            lines.Add("Readable types are .md, text files, and .pdf. When you read a PDF it is loaded into the conversation as an attachment you can then discuss.");
             lines.Add("");
         }
 
