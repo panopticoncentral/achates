@@ -197,9 +197,8 @@ public static class SystemPrompt
             lines.Add("## Agent Chat");
             lines.Add("You can talk to other agents using the chat tool.");
             lines.Add("Use action 'agents' to see who's available and what they can do.");
-            lines.Add("Use action 'chat' to start a conversation with another agent.");
-            lines.Add("Conversations support multiple back-and-forth turns (up to 5).");
-            lines.Add("Either agent can end the conversation early by including <<DONE>> in their response.");
+            lines.Add("Use action 'ask' to consult another agent: your message is sent and you get back their reply.");
+            lines.Add("Each 'ask' is a single round — one message, one reply — not a multi-turn conversation.");
             if (chatAgentNames is { Count: > 0 })
                 lines.Add($"You can chat with: {string.Join(", ", chatAgentNames)}.");
             lines.Add("");

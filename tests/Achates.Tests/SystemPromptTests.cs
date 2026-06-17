@@ -243,7 +243,11 @@ public sealed class SystemPromptTests
         var result = SystemPrompt.Build(hasChat: true);
 
         Assert.Contains("## Agent Chat", result);
-        Assert.Contains("<<DONE>>", result);
+        // The single-round 'ask' action must be described...
+        Assert.Contains("'ask'", result);
+        // ...and the stale multi-turn / early-exit wording must be gone.
+        Assert.DoesNotContain("<<DONE>>", result);
+        Assert.DoesNotContain("up to 5", result);
     }
 
     [Fact]
