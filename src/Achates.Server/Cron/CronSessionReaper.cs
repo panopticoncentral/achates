@@ -46,7 +46,7 @@ public sealed class CronSessionReaper(
         var keepLast = config?.KeepLastPerJob ?? 1;
         var maxAge = config?.MaxAgeDays is { } days && days > 0
             ? TimeSpan.FromDays(days)
-            : (TimeSpan?)TimeSpan.FromDays(30);
+            : (TimeSpan?)TimeSpan.FromDays(7);
 
         // Nothing to do if both rules are disabled.
         if (keepLast <= 0 && maxAge is null) return;

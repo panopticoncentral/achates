@@ -154,7 +154,7 @@ Retention policy for sessions saved by scheduled cron job runs. Applied by `Cron
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `keep_last_per_job` | int | `1` | Number of most-recent sessions retained per cron job. Set to `0` to disable retention-based pruning. |
-| `max_age_days` | int | `30` | Absolute ceiling in days; any cron-origin session older than this is pruned. |
+| `max_age_days` | int | `7` | Absolute ceiling in days; any cron-origin session older than this is pruned. |
 
 ## Agent definitions (`AGENT.md`)
 
