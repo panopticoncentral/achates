@@ -29,6 +29,7 @@ public sealed class GatewayService(
     private WithingsClient? _withingsClient;
     private MobileTransport? _mobileTransport;
     private MobileSessionStore? _mobileSessionStore;
+    private ReadStateStore? _readStateStore;
     private AgentStateCache? _agentStateCache;
     private readonly DeviceCommandBridge _deviceBridge = new();
 
@@ -125,7 +126,8 @@ public sealed class GatewayService(
         _agentStateCache = new AgentStateCache();
         _mobileSessionStore = new MobileSessionStore(_achatesHome);
         await _mobileSessionStore.MigrateAsync(agents.Keys, cancellationToken);
-        _mobileTransport = new MobileTransport(agents, _mobileSessionStore, _agentStateCache, loggerFactory, serviceProvider);
+        _readStateStore = new ReadStateStore(_achatesHome);
+        _mobileTransport = new MobileTransport(agents, _mobileSessionStore, _readStateStore, _agentStateCache, loggerFactory, serviceProvider);
         _mobileTransport.AgentReloadFunc = ReloadAgentAsync;
         _mobileTransport.AgentRenameFunc = RenameAgentAsync;
         _mobileTransport.AgentDeleteFunc = DeleteAgentAsync;

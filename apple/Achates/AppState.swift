@@ -96,25 +96,23 @@ final class AppState {
         currentSessionId = nil
     }
 
-    func markCurrentAgentAsRead() {
-        guard let agent = currentAgent, client != nil else { return }
+    func markCurrentSessionAsRead() {
+        guard let agent = currentAgent, let sessionId = currentSessionId, client != nil else { return }
 
-        let latestTimestamp: Int? = messages.reversed().compactMap { msg -> Int? in
-            return Int(msg.timestamp.timeIntervalSince1970 * 1000)
-        }.first
-
-        guard let ts = latestTimestamp else { return }
-
-        if let index = agents.firstIndex(where: { $0.id == agent.id }), agents[index].unreadCount > 0 {
-            agents[index].unreadCount = 0
-            updateAppBadge()
+        // Optimistically clear this row's dot immediately.
+        if let index = sessions.firstIndex(where: { $0.id == sessionId }), sessions[index].unread > 0 {
+            sessions[index].unread = 0
         }
 
         Task {
             _ = try? await client?.sendRequest(method: "chat.read", params: [
                 "agent": .string(agent.id),
-                "timestamp": .int(ts),
+                "session_id": .string(sessionId),
             ])
+            // Reading one session may leave others unread — recompute the agent-level
+            // dot/badge from the server rather than assuming zero.
+            await refreshAgents()
+            updateAppBadge()
         }
     }
 
@@ -218,7 +216,7 @@ final class AppState {
             self.error = "Failed to load session: \(error.localizedDescription)"
         }
 
-        markCurrentAgentAsRead()
+        markCurrentSessionAsRead()
     }
 
     func deleteSession(_ sessionId: String, for agent: Agent) async {

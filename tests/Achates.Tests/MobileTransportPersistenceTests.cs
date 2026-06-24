@@ -82,6 +82,7 @@ public sealed class MobileTransportPersistenceTests
             var transport = new MobileTransport(
                 new Dictionary<string, AgentDefinition>(), // empty: skips cost/speech/title paths
                 store,
+                new ReadStateStore(tmp.FullName),
                 new AgentStateCache(),
                 NullLoggerFactory.Instance,
                 new NullServiceProvider());
@@ -108,6 +109,45 @@ public sealed class MobileTransportPersistenceTests
             var assistant = Assert.IsType<AssistantMessage>(
                 loaded.Messages.LastOrDefault(m => m is AssistantMessage));
             Assert.Contains(assistant.Content.OfType<CompletionTextContent>(), c => c.Text.Contains("hello there"));
+        }
+        finally
+        {
+            tmp.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Interactive_turn_marks_its_own_session_read()
+    {
+        // The user who sent the prompt is, by definition, present in that conversation.
+        // The turn must mark its own session caught up so the freshly-generated reply
+        // does NOT surface as unread (the window the client's chat.read used to race).
+        var tmp = Directory.CreateTempSubdirectory();
+        try
+        {
+            var store = new MobileSessionStore(tmp.FullName);
+            var readState = new ReadStateStore(tmp.FullName);
+            var transport = new MobileTransport(
+                new Dictionary<string, AgentDefinition>(),
+                store,
+                readState,
+                new AgentStateCache(),
+                NullLoggerFactory.Instance,
+                new NullServiceProvider());
+
+            var runtime = new AgentRuntime(new AgentOptions
+            {
+                Model = TestModel(new SingleReplyProvider()),
+                SystemPrompt = "test",
+                Tools = [],
+            });
+
+            await transport.StreamAgentResponseAsync(
+                runtime, "vivian", "sess-read", new UserMessage { Text = "hi" }, CancellationToken.None);
+
+            var state = await readState.LoadAsync("vivian");
+            var (list, _) = await store.ListAsync("vivian", limit: int.MaxValue, watermarkFor: state.Watermark);
+            Assert.Equal(0, list.Single(s => s.Id == "sess-read").Unread);
         }
         finally
         {

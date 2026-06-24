@@ -161,6 +161,11 @@ struct SessionListView: View {
     @ViewBuilder
     private func sessionRow(_ session: SessionInfo) -> some View {
         HStack {
+            if session.unread > 0 {
+                Circle()
+                    .fill(.blue)
+                    .frame(width: 8, height: 8)
+            }
             Text(session.title ?? "New conversation")
                 .font(.system(size: 15, weight: .medium))
                 .lineLimit(1)

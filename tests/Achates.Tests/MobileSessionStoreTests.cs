@@ -1,4 +1,6 @@
 using Achates.Agent.Messages;
+using Achates.Providers.Completions;
+using Achates.Providers.Completions.Content;
 using Achates.Server.Mobile;
 
 namespace Achates.Tests;
@@ -9,6 +11,15 @@ public sealed class MobileSessionStoreTests : IDisposable
     private readonly MobileSessionStore _store;
 
     public MobileSessionStoreTests() => _store = new MobileSessionStore(_basePath);
+
+    private static AssistantMessage Assistant(string text, long ts) => new()
+    {
+        Content = [new CompletionTextContent { Text = text }],
+        Model = "m",
+        Usage = new CompletionUsage { Input = 0, Output = 0, Cost = new CompletionUsageCost() },
+        StopReason = CompletionStopReason.Stop,
+        Timestamp = ts,
+    };
 
     public void Dispose()
     {
@@ -47,6 +58,63 @@ public sealed class MobileSessionStoreTests : IDisposable
         Assert.False(hasMore);
         Assert.Contains(list, m => m.Id == "a" && m.Title == "First" && m.MessageCount == 1);
         Assert.Contains(list, m => m.Id == "b" && m.Title == "Second" && m.MessageCount == 2);
+    }
+
+    [Fact]
+    public async Task ListAsync_WithMaxValueLimit_ReturnsAllSessions()
+    {
+        // Regression: callers pass limit: int.MaxValue to mean "give me everything".
+        // ListAsync computed Take(limit + 1) for its hasMore probe, which overflowed
+        // to int.MinValue and made Take return an empty sequence — silently dropping
+        // every session (this zeroed out unread counts for all agents).
+        await _store.SaveAsync("agent1", new MobileSession { Id = "a", Messages = [new UserMessage { Text = "1" }] });
+        await _store.SaveAsync("agent1", new MobileSession { Id = "b", Messages = [new UserMessage { Text = "2" }] });
+        await _store.SaveAsync("agent1", new MobileSession { Id = "c", Messages = [new UserMessage { Text = "3" }] });
+
+        var (list, hasMore) = await _store.ListAsync("agent1", limit: int.MaxValue);
+
+        Assert.Equal(3, list.Count);
+        Assert.False(hasMore);
+    }
+
+    [Fact]
+    public async Task ListAsync_WithWatermark_ComputesPerSessionUnread()
+    {
+        await _store.SaveAsync("agent1", new MobileSession
+        {
+            Id = "s1",
+            Messages =
+            [
+                new UserMessage { Text = "hi", Timestamp = 100 },
+                Assistant("read", 200),
+                Assistant("unread", 400),
+            ],
+        });
+        await _store.SaveAsync("agent1", new MobileSession
+        {
+            Id = "chatty",
+            Source = SessionSource.Chat, // non-participating
+            Messages = [Assistant("x", 999)],
+        });
+
+        // Watermark 300: s1 has one unread assistant (ts 400); chat session excluded.
+        var (list, _) = await _store.ListAsync("agent1", limit: int.MaxValue, watermarkFor: _ => 300);
+
+        Assert.Equal(1, list.Single(s => s.Id == "s1").Unread);
+        Assert.Equal(0, list.Single(s => s.Id == "chatty").Unread);
+    }
+
+    [Fact]
+    public async Task ListAsync_WithoutWatermark_UnreadIsZero()
+    {
+        await _store.SaveAsync("agent1", new MobileSession
+        {
+            Id = "s1",
+            Messages = [Assistant("x", 999)],
+        });
+
+        var (list, _) = await _store.ListAsync("agent1");
+        Assert.Equal(0, list.Single().Unread);
     }
 
     [Fact]

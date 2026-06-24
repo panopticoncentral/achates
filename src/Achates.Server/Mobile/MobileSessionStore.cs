@@ -44,7 +44,8 @@ public sealed class MobileSessionStore(string basePath)
     }
 
     public async Task<(IReadOnlyList<MobileSessionInfo> Sessions, bool HasMore)> ListAsync(
-        string agentName, DateTimeOffset? before = null, int limit = 50, CancellationToken ct = default)
+        string agentName, DateTimeOffset? before = null, int limit = 50,
+        CancellationToken ct = default, Func<string, long>? watermarkFor = null)
     {
         var dir = GetDirectory(agentName);
         if (!Directory.Exists(dir)) return ([], false);
@@ -61,6 +62,9 @@ public sealed class MobileSessionStore(string basePath)
             var cronTaskName = session.Messages.FirstOrDefault() is UserMessage { Hidden: true } first
                 ? Cron.CronSessionMarker.TryParseJobName(first.Text)
                 : null;
+            var unread = watermarkFor is null
+                ? 0
+                : UnreadCalculator.UnreadFor(session, cronTaskName, watermarkFor(session.Id));
             results.Add(new MobileSessionInfo(
                 session.Id,
                 session.Title,
@@ -71,7 +75,8 @@ public sealed class MobileSessionStore(string basePath)
                 session.JobId,
                 cronTaskName,
                 session.Source,
-                session.SpeechEnabled));
+                session.SpeechEnabled,
+                unread));
         }
 
         IEnumerable<MobileSessionInfo> query = results.OrderByDescending(s => s.Updated);
@@ -79,7 +84,11 @@ public sealed class MobileSessionStore(string basePath)
         if (before.HasValue)
             query = query.Where(s => s.Updated < before.Value);
 
-        var filtered = query.Take(limit + 1).ToList();
+        // Take one extra to probe hasMore, guarding against overflow when a caller
+        // passes limit: int.MaxValue to mean "everything" (int.MaxValue + 1 wraps to
+        // int.MinValue, and Take(negative) returns an empty sequence).
+        var probe = limit == int.MaxValue ? int.MaxValue : limit + 1;
+        var filtered = query.Take(probe).ToList();
         var hasMore = filtered.Count > limit;
         if (hasMore) filtered.RemoveAt(filtered.Count - 1);
 

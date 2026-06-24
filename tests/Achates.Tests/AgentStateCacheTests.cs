@@ -45,24 +45,4 @@ public sealed class AgentStateCacheTests
         Assert.Null(cache.Get("agent1"));
         Assert.Null(cache.Get("agent2"));
     }
-
-    [Fact]
-    public void MarkRead_SetsUnreadToZero()
-    {
-        var cache = new AgentStateCache();
-        cache.Set("agent1", new AgentPreviewState("Hi", "2026-03-31T00:00:00Z", 5));
-        cache.MarkRead("agent1");
-
-        var result = cache.Get("agent1");
-        Assert.NotNull(result);
-        Assert.Equal(0, result.UnreadCount);
-    }
-
-    [Fact]
-    public void MarkRead_NoOpWhenNotCached()
-    {
-        var cache = new AgentStateCache();
-        cache.MarkRead("agent1"); // should not throw
-        Assert.Null(cache.Get("agent1"));
-    }
 }

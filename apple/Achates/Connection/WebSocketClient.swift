@@ -353,7 +353,7 @@ final class WebSocketClient {
             if matchesCurrentSession {
                 appState.isStreaming = false
                 appState.streamingMessageId = nil
-                appState.markCurrentAgentAsRead()
+                appState.markCurrentSessionAsRead()
             }
             // The cost ledger just changed — drop any cached summaries so the
             // next read goes back to the server.

@@ -10,6 +10,8 @@ struct SessionInfo: Identifiable, Sendable, Equatable {
     /// Per-session opt-in for spoken assistant replies. Mirrors the server's
     /// `MobileSession.SpeechEnabled` field; flipped via `session.set_speech` RPC.
     var speechEnabled: Bool = false
+    /// Number of unread assistant messages in this session (server-computed).
+    var unread: Int = 0
 
     static func fromList(_ payload: [String: JSONValue]) -> [SessionInfo] {
         guard let arr = payload["sessions"]?.arrayValue else { return [] }
@@ -27,7 +29,8 @@ struct SessionInfo: Identifiable, Sendable, Equatable {
             preview: dict["preview"]?.stringValue,
             created: parseDate(dict["created"]),
             updated: parseDate(dict["updated"]),
-            speechEnabled: dict["speech_enabled"]?.boolValue ?? false
+            speechEnabled: dict["speech_enabled"]?.boolValue ?? false,
+            unread: dict["unread"]?.intValue ?? 0
         )
     }
 

@@ -29,6 +29,7 @@ public sealed class MobileTransport
     };
 
     private readonly MobileSessionStore sessionStore;
+    private readonly ReadStateStore readStateStore;
     private readonly AgentStateCache stateCache;
     private readonly ILoggerFactory loggerFactory;
     private readonly ILogger _logger;
@@ -54,11 +55,13 @@ public sealed class MobileTransport
     public MobileTransport(
         IReadOnlyDictionary<string, AgentDefinition> initialAgents,
         MobileSessionStore sessionStore,
+        ReadStateStore readStateStore,
         AgentStateCache stateCache,
         ILoggerFactory loggerFactory,
         IServiceProvider serviceProvider)
     {
         this.sessionStore = sessionStore;
+        this.readStateStore = readStateStore;
         this.stateCache = stateCache;
         this.loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<MobileTransport>();
@@ -548,7 +551,9 @@ public sealed class MobileTransport
         if (request.Params.TryGetProperty("limit", out var limitProp) && limitProp.TryGetInt32(out var limitVal))
             limit = Math.Clamp(limitVal, 1, 100);
 
-        var (sessions, hasMore) = await sessionStore.ListAsync(agentName, before, limit, ct);
+        var readState = await readStateStore.LoadAsync(agentName);
+        var (sessions, hasMore) = await sessionStore.ListAsync(
+            agentName, before, limit, ct, readState.Watermark);
         var payload = JsonSerializer.SerializeToElement(new
         {
             sessions = sessions.Select(s => new
@@ -560,6 +565,7 @@ public sealed class MobileTransport
                 updated = s.Updated.ToUnixTimeMilliseconds(),
                 job_id = s.JobId,
                 speech_enabled = s.SpeechEnabled,
+                unread = s.Unread,
             }),
             has_more = hasMore,
         }, JsonOptions);
@@ -616,6 +622,7 @@ public sealed class MobileTransport
             return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'session_id' parameter.");
 
         await sessionStore.DeleteAsync(agentName, sessionId, ct);
+        await readStateStore.RemoveSessionAsync(agentName, sessionId);
 
         var runtimeKey = $"{agentName}:{sessionId}";
         if (_runtimes.TryRemove(runtimeKey, out var runtime))
@@ -845,57 +852,12 @@ public sealed class MobileTransport
         return (null, null);
     }
 
-    private string GetAgentReadStatePath(string agentName) =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".achates", "agents", agentName, "read-state.json");
-
-    private async Task<long> LoadLastReadTimestampAsync(string agentName)
-    {
-        var path = GetAgentReadStatePath(agentName);
-        if (!File.Exists(path)) return 0;
-        try
-        {
-            var json = await File.ReadAllTextAsync(path);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("last_read_timestamp", out var ts) && ts.TryGetInt64(out var value))
-                return value;
-        }
-        catch { /* corrupted or invalid — treat as never read */ }
-        return 0;
-    }
-
-    private async Task SaveLastReadTimestampAsync(string agentName, long timestamp)
-    {
-        var path = GetAgentReadStatePath(agentName);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var tempPath = path + ".tmp";
-        var json = JsonSerializer.Serialize(new { last_read_timestamp = timestamp }, JsonOptions);
-        await File.WriteAllTextAsync(tempPath, json);
-        File.Move(tempPath, path, overwrite: true);
-    }
-
     private async Task<int> GetUnreadCountAsync(string agentName, CancellationToken ct)
     {
-        var lastRead = await LoadLastReadTimestampAsync(agentName);
-        var (sessions, _) = await sessionStore.ListAsync(agentName, limit: int.MaxValue, ct: ct);
-        var count = 0;
-
-        foreach (var info in sessions)
-        {
-            // Sessions are sorted by Updated desc; if this session is entirely before lastRead, stop
-            if (info.Updated.ToUnixTimeMilliseconds() <= lastRead) break;
-
-            var session = await sessionStore.LoadAsync(agentName, info.Id, ct);
-            if (session is null) continue;
-
-            for (var j = session.Messages.Count - 1; j >= 0; j--)
-            {
-                if (session.Messages[j].Timestamp <= lastRead) break;
-                if (session.Messages[j] is AssistantMessage) count++;
-            }
-        }
-
-        return count;
+        var state = await readStateStore.LoadAsync(agentName);
+        var (sessions, _) = await sessionStore.ListAsync(
+            agentName, limit: int.MaxValue, ct: ct, watermarkFor: state.Watermark);
+        return sessions.Sum(s => s.Unread);
     }
 
     private async Task<ResponseFrame?> HandleChatSendAsync(MobileConnection connection, RequestFrame request, CancellationToken ct)
@@ -1106,15 +1068,24 @@ public sealed class MobileTransport
         if (!_agents.ContainsKey(agentName))
             return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
 
-        if (!request.Params.TryGetProperty("timestamp", out var tsProp) || !tsProp.TryGetInt64(out var timestamp))
-            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing or invalid 'timestamp' parameter.");
+        var sessionId = GetStringParam(request.Params, "session_id");
+        if (sessionId is not null)
+        {
+            // Mark this conversation caught up to its latest message (server-authoritative —
+            // no client clock skew). A non-existent session is a harmless no-op.
+            var session = await sessionStore.LoadAsync(agentName, sessionId, ct);
+            if (session is not null)
+                await readStateStore.AdvanceSessionReadAsync(
+                    agentName, sessionId, UnreadCalculator.CaughtUpTimestamp(session));
+        }
+        else if (request.Params.TryGetProperty("timestamp", out var tsProp) && tsProp.TryGetInt64(out var timestamp))
+        {
+            // Tolerate an old client that still sends the agent-wide timestamp form.
+            await readStateStore.AdvanceLegacyAsync(agentName, timestamp);
+        }
 
-        // Only advance forward, never backward
-        var current = await LoadLastReadTimestampAsync(agentName);
-        if (timestamp > current)
-            await SaveLastReadTimestampAsync(agentName, timestamp);
-
-        stateCache.MarkRead(agentName);
+        // A read may leave other sessions unread, so recompute rather than force-zero.
+        stateCache.Invalidate(agentName);
 
         var payload = JsonSerializer.SerializeToElement(new { ok = true }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
@@ -2022,6 +1993,15 @@ public sealed class MobileTransport
                         var session = MobileSession.WithMessages(existing, sessionId,
                             chatBuffer.Merge([.. runtime.Messages]));
                         await sessionStore.SaveAsync(agentName, session, ct);
+
+                        // The user who sent this prompt is present in this conversation, so
+                        // mark it caught up to its own freshly-generated reply. Without this
+                        // the reply surfaces as "unread" in the very session being viewed
+                        // until a separate chat.read round-trip lands (a visible, racy window).
+                        // This is the interactive path only — cron/dreamtime/chat replies go
+                        // through other code and correctly remain unread.
+                        await readStateStore.AdvanceSessionReadAsync(
+                            agentName, sessionId, UnreadCalculator.CaughtUpTimestamp(session));
 
                         // Diagnostic: surfaces turns that completed server-side after the
                         // initiating client had already dropped — the exact case that used

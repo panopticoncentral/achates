@@ -84,4 +84,5 @@ public sealed record MobileSessionInfo(
     string? JobId,
     string? CronTaskName = null,
     SessionSource? Source = null,
-    bool SpeechEnabled = false);
+    bool SpeechEnabled = false,
+    int Unread = 0);
