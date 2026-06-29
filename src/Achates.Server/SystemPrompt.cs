@@ -68,6 +68,7 @@ public static class SystemPrompt
             lines.Add("- **Agent memory** (`scope: agent`): Notes specific to your role and past conversations with the user. Only you use this file.");
             lines.Add("Read memory at the start of new conversations to recall prior context.");
             lines.Add("When saving, include everything you want to keep — the file for that scope is replaced, not appended.");
+            lines.Add("For detailed or dated notes, you also have a **memory archive** — topical files retrieved on demand. Use `action: list` to see them, `action: search` to find content, and read/save/append/edit with a `file` to work with one. Keep your main memory focused; move dated logs, completed items, and long histories into the archive.");
         }
         else
         {
@@ -75,6 +76,7 @@ public static class SystemPrompt
             lines.Add("- **Agent memory** (`scope: agent`): Notes specific to your role and past conversations with the user.");
             lines.Add("Read your memory at the start of new conversations to recall prior context.");
             lines.Add("When saving, include everything you want to keep — the file is replaced, not appended.");
+            lines.Add("For detailed or dated notes, you also have a **memory archive** — topical files retrieved on demand. Use `action: list` to see them, `action: search` to find content, and read/save/append/edit with a `file` to work with one. Keep your main memory focused; move dated logs, completed items, and long histories into the archive.");
         }
         lines.Add("");
 

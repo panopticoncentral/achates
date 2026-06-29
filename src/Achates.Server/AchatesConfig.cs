@@ -6,6 +6,7 @@ public sealed class AchatesConfig
     public ModelsConfig? Models { get; set; }
     public ToolsConfig? Tools { get; set; }
     public CronConfig? Cron { get; set; }
+    public MemoryConfig? Memory { get; set; }
 }
 
 public sealed class ModelsConfig
@@ -36,6 +37,16 @@ public sealed class CronConfig
     /// absolute ceiling. Default 30.
     /// </summary>
     public int? MaxAgeDays { get; set; }
+}
+
+public sealed class MemoryConfig
+{
+    /// <summary>
+    /// Default soft budget (in tokens) for agents' core memory files. Per-agent
+    /// <c>**Memory Budget:**</c> overrides this; absent here too falls back to
+    /// <see cref="Tools.MemoryTool.DefaultCoreBudgetTokens"/>.
+    /// </summary>
+    public int? DefaultBudgetTokens { get; set; }
 }
 
 public sealed class AgentConfig
@@ -102,6 +113,14 @@ public sealed class AgentConfig
     /// real-world identity facts.
     /// </summary>
     public bool? SharedMemory { get; set; }
+
+    /// <summary>
+    /// Per-agent soft budget (in tokens) for the always-loaded core memory file. When core
+    /// exceeds it, the memory tool appends a non-blocking nudge to consolidate into the
+    /// archive. Null falls back to <c>memory.default_budget_tokens</c>, then to
+    /// <see cref="Tools.MemoryTool.DefaultCoreBudgetTokens"/>.
+    /// </summary>
+    public int? MemoryBudgetTokens { get; set; }
 
     /// <summary>
     /// System prompt from the ## Prompt section of AGENT.md.

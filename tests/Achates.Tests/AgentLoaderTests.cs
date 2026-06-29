@@ -269,6 +269,60 @@ public sealed class AgentLoaderTests
     }
 
     [Fact]
+    public void Parse_ReadsMemoryBudgetCapability()
+    {
+        var md = """
+            # Test
+
+            ## Capabilities
+
+            **Memory Budget:** 16000
+            """;
+
+        var config = AgentLoader.Parse(md);
+
+        Assert.NotNull(config);
+        Assert.Equal(16000, config!.MemoryBudgetTokens);
+    }
+
+    [Fact]
+    public void Parse_InvalidMemoryBudget_LeavesNull()
+    {
+        var md = """
+            # Test
+
+            ## Capabilities
+
+            **Memory Budget:** lots
+            """;
+
+        var config = AgentLoader.Parse(md);
+        Assert.Null(config!.MemoryBudgetTokens);
+    }
+
+    [Fact]
+    public void Serialize_WritesMemoryBudget_WhenSet()
+    {
+        var config = new AgentConfig { MemoryBudgetTokens = 16000 };
+        Assert.Contains("**Memory Budget:** 16000", AgentLoader.Serialize("Test", config));
+    }
+
+    [Fact]
+    public void Serialize_OmitsMemoryBudget_WhenNull()
+    {
+        var config = new AgentConfig { MemoryBudgetTokens = null };
+        Assert.DoesNotContain("Memory Budget", AgentLoader.Serialize("Test", config));
+    }
+
+    [Fact]
+    public void MemoryBudget_RoundTrips()
+    {
+        var original = new AgentConfig { MemoryBudgetTokens = 12000 };
+        var roundtripped = AgentLoader.Parse(AgentLoader.Serialize("Test", original));
+        Assert.Equal(12000, roundtripped!.MemoryBudgetTokens);
+    }
+
+    [Fact]
     public void RenameAgent_OnDisk_MovesDirectoryAndUpdatesCrossReferences()
     {
         var basePath = Path.Combine(Path.GetTempPath(), $"achates-rename-test-{Guid.NewGuid():N}");

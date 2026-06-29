@@ -65,4 +65,10 @@ public sealed record AgentDefinition
     /// request entirely. Range: <c>[0.25, 4.0]</c>.
     /// </summary>
     public double? SpeechRate { get; init; }
+
+    /// <summary>
+    /// Resolved core-memory soft budget in tokens (per-agent capability → global default →
+    /// <see cref="Achates.Server.Tools.MemoryTool.DefaultCoreBudgetTokens"/>). Passed to the memory tool.
+    /// </summary>
+    public int MemoryBudgetTokens { get; init; } = Achates.Server.Tools.MemoryTool.DefaultCoreBudgetTokens;
 }

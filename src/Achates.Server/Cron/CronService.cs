@@ -39,36 +39,47 @@ public sealed class CronService : IAsyncDisposable
 
         --- Dreamtime Mode ---
 
-        You are performing your nightly memory review.
+        You are performing your nightly memory review and consolidation.
 
-        You have access to your current memory and the sessions that have occurred since
-        your last review. Your job is to:
+        You keep memory in two tiers:
+        - **Core memory** (your main file): always loaded at the start of every conversation.
+          Keep it focused — durable facts, relationships, recurring patterns, and current state.
+        - **Memory archive** (topical files): retrieved on demand via the memory tool's
+          `list` / `search` / read with a `file`. This is where dated logs, completed
+          items, and long historical accounts belong.
 
-        1. Use the sessions tool to list recent sessions.
-        2. Scan the list and decide which sessions contain information worth remembering.
-        3. Read those sessions in full.
-        4. Read your current memory ONCE, up front. Do not re-read the whole memory
-           after each edit — the memory file can be large, and every full read is
-           persisted into this session, bloating it. You already know the text you're
-           editing from this initial read and from the `old` value you pass to `edit`,
-           so re-reading is unnecessary. Only read again if a `save`/`append`/`edit`
-           reports failure and you genuinely need to re-orient.
-        5. Update your memory to incorporate new learnings. Prefer INCREMENTAL edits:
-           use the memory tool's `append` action to add new facts and its `edit` action
-           to correct or remove specific outdated lines. Reserve a full `save` rewrite
-           for when the memory has genuinely become disorganized and needs restructuring
-           — a full save regenerates the entire file in one shot and is slow and failure-
-           prone once the memory is large.
+        Your job:
 
-        Focus on:
-        - User preferences, habits, and facts you've learned
-        - Recurring requests or patterns
-        - Corrections the user made
-        - Things the user explicitly asked you to remember
-        - Outdated information in memory that sessions contradict
+        1. Use the sessions tool to list recent sessions; decide which contain anything worth
+           remembering; read those in full.
+        2. Read your core memory ONCE, up front. Do not re-read the whole file after each edit
+           — it is large and every full read is persisted into this session, bloating it. You
+           already know the text you are editing from this initial read and the `old` values
+           you pass to `edit`.
+        3. Record tonight's observations by APPENDING to an archive journal file
+           (`append` with `file: journal`) — and ONLY there. A dated nightly note must
+           NEVER also be written into core memory; dated notes live in the archive.
+        4. Update core memory with genuinely durable new learnings (preferences, facts,
+           corrections, patterns) using INCREMENTAL `edit`/`append`. Reserve a full `save`
+           for real restructuring.
+        5. Keep core lean — consolidate, don't just accumulate:
+           - Move dated/completed sections OUT of core (`edit` to remove) into a topical
+             archive file (`append` with a `file`). Old dated `Dreamtime Note —` entries and
+             old dated metric/score logs do NOT belong in core — relocate them.
+           - SUMMARIZE, don't just relocate: collapse verbose dated event reconstructions to
+             a few summary lines in core, moving the full account to an archive file. Core
+             should get denser, not just shorter.
+           - Prune completed items from any pending/todo list in core.
+        6. When you read core (step 2), the memory tool tells you whether core is over its
+           size budget. If it says you are OVER budget, you MUST consolidate this run before
+           finishing: move at least the oldest one or two dated sections and any completed
+           items out of core into the archive. You need not clear the whole backlog in one
+           night, but every over-budget run must leave core SMALLER than it started — never
+           larger.
 
-        Do NOT memorize transient details (specific appointment times, one-off questions).
-        Focus on durable knowledge that will help you serve the user better.
+        Focus on durable knowledge that helps you serve the user better. Do NOT memorize
+        transient details (specific appointment times, one-off questions) in core — those go
+        to the archive journal if anywhere.
 
         When you're done, briefly summarize what you changed and why.
         """;

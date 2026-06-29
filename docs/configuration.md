@@ -44,6 +44,7 @@ You are a helpful assistant.
 | `provider` | object | _(required)_ | LLM provider configuration (see below). |
 | `models` | object | _(none)_ | Default base/thinking model fallbacks. Per-agent values in AGENT.md override these (see below). |
 | `tools` | object | _(none)_ | Shared tool configuration (see below). |
+| `memory` | object | _(none)_ | Global memory settings (see below). |
 | `cron` | object | _(none)_ | Cron session retention policy (see below). |
 
 ### `models`
@@ -147,6 +148,14 @@ The Kokoro server's lifecycle is the user's responsibility — start it however 
 
 Failure behavior: if the endpoint is unreachable mid-turn, the first sentence's synthesis attempt fails and emits one `audio.error`; subsequent sentences in the same turn are skipped silently (no retry storm). If `tools.speech` is omitted from the config entirely, speech is disabled — no `ISpeechSynthesizer` is registered and the broker is never built, even for sessions with the speaker toggle on.
 
+### `memory`
+
+Global defaults for the tiered memory system. Per-agent `**Memory Budget:**` in AGENT.md overrides `default_budget_tokens` for that agent.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `default_budget_tokens` | int | `8000` | Soft token budget for every agent's core memory file (`memory.md`). When an agent-scope core write (`save` or `append`) would push the core past this limit, the tool appends a non-blocking consolidation nudge — the write is never rejected. Per-agent `**Memory Budget:**` takes precedence when set. |
+
 ### `cron`
 
 Retention policy for sessions saved by scheduled cron job runs. Applied by `CronSessionReaper` after each cron tick (self-throttled to once per 5 minutes per agent). Only affects `User`-kind cron sessions — dreamtime sessions are exempt.
@@ -187,6 +196,7 @@ Each capability is a `**Key:** value` line. List values (tools, allowed chats) u
 | `Shared Memory` | bool | `true` | When `false`, the agent only sees its own private memory file — roleplay/in-character mode. |
 | `Voice` | string | _(none)_ | TTS voice id for this agent. Accepts a single Kokoro voice (`af_nicole`) or a blend (`af_nicole(0.7)+af_bella(0.3)`). When omitted, the agent is voiceless unless `tools.speech.default_voice` is set globally. |
 | `Speech Rate` | number | _(Kokoro default = 1.0)_ | Per-agent TTS rate, Kokoro's `speed` parameter. Accepts `[0.25, 4.0]` and is clamped silently if out of range. Practical range: `0.85`–`1.25`. When omitted, the field is dropped from the synthesis request body entirely so default-rate calls stay byte-identical to pre-rate behavior. |
+| `Memory Budget` | int | _(`memory.default_budget_tokens`)_ | Soft token budget for this agent's core memory file. Exceeding it on a `save`/`append` appends a non-blocking consolidation nudge — the write is never rejected. Falls back to `memory.default_budget_tokens` (global config), then to the hardcoded default of 8 000 tokens. |
 
 ## Full example
 
@@ -219,6 +229,9 @@ tools:
   withings:
     client_id: <withings-client-id>
     client_secret: <withings-client-secret>
+
+memory:
+  default_budget_tokens: 8000
 ```
 
 ### `~/.achates/agents/paul/AGENT.md`
@@ -252,6 +265,8 @@ Personal assistant.
 
 **Reasoning Effort:** medium
 
+**Memory Budget:** 16000
+
 ## Prompt
 
 You are Paul's personal assistant...
@@ -275,7 +290,8 @@ You are Paul's personal assistant...
 | `~/.achates/agents/{name}/AGENT.md` | Agent definition (markdown). |
 | `~/.achates/agents/{name}/sessions/{sessionId}.json` | Persisted conversation history. |
 | `~/.achates/memory.md` | Shared memory (universal user facts, all agents). |
-| `~/.achates/agents/{name}/memory.md` | Agent memory (agent-specific notes). |
+| `~/.achates/agents/{name}/memory.md` | Agent memory — core file (always loaded into context). |
+| `~/.achates/agents/{name}/memory/` | Agent memory — archive (topical `.md` files, retrieved on demand). |
 | `~/.achates/agents/{name}/costs.jsonl` | Cost ledger (append-only, always recorded). |
 | `~/.achates/agents/{name}/cron.json` | Scheduled task definitions and state. |
 | `~/.achates/agents/{name}/avatar.jpg` | Agent profile picture (optional; `.png` also accepted). |

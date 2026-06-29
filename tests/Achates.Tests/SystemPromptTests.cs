@@ -285,4 +285,21 @@ public sealed class SystemPromptTests
 
         Assert.DoesNotContain("## Tools", result);
     }
+
+    // --- Memory archive ---
+
+    [Fact]
+    public void Build_DescribesMemoryArchive()
+    {
+        var prompt = SystemPrompt.Build(agentPrompt: "You are a test.");
+        Assert.Contains("archive", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("list", prompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_DescribesArchive_WhenSharedDisabled()
+    {
+        var prompt = SystemPrompt.Build(agentPrompt: "You are a test.", sharedMemoryEnabled: false);
+        Assert.Contains("archive", prompt, StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -624,6 +624,8 @@ public sealed class GatewayService(
             SharedMemoryEnabled = agentConfig.SharedMemory ?? true,
             Voice = agentConfig.Voice,
             SpeechRate = agentConfig.SpeechRate,
+            MemoryBudgetTokens = Tools.MemoryTool.ResolveCoreBudgetTokens(
+                agentConfig.MemoryBudgetTokens, config.Memory?.DefaultBudgetTokens),
         };
 
         logger.LogInformation("Agent '{Name}' resolved with model {Model}", name, model.Id);

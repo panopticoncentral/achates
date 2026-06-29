@@ -248,4 +248,312 @@ public sealed class MemoryToolTests : IDisposable
         Assert.False(File.Exists(_sharedPath));
         Assert.Equal("should not reach shared", await File.ReadAllTextAsync(_agentPath));
     }
+
+    // ---------------- Archive tier: file routing ----------------
+
+    private string ArchiveDir => Path.Combine(_dir, "memory");
+
+    [Fact]
+    public void SchemaIncludesFileParam()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true);
+        Assert.Contains("\"file\"", tool.Parameters.GetRawText());
+    }
+
+    [Fact]
+    public async Task Save_WithFile_WritesArchiveFile_NotCore()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        await tool.ExecuteAsync("t", Args(
+            ("action", JE("save")),
+            ("file", JE("journal")),
+            ("content", JE("night one"))));
+
+        Assert.Equal("night one", await File.ReadAllTextAsync(Path.Combine(ArchiveDir, "journal.md")));
+        Assert.False(File.Exists(_agentPath));
+    }
+
+    [Fact]
+    public async Task Read_WithFile_ReturnsArchiveContent()
+    {
+        Directory.CreateDirectory(ArchiveDir);
+        await File.WriteAllTextAsync(Path.Combine(ArchiveDir, "history.md"), "old events");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        var result = await tool.ExecuteAsync("t", Args(
+            ("action", JE("read")),
+            ("file", JE("history"))));
+
+        Assert.Contains("old events", Text(result));
+    }
+
+    [Fact]
+    public async Task Append_WithFile_AddsToArchiveFile()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        await tool.ExecuteAsync("t", Args(("action", JE("append")), ("file", JE("journal")), ("content", JE("a"))));
+        await tool.ExecuteAsync("t", Args(("action", JE("append")), ("file", JE("journal")), ("content", JE("b"))));
+
+        Assert.Equal("a\nb", await File.ReadAllTextAsync(Path.Combine(ArchiveDir, "journal.md")));
+    }
+
+    [Fact]
+    public async Task Edit_WithFile_ReplacesUniqueTextInArchive()
+    {
+        Directory.CreateDirectory(ArchiveDir);
+        await File.WriteAllTextAsync(Path.Combine(ArchiveDir, "n.md"), "keep change me end");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        await tool.ExecuteAsync("t", Args(
+            ("action", JE("edit")), ("file", JE("n")), ("old", JE("change me")), ("new", JE("done"))));
+
+        Assert.Equal("keep done end", await File.ReadAllTextAsync(Path.Combine(ArchiveDir, "n.md")));
+    }
+
+    [Theory]
+    [InlineData("../escape")]
+    [InlineData("/etc/passwd")]
+    [InlineData("../../secrets")]
+    public async Task ArchiveFile_PathTraversal_IsRejected(string badFile)
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        var result = await tool.ExecuteAsync("t", Args(
+            ("action", JE("save")), ("file", JE(badFile)), ("content", JE("x"))));
+
+        Assert.Contains("escapes", Text(result), StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(ArchiveDir) && Directory.GetFiles(ArchiveDir).Length > 0);
+    }
+
+    [Fact]
+    public async Task Read_MissingArchiveFile_ReturnsFriendlyMessage()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+        var result = await tool.ExecuteAsync("t", Args(("action", JE("read")), ("file", JE("nope"))));
+        Assert.Contains("not found", Text(result), StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---------------- Archive tier: list action ----------------
+
+    [Fact]
+    public void SchemaIncludesListAction()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true);
+        Assert.Contains("\"list\"", tool.Parameters.GetRawText());
+    }
+
+    [Fact]
+    public async Task List_EmptyArchive_ReturnsFriendlyMessage()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+        var result = await tool.ExecuteAsync("t", Args(("action", JE("list"))));
+        Assert.Contains("empty", Text(result), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task List_ReturnsFilesWithHeadings()
+    {
+        Directory.CreateDirectory(ArchiveDir);
+        await File.WriteAllTextAsync(Path.Combine(ArchiveDir, "journal.md"), "# Nightly Journal\nday one");
+        await File.WriteAllTextAsync(Path.Combine(ArchiveDir, "history.md"), "# Marriage History\ndetails");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        var text = Text(await tool.ExecuteAsync("t", Args(("action", JE("list")))));
+
+        Assert.Contains("journal", text);
+        Assert.Contains("Nightly Journal", text);
+        Assert.Contains("history", text);
+        Assert.Contains("Marriage History", text);
+    }
+
+    // ---------------- Archive tier: search action ----------------
+
+    [Fact]
+    public void SchemaIncludesSearchActionAndQuery()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true);
+        var json = tool.Parameters.GetRawText();
+        Assert.Contains("\"search\"", json);
+        Assert.Contains("\"query\"", json);
+    }
+
+    [Fact]
+    public async Task Search_FindsBodyMatches_CaseInsensitive()
+    {
+        Directory.CreateDirectory(ArchiveDir);
+        await File.WriteAllTextAsync(Path.Combine(ArchiveDir, "journal.md"),
+            "# Journal\nPaul mentioned the kitchen incident\nunrelated line");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        var text = Text(await tool.ExecuteAsync("t", Args(
+            ("action", JE("search")), ("query", JE("KITCHEN")))));
+
+        Assert.Contains("journal", text);
+        Assert.Contains("kitchen incident", text);
+    }
+
+    [Fact]
+    public async Task Search_NoMatches_ReturnsFriendlyMessage()
+    {
+        Directory.CreateDirectory(ArchiveDir);
+        await File.WriteAllTextAsync(Path.Combine(ArchiveDir, "journal.md"), "# Journal\nday one");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        var text = Text(await tool.ExecuteAsync("t", Args(
+            ("action", JE("search")), ("query", JE("zzzznotfound")))));
+
+        Assert.Contains("No matches", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Search_MissingQuery_ReturnsError()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+        var text = Text(await tool.ExecuteAsync("t", Args(("action", JE("search")))));
+        Assert.Contains("query", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---------------- Core soft-budget note ----------------
+
+    [Fact]
+    public async Task Save_OverBudget_AppendsNote()
+    {
+        // Budget of 5 tokens ≈ 20 chars; write more than that.
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false, coreBudgetTokens: 5);
+
+        var text = Text(await tool.ExecuteAsync("t", Args(
+            ("action", JE("save")),
+            ("content", JE(new string('x', 200))))));
+
+        Assert.Contains("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Save_UnderBudget_NoNote()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false, coreBudgetTokens: 100_000);
+        var text = Text(await tool.ExecuteAsync("t", Args(("action", JE("save")), ("content", JE("tiny")))));
+        Assert.DoesNotContain("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Save_BudgetZero_NoNote()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false, coreBudgetTokens: 0);
+        var text = Text(await tool.ExecuteAsync("t", Args(
+            ("action", JE("save")), ("content", JE(new string('x', 200))))));
+        Assert.DoesNotContain("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Append_OverBudget_AppendsNote()
+    {
+        await File.WriteAllTextAsync(_agentPath, new string('x', 180));
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false, coreBudgetTokens: 5);
+        var text = Text(await tool.ExecuteAsync("t", Args(("action", JE("append")), ("content", JE("more")))));
+        Assert.Contains("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(16000, 8000, 16000)]
+    [InlineData(null, 8000, 8000)]
+    [InlineData(null, null, MemoryTool.DefaultCoreBudgetTokens)]
+    public void ResolveCoreBudgetTokens_FollowsResolutionOrder(int? perAgent, int? globalDefault, int expected)
+    {
+        Assert.Equal(expected, MemoryTool.ResolveCoreBudgetTokens(perAgent, globalDefault));
+    }
+
+    [Fact]
+    public async Task Append_WithFile_ToNewFile_SaysAppended()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+        var text = Text(await tool.ExecuteAsync("t", Args(
+            ("action", JE("append")), ("file", JE("fresh")), ("content", JE("first")))));
+        Assert.Contains("Appended", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("first", await File.ReadAllTextAsync(Path.Combine(ArchiveDir, "fresh.md")));
+    }
+
+    [Fact]
+    public async Task Save_SharedScope_OverBudget_NoNote()
+    {
+        // Budget applies to the agent core only — shared writes never get the nudge.
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true, coreBudgetTokens: 5);
+        var text = Text(await tool.ExecuteAsync("t", Args(
+            ("action", JE("save")), ("scope", JE("shared")), ("content", JE(new string('x', 200))))));
+        Assert.DoesNotContain("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Save_ArchiveFile_OverBudget_NoNote()
+    {
+        // The budget nudge is for core memory only — archive writes never get it.
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false, coreBudgetTokens: 5);
+        var text = Text(await tool.ExecuteAsync("t", Args(
+            ("action", JE("save")), ("file", JE("big")), ("content", JE(new string('x', 200))))));
+        Assert.DoesNotContain("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---- Budget note also surfaces on core read and edit (so dreamtime, which
+    //      reads core up front and maintains it via edit, reliably sees the signal) ----
+
+    [Fact]
+    public async Task Read_AgentScope_OverBudget_AppendsNote()
+    {
+        await File.WriteAllTextAsync(_agentPath, new string('x', 200));
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false, coreBudgetTokens: 5);
+        var text = Text(await tool.ExecuteAsync("t", Args(("action", JE("read")), ("scope", JE("agent")))));
+        Assert.Contains("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Read_AgentScope_UnderBudget_NoNote()
+    {
+        await File.WriteAllTextAsync(_agentPath, "tiny");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false, coreBudgetTokens: 100_000);
+        var text = Text(await tool.ExecuteAsync("t", Args(("action", JE("read")), ("scope", JE("agent")))));
+        Assert.DoesNotContain("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Read_SharedScope_OverBudget_NoNote()
+    {
+        // The budget is the agent core's — a shared-scope read never carries the nudge.
+        await File.WriteAllTextAsync(_sharedPath, new string('x', 200));
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true, coreBudgetTokens: 5);
+        var text = Text(await tool.ExecuteAsync("t", Args(("action", JE("read")), ("scope", JE("shared")))));
+        Assert.DoesNotContain("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Read_Unscoped_AgentOverBudget_AppendsNote()
+    {
+        // Unscoped read (shared-enabled) returns both files; the note fires on the agent core.
+        await File.WriteAllTextAsync(_agentPath, new string('x', 200));
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true, coreBudgetTokens: 5);
+        var text = Text(await tool.ExecuteAsync("t", Args(("action", JE("read")))));
+        Assert.Contains("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Edit_AgentScope_OverBudget_AppendsNote()
+    {
+        await File.WriteAllTextAsync(_agentPath, "keep " + new string('x', 200) + " zzz");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false, coreBudgetTokens: 5);
+        var text = Text(await tool.ExecuteAsync("t", Args(
+            ("action", JE("edit")), ("old", JE("zzz")), ("new", JE("yyy")))));
+        Assert.Contains("updated", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Edit_AgentScope_UnderBudget_NoNote()
+    {
+        await File.WriteAllTextAsync(_agentPath, "Paul likes tea");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false, coreBudgetTokens: 100_000);
+        var text = Text(await tool.ExecuteAsync("t", Args(
+            ("action", JE("edit")), ("old", JE("tea")), ("new", JE("coffee")))));
+        Assert.DoesNotContain("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
 }

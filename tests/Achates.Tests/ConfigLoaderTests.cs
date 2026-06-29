@@ -85,4 +85,31 @@ public class ConfigLoaderTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Memory_DefaultBudget_RoundTrips()
+    {
+        var path = TempConfigPath();
+        try
+        {
+            var config = new AchatesConfig
+            {
+                Provider = new ProviderConfig { Name = "openrouter" },
+                Memory = new MemoryConfig { DefaultBudgetTokens = 8000 },
+            };
+            Environment.SetEnvironmentVariable("ACHATES_CONFIG_PATH", path);
+
+            ConfigLoader.Save(config);
+            var text = File.ReadAllText(path);
+            var loaded = ConfigLoader.Load();
+
+            Assert.Contains("default_budget_tokens", text);
+            Assert.Equal(8000, loaded.Memory?.DefaultBudgetTokens);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ACHATES_CONFIG_PATH", null);
+            File.Delete(path);
+        }
+    }
 }

@@ -119,6 +119,12 @@ public static class AgentLoader
             sb.AppendLine("**Shared Memory:** false");
         }
 
+        if (config.MemoryBudgetTokens is { } memBudget)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"**Memory Budget:** {memBudget}");
+        }
+
         if (!string.IsNullOrWhiteSpace(config.Voice))
         {
             sb.AppendLine();
@@ -371,6 +377,10 @@ public static class AgentLoader
             case "shared memory":
                 if (value is not null && bool.TryParse(value, out var sharedMemory))
                     config.SharedMemory = sharedMemory;
+                break;
+            case "memory budget":
+                if (int.TryParse(value, out var memBudget) && memBudget >= 0)
+                    config.MemoryBudgetTokens = memBudget;
                 break;
             case "voice":
                 config.Voice = string.IsNullOrWhiteSpace(value) ? null : value;
