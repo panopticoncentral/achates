@@ -7,31 +7,21 @@ struct AchatesApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
-                .environment(appState)
-                #if os(macOS)
-                .frame(minWidth: 700, minHeight: 500)
-                #endif
-                .task {
-                    _ = try? await UNUserNotificationCenter.current()
-                        .requestAuthorization(options: [.badge])
-                }
-                .onChange(of: scenePhase) { _, newPhase in
-                    appState.handleScenePhaseChange(newPhase)
-                }
-        }
         #if os(macOS)
+        // A single Window, not a WindowGroup: every window would share the one
+        // AppState (one socket, one selection), so a second window just mirrors
+        // and fights the first. This also frees ⌘N from File > New Window.
+        Window("Achates", id: "main") {
+            mainContent
+                .frame(minWidth: 700, minHeight: 500)
+        }
         .defaultSize(width: 1000, height: 700)
         .commands {
-            CommandGroup(after: .newItem) {
+            CommandGroup(replacing: .newItem) {
                 Button("New Conversation") {
                     Task {
                         if let agent = appState.currentAgent {
-                            if let sessionId = await appState.createSession(for: agent) {
-                                appState.currentSessionId = sessionId
-                                appState.messages = []
-                            }
+                            await appState.startNewConversation(for: agent)
                         }
                     }
                 }
@@ -39,13 +29,36 @@ struct AchatesApp: App {
                 .disabled(appState.currentAgent == nil)
             }
         }
-        #endif
 
-        #if os(macOS)
         Settings {
-            SettingsView()
+            MacSettingsView()
                 .environment(appState)
         }
+
+        // Content management (memory, jobs, models) gets a real window instead
+        // of pushes inside the settings pane. Also listed in the Window menu.
+        Window("System", id: "system") {
+            SystemWindowView()
+                .environment(appState)
+                .frame(minWidth: 640, minHeight: 420)
+        }
+        .defaultSize(width: 780, height: 540)
+        #else
+        WindowGroup {
+            mainContent
+        }
         #endif
+    }
+
+    private var mainContent: some View {
+        ContentView()
+            .environment(appState)
+            .task {
+                _ = try? await UNUserNotificationCenter.current()
+                    .requestAuthorization(options: [.badge])
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                appState.handleScenePhaseChange(newPhase)
+            }
     }
 }

@@ -14,8 +14,11 @@ struct MemoryListView: View {
                 }
                 .listRowSeparator(.hidden)
             } else if appState.memories.isEmpty {
-                Text("No memory files.")
-                    .foregroundStyle(.secondary)
+                ContentUnavailableView(
+                    "No Memory Files",
+                    systemImage: "brain",
+                    description: Text("Agents build memory as you talk to them.")
+                )
             } else {
                 ForEach(appState.memories) { memory in
                     NavigationLink {
@@ -31,6 +34,20 @@ struct MemoryListView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .refreshable { await appState.loadMemories() }
+        #if os(macOS)
+        // Pull-to-refresh doesn't exist on the Mac; give it a button + ⌘R.
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task { await appState.loadMemories() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .keyboardShortcut("r", modifiers: .command)
+                .accessibilityLabel("Refresh")
+            }
+        }
+        #endif
         .task {
             await appState.loadMemories()
             hasLoaded = true

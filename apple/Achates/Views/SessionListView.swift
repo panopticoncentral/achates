@@ -7,6 +7,7 @@ struct SessionListView: View {
     @State private var renameText = ""
     @State private var showDeleteAll = false
     @State private var showCosts = false
+    @ScaledMetric(relativeTo: .subheadline) private var unreadDotSize: CGFloat = 8
 
     var body: some View {
         Group {
@@ -18,16 +19,7 @@ struct SessionListView: View {
                     Text("No conversations yet")
                         .foregroundStyle(.secondary)
                     Button("Start a Conversation") {
-                        Task {
-                            if let sessionId = await appState.createSession(for: agent) {
-                                #if os(iOS)
-                                appState.navigationPath.append(SessionSelection(agent: agent, sessionId: sessionId))
-                                #else
-                                appState.currentSessionId = sessionId
-                                appState.messages = []
-                                #endif
-                            }
-                        }
+                        Task { await appState.startNewConversation(for: agent) }
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -41,31 +33,33 @@ struct SessionListView: View {
         .navigationBarTitleDisplayMode(.large)
         #endif
         .toolbar {
-            ToolbarItem(placement: .automatic) {
-                HStack(spacing: 12) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    Task { await appState.startNewConversation(for: agent) }
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+                .accessibilityLabel("New Chat")
+
+                Menu {
                     Button {
                         showCosts = true
                     } label: {
-                        Image(systemName: "chart.bar")
+                        Label("Costs…", systemImage: "chart.bar")
                     }
-                    .accessibilityLabel("Costs")
 
-                    Button {
-                        Task {
-                            if let sessionId = await appState.createSession(for: agent) {
-                                #if os(iOS)
-                                appState.navigationPath.append(SessionSelection(agent: agent, sessionId: sessionId))
-                                #else
-                                appState.currentSessionId = sessionId
-                                appState.messages = []
-                                #endif
-                            }
-                        }
+                    Divider()
+
+                    Button(role: .destructive) {
+                        showDeleteAll = true
                     } label: {
-                        Image(systemName: "square.and.pencil")
+                        Label("Delete All Conversations…", systemImage: "trash")
                     }
-                    .accessibilityLabel("New Chat")
+                    .disabled(appState.sessions.isEmpty)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
+                .accessibilityLabel("More actions")
             }
         }
         .sheet(isPresented: $showCosts) {
@@ -160,21 +154,34 @@ struct SessionListView: View {
 
     @ViewBuilder
     private func sessionRow(_ session: SessionInfo) -> some View {
-        HStack {
+        HStack(spacing: 8) {
             if session.unread > 0 {
                 Circle()
-                    .fill(.blue)
-                    .frame(width: 8, height: 8)
+                    .fill(.tint)
+                    .frame(width: unreadDotSize, height: unreadDotSize)
             }
-            Text(session.title ?? "New conversation")
-                .font(.system(size: 15, weight: .medium))
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            Text(formatTimestamp(session.updated))
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(session.title ?? "New conversation")
+                        .font(.listRowTitle)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(session.updated.chatListLabel())
+                        .font(.listRowCaption)
+                        .foregroundStyle(session.unread > 0 ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                }
+                if let preview = session.preview, !preview.isEmpty {
+                    Text(preview)
+                        .font(.listRowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(session.title ?? "New conversation")
+        .accessibilityValue(session.unread > 0 ? "unread" : "")
         .contextMenu {
             Button {
                 sessionToRename = session
@@ -226,23 +233,4 @@ struct SessionListView: View {
         return groups
     }
 
-    private func formatTimestamp(_ date: Date) -> String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(date) {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "h:mm a"
-            return formatter.string(from: date)
-        } else if calendar.isDateInYesterday(date) {
-            return "Yesterday"
-        } else if let weekAgo = calendar.date(byAdding: .day, value: -6, to: calendar.startOfDay(for: Date())),
-                  date >= weekAgo {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "EEE"
-            return formatter.string(from: date)
-        } else {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .short
-            return formatter.string(from: date)
-        }
-    }
 }

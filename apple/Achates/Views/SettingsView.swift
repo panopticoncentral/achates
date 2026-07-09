@@ -1,5 +1,12 @@
 import SwiftUI
 
+/// iOS settings screen (pushed from the agent list, or shown at first run
+/// wrapped in a NavigationStack by ContentView). It deliberately does NOT
+/// create its own NavigationStack — when pushed, a nested stack would double
+/// the navigation bars and break swipe-back.
+///
+/// macOS uses `MacSettingsView` (tabbed Settings scene) and `SystemWindowView`
+/// instead.
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @AppStorage("show_message_costs") private var showMessageCosts = false
@@ -8,19 +15,11 @@ struct SettingsView: View {
     @State private var showError = false
     @State private var errorMessage = ""
 
+    private var isConnected: Bool { appState.connectionStatus == .connected }
+
     var body: some View {
-        #if os(macOS)
-        NavigationStack {
-            formContent
-                .formStyle(.grouped)
-        }
-        .frame(minWidth: 350, idealWidth: 400, minHeight: 200)
-        #else
-        NavigationStack {
-            formContent
-                .navigationTitle("Settings")
-        }
-        #endif
+        formContent
+            .navigationTitle("Settings")
     }
 
     @ViewBuilder
@@ -44,14 +43,23 @@ struct SettingsView: View {
             }
             #endif
 
-            Section("Server") {
+            Section {
                 TextField("Server URL", text: $urlString, prompt: Text("http://192.168.1.100:5000"))
                     .textContentType(.URL)
                     .autocorrectionDisabled()
+                    .onSubmit(connect)
                     #if os(iOS)
                     .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
                     #endif
+            } header: {
+                Text("Server")
+            } footer: {
+                if let reason = appState.lastConnectionError,
+                   appState.connectionStatus == .disconnected {
+                    Text(reason)
+                        .foregroundStyle(.red)
+                }
             }
 
             Section {
@@ -78,7 +86,7 @@ struct SettingsView: View {
                 }
             }
 
-            if appState.connectionStatus == .connected {
+            if isConnected {
                 Section {
                     Label("Connected", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
@@ -95,33 +103,38 @@ struct SettingsView: View {
                 Toggle("Show tool activity", isOn: $showToolActivity)
             }
 
-            if appState.connectionStatus == .connected {
-                Section("System") {
-                    NavigationLink {
-                        MemoryListView()
-                    } label: {
-                        Label("Memory", systemImage: "brain")
-                    }
+            Section {
+                NavigationLink {
+                    MemoryListView()
+                } label: {
+                    Label("Memory", systemImage: "brain")
+                }
 
-                    NavigationLink {
-                        JobsView()
-                    } label: {
-                        Label("Scheduled Jobs", systemImage: "calendar.badge.clock")
-                    }
+                NavigationLink {
+                    JobsView()
+                } label: {
+                    Label("Scheduled Jobs", systemImage: "calendar.badge.clock")
+                }
 
-                    NavigationLink {
-                        DefaultModelsView()
-                    } label: {
-                        Label("Default Models", systemImage: "cpu")
-                    }
+                NavigationLink {
+                    DefaultModelsView()
+                } label: {
+                    Label("Default Models", systemImage: "cpu")
+                }
+            } header: {
+                Text("System")
+            } footer: {
+                if !isConnected {
+                    Text("Connect to a server to manage memory, jobs, and models.")
                 }
             }
+            .disabled(!isConnected)
 
             Section("About") {
                 HStack {
                     Text("Version")
                     Spacer()
-                    Text(appVersion)
+                    Text(AppVersion.display)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -136,16 +149,13 @@ struct SettingsView: View {
                 urlString = url.absoluteString
             }
         }
-    }
-
-    private var appVersion: String {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "–"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "–"
-        return "\(version) (\(build))"
+        .onChange(of: appState.serverURL) { _, new in
+            if let new { urlString = new.absoluteString }
+        }
     }
 
     private func connect() {
-        guard let url = URL(string: urlString) else {
+        guard let url = URL(string: urlString), url.scheme != nil else {
             errorMessage = "Invalid URL"
             showError = true
             return

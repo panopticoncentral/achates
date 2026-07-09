@@ -93,11 +93,10 @@ final class WebSocketClient {
         }
     }
 
-    func sendMessage(_ text: String, attachments: [DraftAttachment] = []) async {
+    func sendMessage(_ text: String, attachments: [DraftAttachment] = []) async throws {
         guard let agent = appState.currentAgent,
               let sessionId = appState.currentSessionId else {
-            print("Cannot send message: no agent or session selected")
-            return
+            throw FrameError.notConnected
         }
         var params: [String: JSONValue] = [
             "text": .string(text),
@@ -107,11 +106,7 @@ final class WebSocketClient {
         if !attachments.isEmpty {
             params["attachments"] = .array(attachments.map(encodeAttachment))
         }
-        do {
-            _ = try await sendRequest(method: "chat.send", params: params)
-        } catch {
-            print("Failed to send message: \(error)")
-        }
+        _ = try await sendRequest(method: "chat.send", params: params)
     }
 
     /// Resubmit a user prompt. `promptIndex` is the 0-based user-turn ordinal to
@@ -181,6 +176,7 @@ final class WebSocketClient {
             ])
             reconnectAttemptsHolder.set(0)
             appState.connectionStatus = .connected
+            appState.lastConnectionError = nil
 
             // Step 2: Fetch agent list
             if let agentsPayload = try await sendRequest(method: "agents.list") {
@@ -193,7 +189,9 @@ final class WebSocketClient {
             // currently on screen.
             await appState.resyncCurrentView()
         } catch {
-            print("Connect handshake failed: \(error)")
+            // Keep the reason around: the settings/onboarding surfaces show it so a
+            // failed connect isn't just a form that silently did nothing.
+            appState.lastConnectionError = error.localizedDescription
             appState.connectionStatus = .disconnected
         }
     }

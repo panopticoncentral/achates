@@ -73,6 +73,13 @@ struct ComposerView: View {
             inputRow
         }
         .background(.bar)
+        // Finder drags are the most natural way to attach on the Mac (and work
+        // on iPad too). Images go through the normal resize path; PDFs/text
+        // through the document path.
+        .dropDestination(for: URL.self) { urls, _ in
+            handleDroppedURLs(urls)
+            return true
+        }
         .onAppear { applyPendingEditIfNeeded(pendingEdit) }
         .onChange(of: pendingEdit) { _, newValue in
             applyPendingEditIfNeeded(newValue)
@@ -184,7 +191,17 @@ struct ComposerView: View {
                 placeholder: "Message",
                 minHeight: 30,
                 maxHeight: 240,
-                onSend: send
+                onSend: send,
+                onEscape: {
+                    // Esc lands in the focused text view before ChatView's
+                    // .onKeyPress can see it; stop generation from here.
+                    guard appState.isStreaming else { return false }
+                    onCancel()
+                    return true
+                },
+                onPasteImage: { data in
+                    addAttachment(from: data)
+                }
             )
             .frame(maxWidth: .infinity)
             .frame(height: composerHeight)
@@ -347,6 +364,24 @@ struct ComposerView: View {
             mime: "image/jpeg",
             thumbnail: result.thumbnail
         ))
+    }
+
+    /// Route dropped file URLs: images through the resize path, the rest
+    /// through the document path (which enforces the PDF/text caps).
+    private func handleDroppedURLs(_ urls: [URL]) {
+        for url in urls {
+            if attachments.count >= maxAttachments { break }
+            let isImage = UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false
+            if isImage {
+                let didStart = url.startAccessingSecurityScopedResource()
+                defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+                if let data = try? Data(contentsOf: url) {
+                    addAttachment(from: data)
+                }
+            } else {
+                addDocuments([url])
+            }
+        }
     }
 
     private func addDocuments(_ urls: [URL]) {
@@ -516,6 +551,10 @@ struct MacComposerTextView: NSViewRepresentable {
     let minHeight: CGFloat
     let maxHeight: CGFloat
     let onSend: () -> Void
+    /// Return true when Esc was consumed (e.g. stop generation).
+    var onEscape: () -> Bool = { false }
+    /// Called with JPEG data when the user pastes an image instead of text.
+    var onPasteImage: (Data) -> Void = { _ in }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -556,7 +595,7 @@ struct MacComposerTextView: NSViewRepresentable {
         }
         textView.string = text
         textView.placeholderString = placeholder
-        textView.onSend = onSend
+        textView.onPasteImage = onPasteImage
 
         scrollView.documentView = textView
         context.coordinator.observe(scrollView: scrollView)
@@ -573,7 +612,8 @@ struct MacComposerTextView: NSViewRepresentable {
         if textView.placeholderString != placeholder {
             textView.placeholderString = placeholder
         }
-        textView.onSend = onSend
+        textView.onPasteImage = onPasteImage
+        context.coordinator.parent = self
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -611,6 +651,24 @@ struct MacComposerTextView: NSViewRepresentable {
             scheduleMeasure()
         }
 
+        // Key handling lives here (not in keyDown) so the input-method pipeline
+        // runs first: during Japanese/Chinese/Korean composition, Return must
+        // commit the marked text, not send the message.
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            switch commandSelector {
+            case #selector(NSResponder.insertNewline(_:)):
+                if textView.hasMarkedText() { return false }
+                // Shift+Return inserts a newline (chat convention).
+                if NSApp.currentEvent?.modifierFlags.contains(.shift) == true { return false }
+                parent.onSend()
+                return true
+            case #selector(NSResponder.cancelOperation(_:)):
+                return parent.onEscape()
+            default:
+                return false
+            }
+        }
+
         // Always update height off the current layout pass, never inside it.
         // The async hop is what breaks the AppKit/SwiftUI feedback loop.
         func scheduleMeasure() {
@@ -641,7 +699,7 @@ struct MacComposerTextView: NSViewRepresentable {
 }
 
 private final class ComposerNSTextView: NSTextView {
-    var onSend: (() -> Void)?
+    var onPasteImage: ((Data) -> Void)?
     var placeholderString: String = "" {
         didSet {
             if oldValue != placeholderString { needsDisplay = true }
@@ -652,17 +710,22 @@ private final class ComposerNSTextView: NSTextView {
         NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
     }
 
-    override func keyDown(with event: NSEvent) {
-        // Return key (keyCode 36); Enter on numeric keypad (76) is treated the same
-        if event.keyCode == 36 || event.keyCode == 76 {
-            if event.modifierFlags.contains(.shift) {
-                insertText("\n", replacementRange: selectedRange())
-            } else {
-                onSend?()
-            }
+    // ⌘V of a screenshot or copied image attaches it instead of doing nothing
+    // (this is a plain-text view — super would silently drop the image).
+    override func paste(_ sender: Any?) {
+        let pasteboard = NSPasteboard.general
+        // Only divert when there's no text representation to paste.
+        let hasText = pasteboard.string(forType: .string)?.isEmpty == false
+        if !hasText,
+           let onPasteImage,
+           let image = NSImage(pasteboard: pasteboard),
+           let tiff = image.tiffRepresentation,
+           let rep = NSBitmapImageRep(data: tiff),
+           let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) {
+            onPasteImage(jpeg)
             return
         }
-        super.keyDown(with: event)
+        super.paste(sender)
     }
 
     override func draw(_ dirtyRect: NSRect) {

@@ -35,6 +35,10 @@ final class AppState {
     var client: WebSocketClient?
     var error: String?
 
+    /// Why the last connect attempt failed, for the settings/onboarding UI.
+    /// Cleared on a successful handshake.
+    var lastConnectionError: String?
+
     /// Plays back streamed assistant-speech audio. One instance app-wide;
     /// turns are tagged so per-message replay can reconstruct a finished turn.
     let speechPlayer = SpeechPlayer()
@@ -94,6 +98,9 @@ final class AppState {
         sessions = []
         messages = []
         currentSessionId = nil
+        isStreaming = false
+        streamingMessageId = nil
+        failedSend = nil
     }
 
     func markCurrentSessionAsRead() {
@@ -199,10 +206,23 @@ final class AppState {
         return nil
     }
 
+    /// Create a session and open it through the normal open path — the single
+    /// entry point for ⌘N, the toolbar button, and the empty-state button, so
+    /// read-marking and speech-state sync aren't skipped by any of them.
+    func startNewConversation(for agent: Agent) async {
+        guard let sessionId = await createSession(for: agent) else { return }
+        #if os(iOS)
+        navigationPath.append(SessionSelection(agent: agent, sessionId: sessionId))
+        #else
+        await openSession(sessionId, for: agent)
+        #endif
+    }
+
     func openSession(_ sessionId: String, for agent: Agent) async {
         guard client != nil else { return }
         currentSessionId = sessionId
         messages = []
+        failedSend = nil
 
         do {
             let payload = try await client?.sendRequest(method: "sessions.get", params: [
@@ -482,15 +502,19 @@ final class AppState {
         memories = MemoryInfo.fromList(payload)
     }
 
-    func loadMemory(scope: String) async -> String {
-        guard let payload = try? await client?.sendRequest(method: "memory.get", params: [
+    func loadMemory(scope: String) async throws -> String {
+        guard let client else { throw AgentEditError.notConnected }
+        let payload = try await client.sendRequest(method: "memory.get", params: [
             "scope": .string(scope),
-        ]) else { return "" }
-        return payload["content"]?.stringValue ?? ""
+        ])
+        return payload?["content"]?.stringValue ?? ""
     }
 
+    // A nil client must throw here, not no-op: `try await client?.send...` returns
+    // nil on disconnect and the caller's UI reads that as a successful save/delete.
     func saveMemory(scope: String, content: String) async throws {
-        _ = try await client?.sendRequest(method: "memory.set", params: [
+        guard let client else { throw AgentEditError.notConnected }
+        _ = try await client.sendRequest(method: "memory.set", params: [
             "scope": .string(scope),
             "content": .string(content),
         ])
@@ -505,7 +529,8 @@ final class AppState {
     }
 
     func setJobEnabled(agent: String, jobId: String, enabled: Bool) async throws {
-        _ = try await client?.sendRequest(method: "jobs.update", params: [
+        guard let client else { throw AgentEditError.notConnected }
+        _ = try await client.sendRequest(method: "jobs.update", params: [
             "agent": .string(agent),
             "id": .string(jobId),
             "enabled": .bool(enabled),
@@ -513,14 +538,16 @@ final class AppState {
     }
 
     func deleteJob(agent: String, jobId: String) async throws {
-        _ = try await client?.sendRequest(method: "jobs.delete", params: [
+        guard let client else { throw AgentEditError.notConnected }
+        _ = try await client.sendRequest(method: "jobs.delete", params: [
             "agent": .string(agent),
             "id": .string(jobId),
         ])
     }
 
     func runJob(agent: String, jobId: String, skipNext: Bool = false) async throws {
-        _ = try await client?.sendRequest(method: "jobs.run", params: [
+        guard let client else { throw AgentEditError.notConnected }
+        _ = try await client.sendRequest(method: "jobs.run", params: [
             "agent": .string(agent),
             "id": .string(jobId),
             "skip_next": .bool(skipNext),
@@ -603,17 +630,25 @@ final class AppState {
 
     // MARK: - Send message
 
+    /// A chat.send that never reached the server. Drives the retry banner in ChatView.
+    struct FailedSend: Equatable {
+        let messageId: String
+        let text: String
+        let attachments: [DraftAttachment]
+    }
+
+    var failedSend: FailedSend?
+
     func sendMessage(_ text: String, attachments: [DraftAttachment] = []) async {
-        guard client != nil, currentAgent != nil, currentSessionId != nil else { return }
+        guard currentAgent != nil, currentSessionId != nil else { return }
+        failedSend = nil
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         var blocks: [ContentBlock] = []
         if !trimmed.isEmpty {
             blocks.append(.text(id: UUID().uuidString, trimmed))
         }
-        for attachment in attachments {
-            blocks.append(.image(id: UUID().uuidString, data: attachment.data, mimeType: "image/jpeg"))
-        }
+        blocks.append(contentsOf: attachments.map(Self.echoBlock))
 
         let userMessage = ChatMessage(role: .user, blocks: blocks)
         messages.append(userMessage)
@@ -624,7 +659,26 @@ final class AppState {
         let assistantMessage = ChatMessage(id: assistantId, role: .assistant, blocks: [])
         messages.append(assistantMessage)
 
-        await client?.sendMessage(trimmed, attachments: attachments)
+        do {
+            guard let client else { throw FrameError.notConnected }
+            try await client.sendMessage(trimmed, attachments: attachments)
+        } catch {
+            // The send never reached the server: drop the placeholder (or it renders
+            // as a typing indicator forever), keep the user's bubble, offer retry.
+            messages.removeAll { $0.id == assistantId }
+            isStreaming = false
+            streamingMessageId = nil
+            failedSend = FailedSend(messageId: userMessage.id, text: trimmed, attachments: attachments)
+        }
+    }
+
+    /// Re-send a failed chat.send: the failed bubble is dropped and the same
+    /// text/attachments go through `sendMessage` again (which re-appends it).
+    func retryFailedSend() async {
+        guard let failed = failedSend else { return }
+        failedSend = nil
+        messages.removeAll { $0.id == failed.messageId }
+        await sendMessage(failed.text, attachments: failed.attachments)
     }
 
     /// The most recent user message in the open session, if any.
@@ -632,14 +686,32 @@ final class AppState {
         messages.last(where: { $0.role == .user })
     }
 
-    /// Reconstruct DraftAttachments from a stored user message's image blocks.
+    /// The transcript echo for an outgoing attachment. PDFs/text files must NOT
+    /// be echoed as images — image decoding fails on their bytes and the sent
+    /// document silently vanishes from the transcript.
+    private static func echoBlock(for attachment: DraftAttachment) -> ContentBlock {
+        if attachment.isImage {
+            return .image(id: UUID().uuidString, data: attachment.data, mimeType: attachment.mime)
+        }
+        return .document(
+            id: UUID().uuidString,
+            data: attachment.data,
+            name: attachment.displayName,
+            mime: attachment.mime)
+    }
+
+    /// Reconstruct DraftAttachments from a stored user message's attachment blocks.
     /// Remote-only images (no local bytes) are dropped — the user can re-attach.
     func draftAttachments(from message: ChatMessage) -> [DraftAttachment] {
         message.blocks.compactMap { block in
-            if case .image(_, let data, let mimeType) = block {
+            switch block {
+            case .image(_, let data, let mimeType):
                 return DraftAttachment(data: data, mime: mimeType)
+            case .document(_, let data, let name, let mime):
+                return DraftAttachment(data: data, mime: mime, displayName: name)
+            default:
+                return nil
             }
-            return nil
         }
     }
 
@@ -680,9 +752,7 @@ final class AppState {
         if !effectiveText.isEmpty {
             blocks.append(.text(id: UUID().uuidString, effectiveText))
         }
-        for attachment in effectiveAttachments {
-            blocks.append(.image(id: UUID().uuidString, data: attachment.data, mimeType: "image/jpeg"))
-        }
+        blocks.append(contentsOf: effectiveAttachments.map(Self.echoBlock))
         messages.append(ChatMessage(role: .user, blocks: blocks))
 
         // Start streaming placeholder.
@@ -696,7 +766,13 @@ final class AppState {
         } catch {
             isStreaming = false
             streamingMessageId = nil
-            self.error = "Failed to resubmit: \(error)"
+            // The local rewind already happened but the server refused; drop the
+            // placeholder and resync so the transcript reflects server truth.
+            messages.removeAll { $0.id == assistantId }
+            self.error = "Failed to resubmit: \(error.localizedDescription)"
+            if let agent = currentAgent, let sessionId = currentSessionId {
+                await reloadCurrentSessionMessages(agent: agent, sessionId: sessionId)
+            }
         }
     }
 

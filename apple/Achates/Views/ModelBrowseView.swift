@@ -70,7 +70,7 @@ struct ModelBrowseView: View {
                                 Spacer()
                                 if selectedModel == nil {
                                     Image(systemName: "checkmark")
-                                        .foregroundStyle(.blue)
+                                        .foregroundStyle(.tint)
                                 }
                             }
                         }

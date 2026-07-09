@@ -58,7 +58,6 @@ public sealed class MobileSessionStore(string basePath)
             var session = await LoadFromPathAsync(file, ct);
             if (session is null) continue;
 
-            var lastUserMessage = session.Messages.OfType<UserMessage>().LastOrDefault();
             var cronTaskName = session.Messages.FirstOrDefault() is UserMessage { Hidden: true } first
                 ? Cron.CronSessionMarker.TryParseJobName(first.Text)
                 : null;
@@ -71,7 +70,7 @@ public sealed class MobileSessionStore(string basePath)
                 session.Created,
                 session.Updated,
                 session.Messages.Count,
-                lastUserMessage?.Text,
+                SessionPreview.Compute(session),
                 session.JobId,
                 cronTaskName,
                 session.Source,

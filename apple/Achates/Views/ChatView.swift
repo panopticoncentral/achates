@@ -18,33 +18,7 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Connection status banner
-            if appState.connectionStatus == .disconnected {
-                HStack(spacing: 6) {
-                    Image(systemName: "wifi.slash")
-                        .font(.caption)
-                    Text("No connection")
-                        .font(.caption.weight(.medium))
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .background(.red.opacity(0.85))
-                .accessibilityLabel("Disconnected from server")
-            } else if appState.connectionStatus == .reconnecting {
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(.white)
-                    Text("Reconnecting...")
-                        .font(.caption.weight(.medium))
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .background(.orange.opacity(0.85))
-                .accessibilityLabel("Reconnecting to server")
-            }
+            ConnectionStatusBanner()
 
             ScrollView {
                 // Eager VStack (not LazyVStack): real bubble heights keep the
@@ -134,6 +108,10 @@ struct ChatView: View {
                 }
             }
 
+            if appState.failedSend != nil {
+                failedSendBanner
+            }
+
             ComposerView(
                 speechService: speechService,
                 pendingEdit: $pendingEdit,
@@ -190,11 +168,11 @@ struct ChatView: View {
                     AgentAvatar(agent: liveAgent, size: 24)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(liveAgent.displayName)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.primary)
                         if let label = connectionLabel {
                             Text(label)
-                                .font(.system(size: 10))
+                                .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -257,6 +235,32 @@ struct ChatView: View {
                 .accessibilityLabel(on ? "Disable speech for this session" : "Enable speech for this session")
         }
         .disabled(appState.currentSessionId == nil)
+    }
+
+    /// Inline strip above the composer when a chat.send never reached the server.
+    private var failedSendBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            Text("Message failed to send.")
+                .font(.footnote)
+            Spacer()
+            Button("Retry") {
+                Task { await appState.retryFailedSend() }
+            }
+            .font(.footnote.weight(.semibold))
+            Button {
+                appState.failedSend = nil
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.red.opacity(0.12))
+        .accessibilityElement(children: .combine)
     }
 
     private var emptyState: some View {

@@ -118,9 +118,9 @@ struct JobDetailView: View {
     }
 
     private func row(_ label: String, value: String, monospaced: Bool = false) -> some View {
-        HStack {
-            Text(label).foregroundStyle(.secondary)
-            Spacer()
+        // LabeledContent gives the platform-standard label-primary / value-secondary
+        // emphasis (the hand-rolled version had it inverted) plus a11y pairing.
+        LabeledContent(label) {
             Text(value)
                 .multilineTextAlignment(.trailing)
                 .if(monospaced) { $0.font(.system(.caption, design: .monospaced)) }

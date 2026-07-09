@@ -282,7 +282,6 @@ public sealed class MobileTransport
     /// </summary>
     public Task BroadcastSessionUpdatedAsync(string agentName, MobileSession session, CancellationToken ct = default)
     {
-        var lastUserMessage = session.Messages.OfType<UserMessage>().LastOrDefault();
         return BroadcastEventAsync("session.updated", new
         {
             agent = agentName,
@@ -291,7 +290,7 @@ public sealed class MobileTransport
             {
                 id = session.Id,
                 title = session.Title,
-                preview = lastUserMessage?.Text,
+                preview = SessionPreview.Compute(session),
                 created = session.Created.ToUnixTimeMilliseconds(),
                 updated = session.Updated.ToUnixTimeMilliseconds(),
                 job_id = session.JobId,
@@ -1147,10 +1146,87 @@ public sealed class MobileTransport
             return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
 
         var p = request.Params;
+
+        var agentFile = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".achates", "agents", agentName, "AGENT.md");
+
+        // The update rewrites the whole AGENT.md, so capabilities the client doesn't
+        // send (display name, provider, memory budget) must be carried forward from
+        // the existing file or they silently vanish on every save from the app.
+        var existing = File.Exists(agentFile)
+            ? AgentLoader.Parse(await File.ReadAllTextAsync(agentFile, ct))
+            : null;
+
+        var config = BuildUpdatedAgentConfig(p, existing);
+
+        // Preserve the existing display name (the H1 title) — agent.update carries no
+        // name param, so reconstructing one from the id would clobber e.g. "Dr. Maya"
+        // into "Dr-maya". Renames go through agent.rename, not here.
+        var displayName = config.Title ?? (char.ToUpper(agentName[0]) + agentName[1..]);
+        var markdown = AgentLoader.Serialize(displayName, config);
+
+        var tempPath = agentFile + ".tmp";
+        await File.WriteAllTextAsync(tempPath, markdown, ct);
+        File.Move(tempPath, agentFile, overwrite: true);
+
+        // Handle avatar upload or removal
+        var agentDir = Path.GetDirectoryName(agentFile)!;
+        if (p.TryGetProperty("avatar", out var avatarProp) && avatarProp.ValueKind == JsonValueKind.String)
+        {
+            var avatarBytes = Convert.FromBase64String(avatarProp.GetString()!);
+            await File.WriteAllBytesAsync(Path.Combine(agentDir, "avatar.jpg"), avatarBytes, ct);
+            var pngPath = Path.Combine(agentDir, "avatar.png");
+            if (File.Exists(pngPath)) File.Delete(pngPath);
+        }
+        else if (p.TryGetProperty("avatar_remove", out var removeProp) && removeProp.ValueKind == JsonValueKind.True)
+        {
+            var jpgPath = Path.Combine(agentDir, "avatar.jpg");
+            var pngPath = Path.Combine(agentDir, "avatar.png");
+            if (File.Exists(jpgPath)) File.Delete(jpgPath);
+            if (File.Exists(pngPath)) File.Delete(pngPath);
+        }
+
+        string? warning = null;
+        if (AgentReloadFunc is not null)
+        {
+            try
+            {
+                await AgentReloadFunc(agentName, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Agent '{Name}' saved but reload failed", agentName);
+                warning = $"Saved, but reload failed: {ex.Message}";
+            }
+        }
+
+        // Notify all clients that the agent list has changed
+        stateCache.Invalidate(agentName);
+        _ = BroadcastEventAsync("agents.changed", new
+        {
+            agent = agentName,
+            reason = "profile_updated",
+        }, CancellationToken.None);
+
+        var payload = JsonSerializer.SerializeToElement(new { ok = true, warning }, JsonOptions);
+        return ResponseFrame.Success(request.Id, payload);
+    }
+
+    /// <summary>
+    /// Builds the new AgentConfig for agent.update from the RPC params, carrying
+    /// forward fields the mobile client never sends (title, provider, memory budget)
+    /// so a full-file rewrite doesn't strip them. Internal for tests.
+    /// </summary>
+    internal static AgentConfig BuildUpdatedAgentConfig(JsonElement p, AgentConfig? existing)
+    {
         var config = new AgentConfig
         {
             Description = GetStringParam(p, "description"),
             Prompt = GetStringParam(p, "prompt"),
+            Title = existing?.Title,
+            Provider = existing?.Provider,
+            MemoryBudgetTokens = existing?.MemoryBudgetTokens,
         };
 
         if (p.TryGetProperty("tools", out var toolsEl) && toolsEl.ValueKind == JsonValueKind.Array)
@@ -1232,64 +1308,7 @@ public sealed class MobileTransport
             // Any other value type leaves config.SharedMemory at its default (null).
         }
 
-        var agentFile = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".achates", "agents", agentName, "AGENT.md");
-
-        // Preserve the existing display name (the H1 title) — agent.update carries no
-        // name param, so reconstructing one from the id would clobber e.g. "Dr. Maya"
-        // into "Dr-maya". Renames go through agent.rename, not here.
-        var existingTitle = File.Exists(agentFile)
-            ? AgentLoader.Parse(await File.ReadAllTextAsync(agentFile, ct))?.Title
-            : null;
-        var displayName = existingTitle ?? (char.ToUpper(agentName[0]) + agentName[1..]);
-        var markdown = AgentLoader.Serialize(displayName, config);
-
-        var tempPath = agentFile + ".tmp";
-        await File.WriteAllTextAsync(tempPath, markdown, ct);
-        File.Move(tempPath, agentFile, overwrite: true);
-
-        // Handle avatar upload or removal
-        var agentDir = Path.GetDirectoryName(agentFile)!;
-        if (p.TryGetProperty("avatar", out var avatarProp) && avatarProp.ValueKind == JsonValueKind.String)
-        {
-            var avatarBytes = Convert.FromBase64String(avatarProp.GetString()!);
-            await File.WriteAllBytesAsync(Path.Combine(agentDir, "avatar.jpg"), avatarBytes, ct);
-            var pngPath = Path.Combine(agentDir, "avatar.png");
-            if (File.Exists(pngPath)) File.Delete(pngPath);
-        }
-        else if (p.TryGetProperty("avatar_remove", out var removeProp) && removeProp.ValueKind == JsonValueKind.True)
-        {
-            var jpgPath = Path.Combine(agentDir, "avatar.jpg");
-            var pngPath = Path.Combine(agentDir, "avatar.png");
-            if (File.Exists(jpgPath)) File.Delete(jpgPath);
-            if (File.Exists(pngPath)) File.Delete(pngPath);
-        }
-
-        string? warning = null;
-        if (AgentReloadFunc is not null)
-        {
-            try
-            {
-                await AgentReloadFunc(agentName, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Agent '{Name}' saved but reload failed", agentName);
-                warning = $"Saved, but reload failed: {ex.Message}";
-            }
-        }
-
-        // Notify all clients that the agent list has changed
-        stateCache.Invalidate(agentName);
-        _ = BroadcastEventAsync("agents.changed", new
-        {
-            agent = agentName,
-            reason = "profile_updated",
-        }, CancellationToken.None);
-
-        var payload = JsonSerializer.SerializeToElement(new { ok = true, warning }, JsonOptions);
-        return ResponseFrame.Success(request.Id, payload);
+        return config;
     }
 
     private async Task<ResponseFrame> HandleAgentRenameAsync(RequestFrame request, CancellationToken ct)

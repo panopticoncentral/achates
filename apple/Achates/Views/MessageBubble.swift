@@ -21,7 +21,6 @@ struct MessageBubble: View {
     var isLastAssistantMessage: Bool = false
     var isLastUserMessage: Bool = false
     var isStreaming: Bool = false
-    var onRetry: (() -> Void)? = nil
     var onResubmit: (() -> Void)? = nil
     var onBeginEdit: (() -> Void)? = nil
     @AppStorage("show_message_costs") private var showMessageCosts = false
@@ -77,7 +76,10 @@ struct MessageBubble: View {
                     .accessibilityLabel("Speech unavailable: \(err)")
                 }
 
-                if visibleBlocks.isEmpty && message.role == .assistant && (message.blocks.isEmpty || isStreaming) {
+                // Only the actively-streaming message shows the indicator — a stale
+                // empty assistant message (failed/aborted turn reloaded from disk)
+                // must not animate "typing" forever.
+                if visibleBlocks.isEmpty && message.role == .assistant && isStreaming {
                     TypingIndicator()
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
@@ -85,6 +87,8 @@ struct MessageBubble: View {
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
                                 .fill(Color(.systemGray5))
                         )
+                        .accessibilityElement()
+                        .accessibilityLabel(agent.map { "\($0.displayName) is typing" } ?? "Assistant is typing")
                 }
             }
 
@@ -92,6 +96,10 @@ struct MessageBubble: View {
                 Spacer(minLength: 48)
             }
         }
+        // Cap line length on wide windows — unbounded bubbles read badly past
+        // ~80 characters and nothing else constrains them on a big Mac display.
+        .frame(maxWidth: 700, alignment: message.role == .user ? .trailing : .leading)
+        .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
         .fullScreenImageViewer(imageData: $fullscreenImageData)
         .fullScreenImageViewer(imageURL: $fullscreenImageURL)
     }
@@ -118,6 +126,9 @@ struct MessageBubble: View {
 
         case .image(_, let data, _):
             imageBubble(data)
+
+        case .document(_, _, let name, let mime):
+            documentChip(name: name, mime: mime)
 
         case .agentTurn(let id, let agentName, let text, let collapsed):
             AgentTurnView(agentTurnId: id, agentName: agentName, text: text, collapsed: collapsed)
@@ -152,6 +163,32 @@ struct MessageBubble: View {
                 .accessibilityAddTraits(.isImage)
         }
         #endif
+    }
+
+    /// Chip for a non-image attachment (PDF, text file) on a user message —
+    /// mirrors the composer's document chip so the sent file stays visible.
+    private func documentChip(name: String?, mime: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: mime == "application/pdf" ? "doc.richtext" : "doc.text")
+                .font(.title3)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name ?? "Document")
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                Text(mime == "application/pdf" ? "PDF" : "Text")
+                    .font(.caption2)
+                    .opacity(0.7)
+            }
+        }
+        .foregroundStyle(message.role == .user ? .white : .primary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(message.role == .user ? Color.accentColor : Color(.systemGray5))
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Attached document: \(name ?? "Document")")
     }
 
     @ViewBuilder
@@ -251,16 +288,18 @@ struct MessageBubble: View {
                     } label: {
                         Label("Retry", systemImage: "arrow.counterclockwise")
                     }
-                } else if let onRetry {
-                    Button {
-                        onRetry()
-                    } label: {
-                        Label("Retry", systemImage: "arrow.counterclockwise")
-                    }
                 }
             }
         }
-        .accessibilityLabel(message.role == .user ? "You said: \(text)" : text)
+        .accessibilityLabel(accessibilityText(text))
+    }
+
+    /// VoiceOver reading for a text bubble — attributes the speaker so
+    /// interleaved user/assistant turns aren't ambiguous in the rotor.
+    private func accessibilityText(_ text: String) -> String {
+        if message.role == .user { return "You said: \(text)" }
+        if let name = agent?.displayName { return "\(name) said: \(text)" }
+        return text
     }
 
     private func copyToClipboard(_ text: String) {

@@ -21,8 +21,11 @@ struct JobsView: View {
                 HStack { Spacer(); ProgressView(); Spacer() }
                     .listRowSeparator(.hidden)
             } else if appState.jobs.isEmpty {
-                Text("No scheduled jobs.")
-                    .foregroundStyle(.secondary)
+                ContentUnavailableView(
+                    "No Scheduled Jobs",
+                    systemImage: "calendar.badge.clock",
+                    description: Text("Agents with the cron tool create jobs when you ask them to schedule something.")
+                )
             } else {
                 ForEach(sortedJobs) { job in
                     NavigationLink {
@@ -38,6 +41,20 @@ struct JobsView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .refreshable { await appState.loadJobs() }
+        #if os(macOS)
+        // Pull-to-refresh doesn't exist on the Mac; give it a button + ⌘R.
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task { await appState.loadJobs() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .keyboardShortcut("r", modifiers: .command)
+                .accessibilityLabel("Refresh")
+            }
+        }
+        #endif
         .task {
             await appState.loadJobs()
             hasLoaded = true

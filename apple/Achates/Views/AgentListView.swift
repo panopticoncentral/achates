@@ -2,6 +2,9 @@ import SwiftUI
 
 struct AgentListView: View {
     @Environment(AppState.self) private var appState
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
     @State private var searchText = ""
     @State private var agentToEdit: Agent?
 
@@ -62,17 +65,29 @@ struct AgentListView: View {
         .navigationBarTitleDisplayMode(.large)
         #endif
         .toolbar {
-            ToolbarItem(placement: .automatic) {
-                #if os(macOS)
+            #if os(macOS)
+            ToolbarItemGroup(placement: .automatic) {
+                Button {
+                    openWindow(id: "system")
+                } label: {
+                    Image(systemName: "wrench.and.screwdriver")
+                }
+                .accessibilityLabel("System")
+                .help("Memory, scheduled jobs, and default models")
+
                 SettingsLink {
                     Image(systemName: "gear")
                 }
-                #else
+                .help("Settings")
+            }
+            #else
+            ToolbarItem(placement: .automatic) {
                 NavigationLink(destination: SettingsView()) {
                     Image(systemName: "gear")
                 }
-                #endif
+                .accessibilityLabel("Settings")
             }
+            #endif
         }
         .onAppear {
             if appState.connectionStatus == .disconnected && appState.serverURL != nil {
@@ -113,6 +128,11 @@ struct AgentListView: View {
                 }
         }
         .searchable(text: $searchText, prompt: "Search")
+        // The lists stay populated (and stale) through drops/reconnects; without
+        // this, only the open chat shows any sign the connection is down.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            ConnectionStatusBanner()
+        }
     }
     #endif
 }
@@ -161,6 +181,14 @@ struct AgentAvatar: View {
 
 private struct AgentRow: View {
     let agent: Agent
+    @ScaledMetric(relativeTo: .subheadline) private var dotSize: CGFloat = 10
+
+    /// The most useful secondary line in a list titled "Chats": the last message
+    /// if we have one, otherwise the static agent description.
+    private var subtitle: String {
+        if let last = agent.lastMessage, !last.isEmpty { return last }
+        return agent.description
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -169,27 +197,27 @@ private struct AgentRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(agent.displayName)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.listRowTitle)
                         .lineLimit(1)
 
                     if agent.unreadCount > 0 {
                         Circle()
-                            .fill(.blue)
-                            .frame(width: 10, height: 10)
+                            .fill(.tint)
+                            .frame(width: dotSize, height: dotSize)
                     }
 
                     Spacer(minLength: 4)
 
                     if let date = agent.lastActivity {
-                        Text(formatTimestamp(date))
-                            .font(.system(size: 13))
-                            .foregroundStyle(agent.unreadCount > 0 ? .blue : .secondary)
+                        Text(date.chatListLabel())
+                            .font(.listRowCaption)
+                            .foregroundStyle(agent.unreadCount > 0 ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                     }
                 }
 
-                if !agent.description.isEmpty {
-                    Text(agent.description)
-                        .font(.system(size: 13))
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.listRowSubtitle)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -197,28 +225,8 @@ private struct AgentRow: View {
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(agent.description.isEmpty ? agent.displayName : "\(agent.displayName). \(agent.description)")
+        .accessibilityLabel(subtitle.isEmpty ? agent.displayName : "\(agent.displayName). \(subtitle)")
         .accessibilityValue(agent.unreadCount > 0 ? "\(agent.unreadCount) unread" : "")
-    }
-
-    private func formatTimestamp(_ date: Date) -> String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(date) {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "h:mm a"
-            return formatter.string(from: date)
-        } else if calendar.isDateInYesterday(date) {
-            return "Yesterday"
-        } else if let weekAgo = calendar.date(byAdding: .day, value: -6, to: calendar.startOfDay(for: Date())),
-                  date >= weekAgo {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "EEE"
-            return formatter.string(from: date)
-        } else {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .short
-            return formatter.string(from: date)
-        }
     }
 }
 

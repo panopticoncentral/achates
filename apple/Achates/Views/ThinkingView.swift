@@ -23,12 +23,19 @@ struct ThinkingView: View {
                         .foregroundStyle(.tertiary)
                     if collapsed {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 8, weight: .semibold))
+                            .font(.caption2.weight(.semibold))
                             .foregroundStyle(.quaternary)
                     }
                 }
+                .contentShape(.rect)
+                #if os(iOS)
+                .frame(minHeight: collapsed ? 44 : nil, alignment: .leading)
+                #endif
             }
             .buttonStyle(.plain)
+            .allowsHitTesting(collapsed)
+            .accessibilityAddTraits(collapsed ? .isButton : [])
+            .accessibilityValue(collapsed ? (isExpanded ? "expanded" : "collapsed") : "")
 
             if isExpanded && collapsed {
                 Text(text)

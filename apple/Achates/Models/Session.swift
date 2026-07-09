@@ -71,11 +71,26 @@ func parseMessage(_ value: JSONValue, serverURL: URL?) -> ChatMessage? {
         if let content = dict["content"]?.arrayValue {
             for item in content {
                 guard let itemDict = item.objectValue,
-                      let itemType = itemDict["type"]?.stringValue,
-                      itemType == "image",
-                      let block = parseImageBlock(itemDict, serverURL: serverURL)
-                else { continue }
-                blocks.append(block)
+                      let itemType = itemDict["type"]?.stringValue else { continue }
+                switch itemType {
+                case "image":
+                    if let block = parseImageBlock(itemDict, serverURL: serverURL) {
+                        blocks.append(block)
+                    }
+                case "file":
+                    // PDF attachments persist as `file` content parts; show them
+                    // as document chips instead of dropping them on reload.
+                    if let b64 = itemDict["data"]?.stringValue,
+                       let data = Data(base64Encoded: b64) {
+                        blocks.append(.document(
+                            id: UUID().uuidString,
+                            data: data,
+                            name: itemDict["file_name"]?.stringValue,
+                            mime: itemDict["mime_type"]?.stringValue ?? "application/pdf"))
+                    }
+                default:
+                    break
+                }
             }
         }
         if blocks.isEmpty {

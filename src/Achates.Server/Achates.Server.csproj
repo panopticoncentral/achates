@@ -21,6 +21,10 @@
     <PackageReference Include="SkiaSharp" Version="3.119.2" />
     <PackageReference Include="YamlDotNet" Version="16.*" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.4" />
+    <!-- Microsoft.Data.Sqlite 10.0.4 pulls SQLitePCLRaw 2.1.11, whose bundled
+         SQLite predates 3.50.2 (GHSA-2m69-gcr7-jv3q). Pin the 3.0.x bundle,
+         which ships a patched SQLite, ahead of the transitive reference. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
     <PackageReference Include="Microsoft.Identity.Client" Version="4.83.0" />
     <PackageReference Include="SmartReader" Version="0.11.0" />
   </ItemGroup>

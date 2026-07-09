@@ -8,6 +8,7 @@ struct MemoryEditView: View {
     @State private var content = ""
     @State private var original = ""
     @State private var isLoading = true
+    @State private var loadFailed = false
     @State private var isSaving = false
     @State private var showConflictBanner = false
     @State private var errorMessage: String?
@@ -20,6 +21,19 @@ struct MemoryEditView: View {
             if isLoading {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if loadFailed {
+                // A failed load must not fall through to an empty editor: Save would
+                // full-replace the real server-side file with whatever is typed here.
+                ContentUnavailableView {
+                    Label("Couldn't Load Memory", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(errorMessage ?? "The memory file couldn't be loaded.")
+                } actions: {
+                    Button("Retry") {
+                        Task { await load() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             } else {
                 VStack(spacing: 0) {
                     if showConflictBanner {
@@ -49,7 +63,7 @@ struct MemoryEditView: View {
                         Text("Save")
                     }
                 }
-                .disabled(!isDirty || isSaving)
+                .disabled(!isDirty || isSaving || loadFailed)
             }
         }
         .alert("Error", isPresented: $showError) {
@@ -97,9 +111,15 @@ struct MemoryEditView: View {
 
     private func load() async {
         isLoading = true
-        let loaded = await appState.loadMemory(scope: memory.scope)
-        content = loaded
-        original = loaded
+        do {
+            let loaded = try await appState.loadMemory(scope: memory.scope)
+            content = loaded
+            original = loaded
+            loadFailed = false
+        } catch {
+            loadFailed = true
+            errorMessage = error.localizedDescription
+        }
         isLoading = false
     }
 

@@ -29,13 +29,19 @@ struct ToolCallView: View {
                         .foregroundStyle(.tertiary)
                     if canExpand {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 8, weight: .semibold))
+                            .font(.caption2.weight(.semibold))
                             .foregroundStyle(.quaternary)
                     }
                 }
+                .contentShape(.rect)
+                #if os(iOS)
+                .frame(minHeight: canExpand ? 44 : nil, alignment: .leading)
+                #endif
             }
             .buttonStyle(.plain)
             .allowsHitTesting(canExpand)
+            .accessibilityAddTraits(canExpand ? .isButton : [])
+            .accessibilityValue(canExpand ? (isExpanded ? "expanded" : "collapsed") : "")
 
             if isExpanded, canExpand, let result {
                 Text(result)

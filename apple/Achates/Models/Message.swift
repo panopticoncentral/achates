@@ -16,6 +16,9 @@ enum ContentBlock: Identifiable, Sendable, Equatable {
     case thinking(id: String, text: String, collapsed: Bool)
     case toolCall(id: String, name: String, status: ToolCallStatus, result: String?)
     case image(id: String, data: Data, mimeType: String)
+    /// A non-image attachment (PDF, text file) on a user message. Carries the
+    /// raw bytes so Edit & Resubmit can reconstruct the attachment.
+    case document(id: String, data: Data, name: String?, mime: String)
     case agentTurn(id: String, agentName: String, text: String, collapsed: Bool)
     case remoteImage(id: String, url: URL)
 
@@ -25,6 +28,7 @@ enum ContentBlock: Identifiable, Sendable, Equatable {
         case .thinking(let id, _, _): return "thinking-\(id)"
         case .toolCall(let id, _, _, _): return "tool-\(id)"
         case .image(let id, _, _): return "image-\(id)"
+        case .document(let id, _, _, _): return "document-\(id)"
         case .agentTurn(let id, _, _, _): return "agent-\(id)"
         case .remoteImage(let id, _): return "image-\(id)"
         }

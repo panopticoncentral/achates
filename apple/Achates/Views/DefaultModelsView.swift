@@ -48,6 +48,9 @@ struct DefaultModelsView: View {
                         Text("Defaults for agents that don't set their own model. Stored in ~/.achates/config.yaml.")
                     }
                 }
+                #if os(macOS)
+                .formStyle(.grouped)
+                #endif
             }
         }
         .navigationTitle("Default Models")
