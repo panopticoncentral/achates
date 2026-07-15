@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Speech
 
 enum SpeechError: Error, LocalizedError {
@@ -15,6 +15,10 @@ enum SpeechError: Error, LocalizedError {
     }
 }
 
+/// On-device dictation built on `SpeechAnalyzer` / `SpeechTranscriber` (iOS 26 /
+/// macOS 26). Replaces the legacy `SFSpeechRecognizer` path, which was ~4x less
+/// accurate on the same audio. The public surface is unchanged, so callers
+/// (`ConversationController`, `ComposerView`, `ChatView`) are untouched.
 @MainActor
 @Observable
 final class SpeechService {
@@ -26,14 +30,25 @@ final class SpeechService {
     var onTranscriptUpdate: ((String) -> Void)?
 
     /// In continuous (hands-free) mode the controller decides when a turn ends
-    /// (via its silence timer), so the recognizer's own end-of-utterance must
-    /// not tear the engine down on its own.
+    /// (via its silence timer); in push-to-talk the composer's mic button does.
+    /// Either way the analyzer runs until `stopRecording()` — it never tears
+    /// itself down mid-stream — so this is retained only for callers' intent.
     private var continuous = false
 
     private var audioEngine: AVAudioEngine?
-    private var recognitionTask: SFSpeechRecognitionTask?
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var analyzer: SpeechAnalyzer?
+    private var transcriber: SpeechTranscriber?
+    private var inputBuilder: AsyncStream<AnalyzerInput>.Continuation?
+    private var recognizerTask: Task<Void, Never>?
 
+    /// The stable prefix of the transcript. `SpeechTranscriber` delivers each
+    /// phrase as a series of volatile hypotheses that firm up into one finalized
+    /// result; we keep the finalized text here and append the live volatile tail.
+    private var finalizedText = ""
+
+    /// Requests Speech-framework authorization. Still required by the on-device
+    /// analyzer — the framework traps if `NSSpeechRecognitionUsageDescription`
+    /// is absent when any Speech API is used.
     func requestAuthorization() async -> Bool {
         await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { status in
@@ -44,15 +59,39 @@ final class SpeechService {
 
     func startRecording(continuous: Bool = false) async throws {
         self.continuous = continuous
+
         let authorized = await requestAuthorization()
         guard authorized else { throw SpeechError.notAuthorized }
 
-        guard let recognizer = SFSpeechRecognizer(), recognizer.isAvailable else {
+        // Pick a transcriber locale equivalent to the user's, if the models
+        // support it at all on this device.
+        guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) else {
             throw SpeechError.recognizerUnavailable
         }
 
-        if recognizer.supportsOnDeviceRecognition {
-            recognizer.supportsOnDeviceRecognition = true
+        // Configure for live audio: volatile results give the incremental
+        // partial updates the composer display and the silence timer depend on.
+        let transcriber = SpeechTranscriber(
+            locale: locale,
+            transcriptionOptions: [],
+            reportingOptions: [.volatileResults],
+            attributeOptions: []
+        )
+
+        // Ensure the on-device model for this locale is installed. Returns nil
+        // (instant no-op) when it's already present — the common case, since the
+        // system dictation model ships preinstalled. A genuine failure here
+        // surfaces as recognizerUnavailable.
+        do {
+            if let installation = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+                try await installation.downloadAndInstall()
+            }
+        } catch {
+            throw SpeechError.recognizerUnavailable
+        }
+
+        guard let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
+            throw SpeechError.recognizerUnavailable
         }
 
         #if os(iOS)
@@ -62,46 +101,55 @@ final class SpeechService {
         #endif
 
         let engine = AVAudioEngine()
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-        }
-
         let inputNode = engine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
-            request.append(buffer)
+        // The mic's hardware format is rarely what the analyzer wants, so
+        // convert every captured buffer on the audio thread before feeding it in.
+        guard let converter = AVAudioConverter(from: recordingFormat, to: analyzerFormat) else {
+            throw SpeechError.audioEngineError("Unable to convert microphone audio to the transcriber's format")
+        }
+
+        let (inputSequence, inputBuilder) = AsyncStream.makeStream(of: AnalyzerInput.self)
+        let analyzer = SpeechAnalyzer(modules: [transcriber])
+
+        finalizedText = ""
+
+        // Consume results: accumulate finalized phrases, append the current
+        // volatile hypothesis, publish the running transcript. A thrown error
+        // (e.g. the analyzer finishing abnormally) stops cleanly.
+        let recognizerTask = Task { [weak self] in
+            do {
+                for try await result in transcriber.results {
+                    guard let self else { return }
+                    let piece = String(result.text.characters)
+                    if result.isFinal {
+                        self.finalizedText += piece
+                        self.transcript = self.finalizedText
+                    } else {
+                        self.transcript = self.finalizedText + piece
+                    }
+                    self.onTranscriptUpdate?(self.transcript)
+                }
+            } catch {
+                self?.stopRecordingInternal()
+            }
+        }
+
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { buffer, _ in
+            guard let converted = SpeechService.convert(buffer, to: analyzerFormat, using: converter) else { return }
+            inputBuilder.yield(AnalyzerInput(buffer: converted))
         }
 
         engine.prepare()
         try engine.start()
-
-        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if let result {
-                    self.transcript = result.bestTranscription.formattedString
-                    self.onTranscriptUpdate?(self.transcript)
-                }
-                if error != nil || (result?.isFinal ?? false) {
-                    // In continuous mode the controller drives normal stop via its
-                    // silence timer, so a benign end-of-utterance (`isFinal`) must
-                    // not tear the engine down. A real error always does, even when
-                    // it arrives alongside a final partial result — otherwise the
-                    // engine is left running dead with `isRecording` stuck true.
-                    if self.continuous {
-                        if error != nil { self.stopRecordingInternal() }
-                    } else {
-                        self.stopRecordingInternal()
-                    }
-                }
-            }
-        }
+        try await analyzer.start(inputSequence: inputSequence)
 
         audioEngine = engine
-        recognitionRequest = request
+        self.transcriber = transcriber
+        self.analyzer = analyzer
+        self.inputBuilder = inputBuilder
+        self.recognizerTask = recognizerTask
         isRecording = true
         transcript = ""
     }
@@ -115,14 +163,55 @@ final class SpeechService {
     private func stopRecordingInternal() {
         audioEngine?.stop()
         audioEngine?.inputNode.removeTap(onBus: 0)
-        recognitionRequest?.endAudio()
-        recognitionTask?.cancel()
+        inputBuilder?.finish()
+        recognizerTask?.cancel()
+
+        // Finish the analysis session off the main actor; the local reference
+        // keeps it alive past the property teardown below.
+        let analyzer = self.analyzer
+        Task { await analyzer?.cancelAndFinishNow() }
+
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
 
         audioEngine = nil
-        recognitionRequest = nil
-        recognitionTask = nil
+        transcriber = nil
+        self.analyzer = nil
+        inputBuilder = nil
+        recognizerTask = nil
         isRecording = false
         continuous = false
         onTranscriptUpdate = nil
+    }
+
+    /// Converts one captured buffer to the analyzer's format. Runs on the audio
+    /// thread, so it's `nonisolated` and touches only its arguments.
+    private nonisolated static func convert(
+        _ buffer: AVAudioPCMBuffer,
+        to format: AVAudioFormat,
+        using converter: AVAudioConverter
+    ) -> AVAudioPCMBuffer? {
+        let ratio = format.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded(.up)) + 16
+        guard capacity > 0, let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
+            return nil
+        }
+
+        var fed = false
+        let status = converter.convert(to: output, error: nil) { _, inputStatus in
+            if fed {
+                inputStatus.pointee = .noDataNow
+                return nil
+            }
+            fed = true
+            inputStatus.pointee = .haveData
+            return buffer
+        }
+
+        if status == .error || output.frameLength == 0 {
+            return nil
+        }
+        return output
     }
 }
