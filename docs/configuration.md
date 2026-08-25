@@ -150,11 +150,12 @@ Failure behavior: if the endpoint is unreachable mid-turn, the first sentence's 
 
 ### `memory`
 
-Global defaults for the tiered memory system. Per-agent `**Memory Budget:**` in AGENT.md overrides `default_budget_tokens` for that agent.
+Global defaults for the tiered memory system. Per-agent `**Memory Budget:**` in AGENT.md overrides `default_budget_tokens` for that agent; per-agent `**Working Budget:**` overrides `default_working_budget_tokens`.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `default_budget_tokens` | int | `8000` | Soft token budget for every agent's core memory file (`memory.md`). When an agent-scope core write (`save` or `append`) would push the core past this limit, the tool appends a non-blocking consolidation nudge — the write is never rejected. Per-agent `**Memory Budget:**` takes precedence when set. |
+| `default_budget_tokens` | int | `2000` | Soft token budget for every agent's core memory file (`memory.md`), which is injected into every session's context. When an agent-scope core write (`save` or `append`) would push the core past this limit, the tool appends a non-blocking consolidation nudge — the write is never rejected. Per-agent `**Memory Budget:**` takes precedence when set. |
+| `default_working_budget_tokens` | int | `500` | Soft token budget for every agent's working memory file (`working.md`) — the rolling list of live threads injected on every turn. Exceeding it on a write appends a non-blocking pruning nudge; the write is never rejected. Per-agent `**Working Budget:**` takes precedence when set. |
 
 ### `cron`
 
@@ -196,7 +197,8 @@ Each capability is a `**Key:** value` line. List values (tools, allowed chats) u
 | `Shared Memory` | bool | `true` | When `false`, the agent only sees its own private memory file — roleplay/in-character mode. |
 | `Voice` | string | _(none)_ | TTS voice id for this agent. Accepts a single Kokoro voice (`af_nicole`) or a blend (`af_nicole(0.7)+af_bella(0.3)`). When omitted, the agent is voiceless unless `tools.speech.default_voice` is set globally. |
 | `Speech Rate` | number | _(Kokoro default = 1.0)_ | Per-agent TTS rate, Kokoro's `speed` parameter. Accepts `[0.25, 4.0]` and is clamped silently if out of range. Practical range: `0.85`–`1.25`. When omitted, the field is dropped from the synthesis request body entirely so default-rate calls stay byte-identical to pre-rate behavior. |
-| `Memory Budget` | int | _(`memory.default_budget_tokens`)_ | Soft token budget for this agent's core memory file. Exceeding it on a `save`/`append` appends a non-blocking consolidation nudge — the write is never rejected. Falls back to `memory.default_budget_tokens` (global config), then to the hardcoded default of 8 000 tokens. |
+| `Memory Budget` | int | _(`memory.default_budget_tokens`)_ | Soft token budget for this agent's core memory file. Exceeding it on a `save`/`append` appends a non-blocking consolidation nudge — the write is never rejected. Falls back to `memory.default_budget_tokens` (global config), then to the hardcoded default of 2 000 tokens. |
+| `Working Budget` | int | _(`memory.default_working_budget_tokens`)_ | Soft token budget for this agent's working memory file. Falls back to `memory.default_working_budget_tokens`, then to the hardcoded default of 500 tokens. |
 
 ## Full example
 
@@ -231,7 +233,8 @@ tools:
     client_secret: <withings-client-secret>
 
 memory:
-  default_budget_tokens: 8000
+  default_budget_tokens: 2000
+  default_working_budget_tokens: 500
 ```
 
 ### `~/.achates/agents/paul/AGENT.md`
@@ -265,7 +268,9 @@ Personal assistant.
 
 **Reasoning Effort:** medium
 
-**Memory Budget:** 16000
+**Memory Budget:** 2000
+
+**Working Budget:** 500
 
 ## Prompt
 
@@ -291,6 +296,7 @@ You are Paul's personal assistant...
 | `~/.achates/agents/{name}/sessions/{sessionId}.json` | Persisted conversation history. |
 | `~/.achates/memory.md` | Shared memory (universal user facts, all agents). |
 | `~/.achates/agents/{name}/memory.md` | Agent memory — core file (always loaded into context). |
+| `~/.achates/agents/{name}/working.md` | Agent memory — working tier (live threads, injected on every turn). |
 | `~/.achates/agents/{name}/memory/` | Agent memory — archive (topical `.md` files, retrieved on demand). |
 | `~/.achates/agents/{name}/costs.jsonl` | Cost ledger (append-only, always recorded). |
 | `~/.achates/agents/{name}/cron.json` | Scheduled task definitions and state. |
@@ -306,7 +312,7 @@ These features are always on and not configurable:
 
 - **Session persistence** — Conversations are saved to disk after each response and restored on restart. Sessions are per-agent and created explicitly (one session = one conversation thread).
 - **Session compaction** — When a conversation approaches 80% of the model's context window, older messages are summarized via the LLM and replaced with a compact summary. Falls back to truncation if summarization fails.
-- **Agent memory** — Each agent has a persistent memory file that survives session boundaries. The agent reads it at conversation start and saves important facts.
+- **Agent memory** — Each agent has a persistent memory that survives session boundaries, in four tiers: shared memory is fetched on demand; core memory is injected automatically at the head of every session; working memory (the rolling list of live threads) is injected automatically on every turn; the archive is retrieved on demand via `list`/`search`/`file`.
 - **Cost tracking** — Every completion is logged to the agent's cost ledger, regardless of whether the `cost` tool is enabled.
 - **Auto-titling** — After the first response in a new session, the server generates a short title via `tools.title.model` (or the agent's own model) and broadcasts it as a `session.updated` event.
 - **Cron session retention** — Sessions saved by cron job runs are pruned by `CronSessionReaper` according to the `cron` config (default: keep 1 per job, max 30 days).

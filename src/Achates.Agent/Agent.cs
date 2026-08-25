@@ -73,6 +73,9 @@ public sealed class AgentRuntime
     public IReadOnlyList<AgentMessage> Messages => _messages;
     public Model? Model => _model;
     public string? SystemPrompt => _systemPrompt;
+
+    /// <summary>The context transform applied to outgoing payloads, if any.</summary>
+    public Func<CompletionContext, CompletionContext>? TransformContext => _transformContext;
     public IReadOnlyList<AgentTool> Tools => _tools;
     public bool IsRunning => _runningLoop is { IsCompleted: false };
     public AgentState State => _state;

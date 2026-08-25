@@ -34,6 +34,7 @@ public sealed class ChatToolTests
         Tools = [],
         CompletionOptions = null,
         MemoryPath = "/tmp/test-memory.md",
+        WorkingMemoryPath = "/tmp/working.md",
     };
 
     private static Dictionary<string, AgentInfo> MakeRegistry(params (string Name, string? Desc)[] agents)

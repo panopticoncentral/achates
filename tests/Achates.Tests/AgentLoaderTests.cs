@@ -388,4 +388,52 @@ public sealed class AgentLoaderTests
             if (Directory.Exists(basePath)) Directory.Delete(basePath, true);
         }
     }
+
+    [Fact]
+    public void Parse_ReadsWorkingBudgetCapability()
+    {
+        var md = """
+            # Test
+
+            ## Capabilities
+
+            **Working Budget:** 750
+            """;
+
+        var config = AgentLoader.Parse(md);
+
+        Assert.NotNull(config);
+        Assert.Equal(750, config!.WorkingBudgetTokens);
+    }
+
+    [Fact]
+    public void Parse_InvalidWorkingBudget_LeavesNull()
+    {
+        var md = """
+            # Test
+
+            ## Capabilities
+
+            **Working Budget:** plenty
+            """;
+
+        var config = AgentLoader.Parse(md);
+
+        Assert.NotNull(config);
+        Assert.Null(config!.WorkingBudgetTokens);
+    }
+
+    [Fact]
+    public void Serialize_WritesWorkingBudget_WhenSet()
+    {
+        var config = new AgentConfig { WorkingBudgetTokens = 750 };
+        Assert.Contains("**Working Budget:** 750", AgentLoader.Serialize("Test", config));
+    }
+
+    [Fact]
+    public void Serialize_OmitsWorkingBudget_WhenNull()
+    {
+        var config = new AgentConfig();
+        Assert.DoesNotContain("**Working Budget:**", AgentLoader.Serialize("Test", config));
+    }
 }

@@ -1,6 +1,7 @@
 using Achates.Providers;
 using Achates.Providers.Completions;
 using Achates.Providers.Completions.Events;
+using Achates.Providers.Completions.Messages;
 using Achates.Providers.Models;
 using Achates.Server.Chat;
 using Achates.Server.Tools;
@@ -48,5 +49,39 @@ public sealed class AgentRuntimeFactoryTests
         var runtime = factory.Create([]);
 
         Assert.Empty(runtime.Tools);
+    }
+
+    [Fact]
+    public void Consult_runtime_injects_core_memory_but_not_working_memory()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"achates-arf-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var corePath = Path.Combine(dir, "memory.md");
+            File.WriteAllText(corePath, "core fact");
+            File.WriteAllText(Path.Combine(dir, "working.md"), "- live thread");
+
+            var factory = new AgentRuntimeFactory(
+                TestModel(), systemPrompt: null, ledger: null, universalTools: null,
+                coreMemoryPath: corePath);
+
+            var runtime = factory.Create([]);
+            var transform = runtime.TransformContext;
+            Assert.NotNull(transform);
+
+            var result = transform!(new CompletionContext
+            {
+                Messages = [new CompletionUserTextMessage { Text = "hi", Timestamp = 100 }],
+            });
+
+            var text = ((CompletionUserTextMessage)result.Messages[0]).Text;
+            Assert.Contains("core fact", text);
+            Assert.DoesNotContain("live thread", text);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
     }
 }

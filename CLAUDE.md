@@ -25,7 +25,7 @@ Config lives at `~/.achates/config.yaml`. Agents live at `~/.achates/agents/{nam
 
 ### Core Concepts
 
-- **Agent** — Named entity with identity (name, description), prompt, tools, and persistent memory. Defined in `~/.achates/agents/{name}/AGENT.md` (YAML frontmatter + markdown prompt), resolved at startup into `AgentDefinition`. Each agent may declare its own base model and thinking model via `**Model:**` and `**Thinking Model:**` capabilities; if absent they fall back to `models.base` / `models.thinking` in `config.yaml`.
+- **Agent** — Named entity with identity (name, description), prompt, tools, and persistent memory. Defined in `~/.achates/agents/{name}/AGENT.md` (YAML frontmatter + markdown prompt), resolved at startup into `AgentDefinition`. Each agent may declare its own base model and thinking model via `**Model:**` and `**Thinking Model:**` capabilities; if absent they fall back to `models.base` / `models.thinking` in `config.yaml`. Memory has four tiers — shared (cross-agent, fetched on demand), core (preloaded at the head of every session), working (a small rolling scratchpad, preloaded on every turn), and archive (topical files retrieved on demand) — see `docs/configuration.md` for the config format and `src/Achates.Server/CLAUDE.md` for the mechanics.
 
 ### Where the rest lives
 

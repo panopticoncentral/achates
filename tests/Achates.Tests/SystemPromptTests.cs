@@ -64,7 +64,7 @@ public sealed class SystemPromptTests
 
         Assert.Contains("## Memory", result);
         Assert.Contains("Shared memory", result);
-        Assert.Contains("Agent memory", result);
+        Assert.Contains("Core memory", result);
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public sealed class SystemPromptTests
 
         Assert.Contains("## Memory", result);
         Assert.Contains("Shared memory", result);
-        Assert.Contains("Agent memory", result);
+        Assert.Contains("Core memory", result);
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public sealed class SystemPromptTests
         Assert.DoesNotContain("scope: shared", result);
         Assert.DoesNotContain("shared`)", result);
         // The remaining single-scope text should be present.
-        Assert.Contains("Agent memory", result);
+        Assert.Contains("Core memory", result);
     }
 
     // --- Style section (always present) ---
@@ -301,5 +301,88 @@ public sealed class SystemPromptTests
     {
         var prompt = SystemPrompt.Build(agentPrompt: "You are a test.", sharedMemoryEnabled: false);
         Assert.Contains("archive", prompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Memory_section_does_not_tell_the_model_to_read_memory_at_conversation_start()
+    {
+        // Core and working memory are injected into the payload now; instructing
+        // the model to read them back burns a tool call on content already present.
+        var prompt = SystemPrompt.Build(sharedMemoryEnabled: true);
+
+        Assert.DoesNotContain("Read memory at the start of new conversations", prompt);
+        Assert.DoesNotContain("Read your memory at the start of new conversations", prompt);
+    }
+
+    [Fact]
+    public void Memory_section_distinguishes_shared_from_core_by_audience()
+    {
+        // Both tiers used to say "facts, preferences", leaving an agent no way to
+        // decide where a newly-learned user preference belongs.
+        var prompt = SystemPrompt.Build(sharedMemoryEnabled: true);
+
+        Assert.Contains("completely different role", prompt);
+        Assert.Contains("prefer core", prompt);
+    }
+
+    [Fact]
+    public void Memory_section_omits_the_shared_core_decision_rule_in_roleplay_mode()
+    {
+        // With no shared scope there is nothing to decide between, and the rule
+        // would name a tier the in-character agent must never hear about.
+        var prompt = SystemPrompt.Build(sharedMemoryEnabled: false);
+
+        Assert.DoesNotContain("completely different role", prompt);
+        Assert.DoesNotContain("Shared memory", prompt);
+        Assert.Contains("Core memory", prompt);
+    }
+
+    [Fact]
+    public void Memory_section_tells_the_agent_when_to_write_a_working_thread()
+    {
+        // Describing what the tier IS is not enough — without a trigger, working
+        // memory only ever gets populated by the nightly dreamtime pass.
+        var prompt = SystemPrompt.Build(sharedMemoryEnabled: true);
+
+        Assert.Contains("add it now", prompt);
+        Assert.Contains("don't rely on remembering", prompt);
+    }
+
+    [Fact]
+    public void Memory_section_shows_a_concrete_working_entry()
+    {
+        var prompt = SystemPrompt.Build(sharedMemoryEnabled: true);
+
+        Assert.Contains("for example", prompt);
+    }
+
+    [Fact]
+    public void Memory_section_write_trigger_survives_in_roleplay_mode()
+    {
+        // In-character agents keep working memory; only the shared scope is hidden.
+        var prompt = SystemPrompt.Build(sharedMemoryEnabled: false);
+
+        Assert.Contains("add it now", prompt);
+        Assert.DoesNotContain("Shared memory", prompt);
+    }
+
+    [Fact]
+    public void Memory_section_describes_working_memory_when_shared_enabled()
+    {
+        var prompt = SystemPrompt.Build(sharedMemoryEnabled: true);
+
+        Assert.Contains("Working memory", prompt);
+        Assert.Contains("scope: working", prompt);
+        Assert.Contains("Shared memory", prompt);
+    }
+
+    [Fact]
+    public void Memory_section_describes_working_memory_but_never_shared_when_shared_disabled()
+    {
+        var prompt = SystemPrompt.Build(sharedMemoryEnabled: false);
+
+        Assert.Contains("Working memory", prompt);
+        Assert.Contains("scope: working", prompt);
+        Assert.DoesNotContain("Shared memory", prompt);
     }
 }

@@ -47,6 +47,14 @@ public sealed class MemoryConfig
     /// <see cref="Tools.MemoryTool.DefaultCoreBudgetTokens"/>.
     /// </summary>
     public int? DefaultBudgetTokens { get; set; }
+
+    /// <summary>
+    /// Default soft budget (in tokens) for agents' working memory files
+    /// (<c>working.md</c>). Per-agent <c>**Working Budget:**</c> overrides this;
+    /// absent here too falls back to
+    /// <see cref="Tools.MemoryTool.DefaultWorkingBudgetTokens"/>.
+    /// </summary>
+    public int? DefaultWorkingBudgetTokens { get; set; }
 }
 
 public sealed class AgentConfig
@@ -121,6 +129,15 @@ public sealed class AgentConfig
     /// <see cref="Tools.MemoryTool.DefaultCoreBudgetTokens"/>.
     /// </summary>
     public int? MemoryBudgetTokens { get; set; }
+
+    /// <summary>
+    /// Per-agent soft budget (in tokens) for the always-loaded working memory file —
+    /// the rolling list of live threads. When it exceeds this, the memory tool appends
+    /// a non-blocking nudge to prune. Null falls back to
+    /// <c>memory.default_working_budget_tokens</c>, then to
+    /// <see cref="Tools.MemoryTool.DefaultWorkingBudgetTokens"/>.
+    /// </summary>
+    public int? WorkingBudgetTokens { get; set; }
 
     /// <summary>
     /// System prompt from the ## Prompt section of AGENT.md.

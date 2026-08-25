@@ -41,9 +41,13 @@ public sealed class CronService : IAsyncDisposable
 
         You are performing your nightly memory review and consolidation.
 
-        You keep memory in two tiers:
-        - **Core memory** (your main file): always loaded at the start of every conversation.
-          Keep it focused — durable facts, relationships, recurring patterns, and current state.
+        You keep memory in three tiers:
+        - **Core memory** (your main file): durable facts, relationships, recurring
+          patterns, and current state. It is already loaded into this session — you do
+          not need to read it, and re-reading it bloats this session for no benefit.
+        - **Working memory** (`scope: working`): a short, live list of threads to raise
+          in your next conversation. Also already loaded. This is where "I noticed X,
+          mention it next time" belongs.
         - **Memory archive** (topical files): retrieved on demand via the memory tool's
           `list` / `search` / read with a `file`. This is where dated logs, completed
           items, and long historical accounts belong.
@@ -52,17 +56,23 @@ public sealed class CronService : IAsyncDisposable
 
         1. Use the sessions tool to list recent sessions; decide which contain anything worth
            remembering; read those in full.
-        2. Read your core memory ONCE, up front. Do not re-read the whole file after each edit
-           — it is large and every full read is persisted into this session, bloating it. You
-           already know the text you are editing from this initial read and the `old` values
-           you pass to `edit`.
+        2. Core and working memory are already in your context above. Edit them with
+           INCREMENTAL `edit`/`append` using the text you can already see — do not read
+           either file back first, and reserve a full `save` for real restructuring.
         3. Record tonight's observations by APPENDING to an archive journal file
            (`append` with `file: journal`) — and ONLY there. A dated nightly note must
            NEVER also be written into core memory; dated notes live in the archive.
         4. Update core memory with genuinely durable new learnings (preferences, facts,
-           corrections, patterns) using INCREMENTAL `edit`/`append`. Reserve a full `save`
-           for real restructuring.
-        5. Keep core lean — consolidate, don't just accumulate:
+           corrections, patterns).
+        5. Curate working memory (`scope: working`):
+           - REMOVE threads you can see were surfaced or resolved in tonight's sessions.
+           - PROMOTE anything that turned out to be durable into core memory, or
+             relocate the detail to an archive file.
+           - ADD a thread for anything you noticed tonight that is worth raising in your
+             next conversation. Keep each one to a line or two.
+           - Working memory is small on purpose. If it is over budget, prune before you
+             add.
+        6. Keep core lean — consolidate, don't just accumulate:
            - Move dated/completed sections OUT of core (`edit` to remove) into a topical
              archive file (`append` with a `file`). Old dated `Dreamtime Note —` entries and
              old dated metric/score logs do NOT belong in core — relocate them.
@@ -70,12 +80,11 @@ public sealed class CronService : IAsyncDisposable
              a few summary lines in core, moving the full account to an archive file. Core
              should get denser, not just shorter.
            - Prune completed items from any pending/todo list in core.
-        6. When you read core (step 2), the memory tool tells you whether core is over its
-           size budget. If it says you are OVER budget, you MUST consolidate this run before
-           finishing: move at least the oldest one or two dated sections and any completed
-           items out of core into the archive. You need not clear the whole backlog in one
-           night, but every over-budget run must leave core SMALLER than it started — never
-           larger.
+        7. Every core write tells you whether core is over its size budget. If it says you
+           are OVER budget, you MUST consolidate this run before finishing: move at least
+           the oldest one or two dated sections and any completed items out of core into
+           the archive. You need not clear the whole backlog in one night, but every
+           over-budget run must leave core SMALLER than it started — never larger.
 
         Focus on durable knowledge that helps you serve the user better. Do NOT memorize
         transient details (specific appointment times, one-off questions) in core — those go
@@ -347,8 +356,9 @@ public sealed class CronService : IAsyncDisposable
             job.Name, job.Id, agentName);
 
         // Build tool list and system prompt — dreamtime jobs get special treatment.
-        // The system prompt is date-free; temporal context is injected per-turn at
-        // the tail of the outgoing payload via TemporalContext.CreateTransform().
+        // The system prompt is date-free and memory-free; temporal context and the
+        // always-loaded memory tiers are injected per-turn into the outgoing payload
+        // via TemporalContext / MemoryContext transforms.
         var systemPrompt = agentDef.SystemPrompt;
         var tools = BuildJobTools(agentName, agentDef);
 
@@ -370,13 +380,17 @@ public sealed class CronService : IAsyncDisposable
             tools = BuildDreamtimeTools(agentName, agentDef, job);
         }
 
+        var temporal = TemporalContext.CreateTransform();
+        var memory = MemoryContext.CreateTransform(
+            agentDef.MemoryPath, agentDef.WorkingMemoryPath, includeWorking: true);
+
         var agent = new AgentRuntime(new AgentOptions
         {
             Model = agentDef.Model,
             SystemPrompt = systemPrompt,
             Tools = tools,
             CompletionOptions = agentDef.CompletionOptions,
-            TransformContext = TemporalContext.CreateTransform(),
+            TransformContext = ctx => memory(temporal(ctx)),
         });
 
         var stream = agent.PromptAsync(new UserMessage

@@ -125,6 +125,12 @@ public static class AgentLoader
             sb.AppendLine($"**Memory Budget:** {memBudget}");
         }
 
+        if (config.WorkingBudgetTokens is { } workBudget)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"**Working Budget:** {workBudget}");
+        }
+
         if (!string.IsNullOrWhiteSpace(config.Voice))
         {
             sb.AppendLine();
@@ -381,6 +387,10 @@ public static class AgentLoader
             case "memory budget":
                 if (int.TryParse(value, out var memBudget) && memBudget >= 0)
                     config.MemoryBudgetTokens = memBudget;
+                break;
+            case "working budget":
+                if (int.TryParse(value, out var workBudget) && workBudget >= 0)
+                    config.WorkingBudgetTokens = workBudget;
                 break;
             case "voice":
                 config.Voice = string.IsNullOrWhiteSpace(value) ? null : value;

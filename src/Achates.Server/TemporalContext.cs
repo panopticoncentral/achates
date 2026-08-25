@@ -85,7 +85,7 @@ public static class TemporalContext
 
             if (string.IsNullOrEmpty(cachedNote)) return context;
 
-            return InjectIntoUserMessage(context, latestUserIdx, cachedNote);
+            return UserMessageNote.Prepend(context, latestUserIdx, cachedNote);
         };
     }
 
@@ -139,28 +139,5 @@ public static class TemporalContext
         }
         var mins = Math.Max(1, (int)elapsed.TotalMinutes);
         return $"{mins}m";
-    }
-
-    private static CompletionContext InjectIntoUserMessage(
-        CompletionContext context, int targetIndex, string note)
-    {
-        var messages = context.Messages.ToList();
-        var target = messages[targetIndex];
-
-        messages[targetIndex] = target switch
-        {
-            CompletionUserTextMessage text => text with { Text = $"{note}\n\n{text.Text}" },
-            CompletionUserContentMessage content => content with
-            {
-                Content =
-                [
-                    new CompletionTextContent { Text = note },
-                    .. content.Content,
-                ],
-            },
-            _ => target, // Unknown user-message subtype; leave alone.
-        };
-
-        return context with { Messages = messages };
     }
 }

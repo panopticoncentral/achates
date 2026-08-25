@@ -80,8 +80,11 @@ public sealed class MemoryToolTests : IDisposable
         var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
         var schemaJson = tool.Parameters.GetRawText();
         Assert.DoesNotContain("\"shared\"", schemaJson);
-        // The whole 'scope' parameter is gone — schema only describes action + content.
-        Assert.DoesNotContain("\"scope\"", schemaJson);
+        // Scope survives in shared-disabled mode so working memory stays reachable,
+        // but the shared scope itself is never named.
+        Assert.Contains("\"scope\"", schemaJson);
+        Assert.Contains("\"working\"", schemaJson);
+        Assert.DoesNotContain("\"shared\"", schemaJson);
     }
 
     [Fact]
@@ -555,5 +558,211 @@ public sealed class MemoryToolTests : IDisposable
         var text = Text(await tool.ExecuteAsync("t", Args(
             ("action", JE("edit")), ("old", JE("tea")), ("new", JE("coffee")))));
         Assert.DoesNotContain("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---------------- Working scope ----------------
+
+    [Fact]
+    public void SchemaExposesWorkingScope_WhenSharedEnabled()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true);
+        Assert.Contains("\"working\"", tool.Parameters.GetRawText());
+    }
+
+    [Fact]
+    public void SchemaExposesWorkingScope_WhenSharedDisabled()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+        var schemaJson = tool.Parameters.GetRawText();
+        Assert.Contains("\"working\"", schemaJson);
+        Assert.DoesNotContain("\"shared\"", schemaJson);
+    }
+
+    [Fact]
+    public async Task Save_WorkingScope_WritesSiblingFile()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true);
+
+        await tool.ExecuteAsync("t", Args(
+            ("action", JE("save")), ("scope", JE("working")), ("content", JE("- ask about the surgery"))));
+
+        var workingPath = Path.Combine(_dir, "working.md");
+        Assert.True(File.Exists(workingPath));
+        Assert.Equal("- ask about the surgery", await File.ReadAllTextAsync(workingPath));
+        Assert.Equal("", File.Exists(_agentPath) ? await File.ReadAllTextAsync(_agentPath) : "");
+    }
+
+    [Fact]
+    public async Task Read_WorkingScope_ReturnsOnlyWorking()
+    {
+        await File.WriteAllTextAsync(_agentPath, "core note");
+        await File.WriteAllTextAsync(Path.Combine(_dir, "working.md"), "- live thread");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true);
+
+        var text = Text(await tool.ExecuteAsync("t", Args(
+            ("action", JE("read")), ("scope", JE("working")))));
+
+        Assert.Contains("- live thread", text);
+        Assert.DoesNotContain("core note", text);
+    }
+
+    [Fact]
+    public async Task Append_And_Edit_WorkingScope_RoundTrip()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true);
+        var workingPath = Path.Combine(_dir, "working.md");
+
+        await tool.ExecuteAsync("t", Args(
+            ("action", JE("save")), ("scope", JE("working")), ("content", JE("- one"))));
+        await tool.ExecuteAsync("t", Args(
+            ("action", JE("append")), ("scope", JE("working")), ("content", JE("- two"))));
+        Assert.Equal("- one\n- two", await File.ReadAllTextAsync(workingPath));
+
+        await tool.ExecuteAsync("t", Args(
+            ("action", JE("edit")), ("scope", JE("working")), ("old", JE("- one\n")), ("new", JE(""))));
+        Assert.Equal("- two", await File.ReadAllTextAsync(workingPath));
+    }
+
+    [Fact]
+    public async Task Save_WorkingScope_Succeeds_WhenSharedDisabled()
+    {
+        // The old code force-rewrote every scope to "agent" when shared was off,
+        // which would silently swallow working writes for in-character agents.
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        await tool.ExecuteAsync("t", Args(
+            ("action", JE("save")), ("scope", JE("working")), ("content", JE("- in-character thread"))));
+
+        Assert.Equal("- in-character thread",
+            await File.ReadAllTextAsync(Path.Combine(_dir, "working.md")));
+    }
+
+    [Fact]
+    public async Task Save_SharedScope_DowngradesToAgent_WhenSharedDisabled()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        await tool.ExecuteAsync("t", Args(
+            ("action", JE("save")), ("scope", JE("shared")), ("content", JE("real world fact"))));
+
+        Assert.False(File.Exists(_sharedPath));
+        Assert.Equal("real world fact", await File.ReadAllTextAsync(_agentPath));
+    }
+
+    [Theory]
+    [InlineData("Working")]
+    [InlineData("Agent")]
+    [InlineData("Shared")]
+    [InlineData("core")]
+    [InlineData("private")]
+    [InlineData("")]
+    public async Task Read_OffEnumScope_DoesNotLeakShared_WhenSharedDisabled(string scope)
+    {
+        // Providers do not hard-enforce schema enums, so a model can send any string.
+        // Only "agent"/"working" are the agent's to see; everything else — a casing
+        // variant included — must collapse to the agent core, never fall through to
+        // the unscoped read, which returns the shared file.
+        const string sentinel = "SENTINEL-real-world-identity-fact";
+        await File.WriteAllTextAsync(_sharedPath, sentinel);
+        await File.WriteAllTextAsync(_agentPath, "in-character notes");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        var text = Text(await tool.ExecuteAsync("t", Args(
+            ("action", JE("read")), ("scope", JE(scope)))));
+
+        Assert.DoesNotContain(sentinel, text);
+    }
+
+    [Fact]
+    public async Task Read_AgentScope_IsLabelledCore_NotAgent()
+    {
+        // The system prompt and dreamtime instructions call this tier "core"; the
+        // tool's own label has to match or the budget nudge names a tier the model
+        // was never told about.
+        await File.WriteAllTextAsync(_agentPath, "core note");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: false);
+
+        var text = Text(await tool.ExecuteAsync("t", Args(("action", JE("read")), ("scope", JE("agent")))));
+
+        Assert.Contains("## Core Memory", text);
+        Assert.DoesNotContain("Agent Memory", text);
+    }
+
+    [Fact]
+    public async Task Read_Unscoped_OverBudget_NudgeNamesCore()
+    {
+        await File.WriteAllTextAsync(_agentPath, new string('x', 200));
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true, coreBudgetTokens: 5);
+
+        var text = Text(await tool.ExecuteAsync("t", Args(("action", JE("read")))));
+
+        Assert.Contains("Core memory is now", text);
+    }
+
+    [Fact]
+    public async Task Read_Unscoped_WorkingOverBudget_AppendsNote()
+    {
+        // The working tier is budgeted too, so an unscoped read must nudge on it
+        // just as save/append/edit do.
+        await File.WriteAllTextAsync(Path.Combine(_dir, "working.md"), new string('x', 400));
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true, workingBudgetTokens: 5);
+
+        var text = Text(await tool.ExecuteAsync("t", Args(("action", JE("read")))));
+
+        Assert.Contains("Working memory is now", text);
+    }
+
+    [Fact]
+    public async Task Read_WithoutScope_IncludesWorking_WhenSharedEnabled()
+    {
+        await File.WriteAllTextAsync(_sharedPath, "user is Paul");
+        await File.WriteAllTextAsync(_agentPath, "core note");
+        await File.WriteAllTextAsync(Path.Combine(_dir, "working.md"), "- live thread");
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true);
+
+        var text = Text(await tool.ExecuteAsync("t", Args(("action", JE("read")))));
+
+        Assert.Contains("user is Paul", text);
+        Assert.Contains("core note", text);
+        Assert.Contains("- live thread", text);
+    }
+
+    [Fact]
+    public async Task Save_WorkingScope_OverBudget_AppendsNote()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true, workingBudgetTokens: 5);
+
+        var text = Text(await tool.ExecuteAsync("t", Args(
+            ("action", JE("save")), ("scope", JE("working")), ("content", JE(new string('x', 400))))));
+
+        Assert.Contains("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Save_WorkingScope_UnderBudget_NoNote()
+    {
+        var tool = new MemoryTool(_sharedPath, _agentPath, sharedEnabled: true, workingBudgetTokens: 100_000);
+
+        var text = Text(await tool.ExecuteAsync("t", Args(
+            ("action", JE("save")), ("scope", JE("working")), ("content", JE("- short")))));
+
+        Assert.DoesNotContain("over the", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(200, 400, 200)]
+    [InlineData(null, 400, 400)]
+    [InlineData(null, null, MemoryTool.DefaultWorkingBudgetTokens)]
+    public void ResolveWorkingBudgetTokens_FollowsResolutionOrder(int? perAgent, int? globalDefault, int expected)
+    {
+        Assert.Equal(expected, MemoryTool.ResolveWorkingBudgetTokens(perAgent, globalDefault));
+    }
+
+    [Fact]
+    public void DefaultCoreBudget_IsTightenedForAlwaysLoadedCore()
+    {
+        // Core is injected into every session now, so the default budget is
+        // sized for context cost rather than for a browse-on-demand file.
+        Assert.Equal(2000, MemoryTool.DefaultCoreBudgetTokens);
     }
 }

@@ -91,7 +91,8 @@ public sealed class MobileTransport
                     def.Model,
                     def.SystemPrompt,
                     def.CostLedger,
-                    universalTools);
+                    universalTools,
+                    def.MemoryPath);
             });
     }
 
@@ -2220,6 +2221,10 @@ public sealed class MobileTransport
         if (extraTools is not null)
             tools.AddRange(extraTools);
 
+        var temporal = TemporalContext.CreateTransform();
+        var memory = MemoryContext.CreateTransform(
+            agentDef.MemoryPath, agentDef.WorkingMemoryPath, includeWorking: true);
+
         return new AgentRuntime(new AgentOptions
         {
             Model = agentDef.Model,
@@ -2227,7 +2232,7 @@ public sealed class MobileTransport
             Tools = tools,
             CompletionOptions = agentDef.CompletionOptions,
             Messages = messages,
-            TransformContext = TemporalContext.CreateTransform(),
+            TransformContext = ctx => memory(temporal(ctx)),
         });
     }
 

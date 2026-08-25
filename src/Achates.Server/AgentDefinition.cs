@@ -31,6 +31,13 @@ public sealed record AgentDefinition
     public IReadOnlyList<string>? AllowChat { get; init; }
     public required CompletionOptions? CompletionOptions { get; init; }
     public required string MemoryPath { get; init; }
+
+    /// <summary>
+    /// Path to the agent's working-memory file (<c>working.md</c>) — the rolling
+    /// list of live threads injected on every turn. Sibling of
+    /// <see cref="MemoryPath"/>, outside the archive directory.
+    /// </summary>
+    public required string WorkingMemoryPath { get; init; }
     public string? DisplayName { get; init; }
     public string? Description { get; init; }
     public CostLedger? CostLedger { get; init; }
@@ -46,8 +53,10 @@ public sealed record AgentDefinition
     /// <summary>
     /// Whether <see cref="Tools.MemoryTool"/> exposes the shared memory scope to
     /// the model. Resolved from <see cref="AgentConfig.SharedMemory"/> with a
-    /// default of <c>true</c>. When false, the tool's schema omits the
-    /// <c>scope</c> parameter and reads/saves only the agent-local file.
+    /// default of <c>true</c>. When false, the tool's schema keeps the
+    /// <c>scope</c> parameter but narrows its enum to <c>[agent, working]</c> —
+    /// the agent's own core and working tiers still work; only the shared file
+    /// becomes unreachable, including for calls that ignore the schema.
     /// </summary>
     public bool SharedMemoryEnabled { get; init; } = true;
 
@@ -71,4 +80,11 @@ public sealed record AgentDefinition
     /// <see cref="Achates.Server.Tools.MemoryTool.DefaultCoreBudgetTokens"/>). Passed to the memory tool.
     /// </summary>
     public int MemoryBudgetTokens { get; init; } = Achates.Server.Tools.MemoryTool.DefaultCoreBudgetTokens;
+
+    /// <summary>
+    /// Resolved working-memory soft budget in tokens (per-agent capability → global
+    /// default → <see cref="Achates.Server.Tools.MemoryTool.DefaultWorkingBudgetTokens"/>).
+    /// Passed to the memory tool.
+    /// </summary>
+    public int WorkingBudgetTokens { get; init; } = Achates.Server.Tools.MemoryTool.DefaultWorkingBudgetTokens;
 }

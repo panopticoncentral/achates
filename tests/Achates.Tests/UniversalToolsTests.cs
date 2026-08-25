@@ -21,6 +21,7 @@ public sealed class UniversalToolsTests
         Tools = [],
         ToolNames = [],
         MemoryPath = memoryPath,
+        WorkingMemoryPath = Path.Combine(Path.GetDirectoryName(memoryPath) ?? ".", "working.md"),
         CompletionOptions = null,
         SharedMemoryEnabled = sharedMemoryEnabled,
     };
@@ -66,7 +67,8 @@ public sealed class UniversalToolsTests
     public void Build_passes_SharedMemoryEnabled_to_MemoryTool()
     {
         // The schema is the contract: when shared is enabled it must list both
-        // scopes; when disabled it must omit the scope parameter entirely.
+        // scopes; when disabled the shared scope must be omitted, but `scope`
+        // itself survives (as agent/working) so working memory stays reachable.
         var enabledDef = MakeAgentDef("/tmp/a.md", sharedMemoryEnabled: true);
         var enabledTools = UniversalTools.Build("test", enabledDef, "/tmp/s.md",
             new Dictionary<string, CostLedger>());
@@ -79,6 +81,7 @@ public sealed class UniversalToolsTests
             new Dictionary<string, CostLedger>());
         var disabledSchema = disabledTools[0].Parameters.GetRawText();
         Assert.DoesNotContain("\"shared\"", disabledSchema);
-        Assert.DoesNotContain("\"scope\"", disabledSchema);
+        Assert.Contains("\"scope\"", disabledSchema);
+        Assert.Contains("\"working\"", disabledSchema);
     }
 }

@@ -58,26 +58,27 @@ public static class SystemPrompt
         }
 
         // Memory section — always included since memory tool is added per-session.
+        // Core and working memory are injected into the outgoing payload by
+        // MemoryContext, so this section tells the model they are already present
+        // rather than telling it to go fetch them.
         // Roleplay/in-character agents (sharedMemoryEnabled == false) get a
-        // single-scope variant that never names the shared scope.
+        // variant that never names the shared scope.
         lines.Add("## Memory");
+        lines.Add("You have persistent memory that survives session resets.");
+        lines.Add("- **Core memory** (`scope: agent`): what you have learned in your own role — your history with the user, the work you do together, patterns you have noticed, where things currently stand. Already loaded into this conversation; don't call the memory tool to read it back.");
+        lines.Add("- **Working memory** (`scope: working`): a short list of live threads to raise when they become relevant. Also already loaded.");
+        lines.Add("  When something surfaces that's worth returning to — a decision left open, a follow-up you promised, something you noticed but shouldn't derail the conversation with — add it now with `append`; don't rely on remembering it later. Keep entries to a line, for example `- Ask how the SpeechAnalyzer migration went.` Remove one once you've raised or resolved it, and keep the list short.");
         if (sharedMemoryEnabled)
         {
-            lines.Add("You have two persistent memory files that survive session resets.");
-            lines.Add("- **Shared memory** (`scope: shared`): Facts about the user that any assistant should know — name, family, preferences, important dates. All agents read and write this same file.");
-            lines.Add("- **Agent memory** (`scope: agent`): Notes specific to your role and past conversations with the user. Only you use this file.");
-            lines.Add("Read memory at the start of new conversations to recall prior context.");
-            lines.Add("When saving, include everything you want to keep — the file for that scope is replaced, not appended.");
-            lines.Add("For detailed or dated notes, you also have a **memory archive** — topical files retrieved on demand. Use `action: list` to see them, `action: search` to find content, and read/save/append/edit with a `file` to work with one. Keep your main memory focused; move dated logs, completed items, and long histories into the archive.");
+            lines.Add("- **Shared memory** (`scope: shared`): facts that hold no matter which assistant is talking — name, family, where they live, important dates. All agents read and write this same file. This one is not preloaded; read it when you need it.");
         }
-        else
+        lines.Add("- **Memory archive**: topical files retrieved on demand. Use `action: list` to see them, `action: search` to find content, and read/save/append/edit with a `file` to work with one.");
+        if (sharedMemoryEnabled)
         {
-            lines.Add("You have a persistent private memory file that survives session resets.");
-            lines.Add("- **Agent memory** (`scope: agent`): Notes specific to your role and past conversations with the user.");
-            lines.Add("Read your memory at the start of new conversations to recall prior context.");
-            lines.Add("When saving, include everything you want to keep — the file is replaced, not appended.");
-            lines.Add("For detailed or dated notes, you also have a **memory archive** — topical files retrieved on demand. Use `action: list` to see them, `action: search` to find content, and read/save/append/edit with a `file` to work with one. Keep your main memory focused; move dated logs, completed items, and long histories into the archive.");
+            lines.Add("Choosing between core and shared: if an assistant in a completely different role would need the fact, it belongs in shared; if it only matters because of what you do, it belongs in core. When in doubt prefer core — every agent writes to shared, so it stays useful only if it stays small.");
         }
+        lines.Add("Keep core focused: dated logs, completed items, and long histories belong in the archive.");
+        lines.Add("When saving, include everything you want to keep — `save` replaces the file for that scope. Prefer `append`/`edit` for small updates.");
         lines.Add("");
 
         if (hasNotebook)

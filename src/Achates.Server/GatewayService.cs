@@ -592,6 +592,7 @@ public sealed class GatewayService(
             hasThink: hasTools.Contains("think"),
             sharedMemoryEnabled: agentConfig.SharedMemory ?? true);
         var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
+        var workingMemoryPath = Path.Combine(achatesHome, "agents", name, "working.md");
         var costLedgerPath = Path.Combine(achatesHome, "agents", name, "costs.jsonl");
         var costLedger = new CostLedger(costLedgerPath);
         var cronStorePath = Path.Combine(achatesHome, "agents", name, "cron.json");
@@ -614,6 +615,7 @@ public sealed class GatewayService(
             AllowChat = agentConfig.AllowChat,
             CompletionOptions = BuildCompletionOptions(agentConfig.Completion, model),
             MemoryPath = memoryPath,
+            WorkingMemoryPath = workingMemoryPath,
             DisplayName = agentConfig.Title,
             Description = agentConfig.Description,
             CostLedger = costLedger,
@@ -626,6 +628,8 @@ public sealed class GatewayService(
             SpeechRate = agentConfig.SpeechRate,
             MemoryBudgetTokens = Tools.MemoryTool.ResolveCoreBudgetTokens(
                 agentConfig.MemoryBudgetTokens, config.Memory?.DefaultBudgetTokens),
+            WorkingBudgetTokens = Tools.MemoryTool.ResolveWorkingBudgetTokens(
+                agentConfig.WorkingBudgetTokens, config.Memory?.DefaultWorkingBudgetTokens),
         };
 
         logger.LogInformation("Agent '{Name}' resolved with model {Model}", name, model.Id);

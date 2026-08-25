@@ -112,4 +112,31 @@ public class ConfigLoaderTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Memory_DefaultWorkingBudget_RoundTrips()
+    {
+        var path = TempConfigPath();
+        try
+        {
+            var config = new AchatesConfig
+            {
+                Provider = new ProviderConfig { Name = "openrouter" },
+                Memory = new MemoryConfig { DefaultWorkingBudgetTokens = 750 },
+            };
+            Environment.SetEnvironmentVariable("ACHATES_CONFIG_PATH", path);
+
+            ConfigLoader.Save(config);
+            var text = File.ReadAllText(path);
+            var loaded = ConfigLoader.Load();
+
+            Assert.Contains("default_working_budget_tokens", text);
+            Assert.Equal(750, loaded.Memory?.DefaultWorkingBudgetTokens);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ACHATES_CONFIG_PATH", null);
+            File.Delete(path);
+        }
+    }
 }
