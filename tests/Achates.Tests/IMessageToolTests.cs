@@ -60,6 +60,64 @@ public class IMessageToolTests : IDisposable
             body: TypedstreamFixture.Build(AttributedOnlyText));
         InsertAttributedBody(conn, rowId: 400, chatId: 10, date: 705000000000000000,
             body: [0x04, 0x0b, 0x99, 0x99]);
+
+        // A message carrying more than one attachment: the join against the
+        // attachment tables yields a row per attachment, not per message.
+        InsertWithAttachments(conn, rowId: 500, chatId: 10, date: 715000000000000000,
+            text: MultiAttachmentText,
+            attachments:
+            [
+                (1, "~/Library/Messages/Attachments/note.caf", "audio/x-caf", "com.apple.coreaudio-format"),
+                (2, "~/Library/Messages/Attachments/photo.jpg", "image/jpeg", "public.jpeg"),
+            ]);
+    }
+
+    private const string MultiAttachmentText = "voice note plus a photo";
+
+    private static void InsertWithAttachments(
+        SqliteConnection conn, long rowId, long chatId, long date, string text,
+        (long Id, string Filename, string Mime, string Uti)[] attachments)
+    {
+        using var msg = conn.CreateCommand();
+        msg.CommandText = """
+            INSERT INTO message (ROWID, text, date, is_from_me, handle_id)
+                VALUES (@rowId, @text, @date, 0, 2);
+            INSERT INTO chat_message_join (chat_id, message_id) VALUES (@chatId, @rowId);
+            """;
+        msg.Parameters.AddWithValue("@rowId", rowId);
+        msg.Parameters.AddWithValue("@chatId", chatId);
+        msg.Parameters.AddWithValue("@date", date);
+        msg.Parameters.AddWithValue("@text", text);
+        msg.ExecuteNonQuery();
+
+        foreach (var (id, filename, mime, uti) in attachments)
+        {
+            using var att = conn.CreateCommand();
+            att.CommandText = """
+                INSERT INTO attachment (ROWID, filename, mime_type, uti)
+                    VALUES (@id, @filename, @mime, @uti);
+                INSERT INTO message_attachment_join (message_id, attachment_id)
+                    VALUES (@rowId, @id);
+                """;
+            att.Parameters.AddWithValue("@id", id);
+            att.Parameters.AddWithValue("@filename", filename);
+            att.Parameters.AddWithValue("@mime", mime);
+            att.Parameters.AddWithValue("@uti", uti);
+            att.Parameters.AddWithValue("@rowId", rowId);
+            att.ExecuteNonQuery();
+        }
+    }
+
+    private static int Occurrences(string haystack, string needle)
+    {
+        var count = 0;
+        for (var i = haystack.IndexOf(needle, StringComparison.Ordinal); i >= 0;
+             i = haystack.IndexOf(needle, i + needle.Length, StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
     }
 
     private const string AttributedOnlyText = "Sure—the deadline moved to Tuesday afternoon";
@@ -156,6 +214,43 @@ public class IMessageToolTests : IDisposable
         });
 
         Assert.Contains(AttributedOnlyText, TextOf(result));
+    }
+
+    [Fact]
+    public async Task Read_returns_a_multi_attachment_message_once()
+    {
+        SeedDatabase();
+        var tool = new IMessageTool(_dbPath, EmptyContacts());
+
+        var result = await tool.ExecuteAsync("call-6", new Dictionary<string, object?>
+        {
+            ["action"] = "read",
+            ["chat_id"] = 10L,
+        });
+
+        Assert.Equal(1, Occurrences(TextOf(result), MultiAttachmentText));
+    }
+
+    [Fact]
+    public async Task Read_count_limits_distinct_messages_not_joined_rows()
+    {
+        SeedDatabase();
+        var tool = new IMessageTool(_dbPath, EmptyContacts());
+
+        // Chat 10 holds four messages; the newest carries two attachments, so a
+        // per-attachment row count silently returns one message fewer.
+        var result = await tool.ExecuteAsync("call-7", new Dictionary<string, object?>
+        {
+            ["action"] = "read",
+            ["chat_id"] = 10L,
+            ["count"] = 4,
+        });
+        var text = TextOf(result);
+
+        Assert.Equal(1, Occurrences(text, MultiAttachmentText));
+        Assert.Contains(AttributedOnlyText, text);
+        Assert.Contains("[unreadable message]", text);
+        Assert.Contains("group message", text);
     }
 
     public void Dispose()

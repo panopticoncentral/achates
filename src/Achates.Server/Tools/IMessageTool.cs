@@ -211,7 +211,11 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
         {
             return TextResult($"Chat {chatId} not found.");
         }
-        // Get messages with audio attachment info (most recent N, displayed oldest-first)
+        // Get messages with audio attachment info (most recent N, displayed oldest-first).
+        // The attachment lookup is a scalar subquery rather than a join: joining
+        // yields one row per attachment, which both duplicates multi-attachment
+        // messages and lets them consume @count, silently shortening the read. The
+        // subquery runs only for rows that survive the LIMIT.
         await using var msgCmd = conn.CreateCommand();
         msgCmd.CommandText = """
             SELECT
@@ -220,14 +224,18 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
                 m.is_from_me,
                 m.date,
                 h.id as sender,
-                a.filename as audio_path,
+                (
+                    SELECT a.filename
+                    FROM message_attachment_join maj
+                    INNER JOIN attachment a ON a.ROWID = maj.attachment_id
+                    WHERE maj.message_id = m.ROWID
+                      AND (a.mime_type LIKE 'audio/%' OR a.uti LIKE '%audio%' OR a.uti LIKE '%caf%')
+                    LIMIT 1
+                ) as audio_path,
                 m.attributedBody
             FROM message m
             INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
             LEFT JOIN handle h ON m.handle_id = h.ROWID
-            LEFT JOIN message_attachment_join maj ON maj.message_id = m.ROWID
-            LEFT JOIN attachment a ON maj.attachment_id = a.ROWID
-                AND (a.mime_type LIKE 'audio/%' OR a.uti LIKE '%audio%' OR a.uti LIKE '%caf%')
             WHERE cmj.chat_id = @chatId
             ORDER BY m.date DESC
             LIMIT @count
@@ -309,15 +317,19 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
                 c.ROWID as chat_id,
                 c.chat_identifier,
                 c.display_name,
-                a.filename as audio_path,
+                (
+                    SELECT a.filename
+                    FROM message_attachment_join maj
+                    INNER JOIN attachment a ON a.ROWID = maj.attachment_id
+                    WHERE maj.message_id = m.ROWID
+                      AND (a.mime_type LIKE 'audio/%' OR a.uti LIKE '%audio%' OR a.uti LIKE '%caf%')
+                    LIMIT 1
+                ) as audio_path,
                 m.attributedBody
             FROM message m
             INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
             INNER JOIN chat c ON cmj.chat_id = c.ROWID
             LEFT JOIN handle h ON m.handle_id = h.ROWID
-            LEFT JOIN message_attachment_join maj ON maj.message_id = m.ROWID
-            LEFT JOIN attachment a ON maj.attachment_id = a.ROWID
-                AND (a.mime_type LIKE 'audio/%' OR a.uti LIKE '%audio%' OR a.uti LIKE '%caf%')
             WHERE m.text LIKE @query
                OR (m.text IS NULL AND instr(m.attributedBody, @raw) > 0)
             ORDER BY m.date DESC
