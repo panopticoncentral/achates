@@ -101,18 +101,30 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
             ) latest ON latest.chat_id = c.ROWID
             LEFT JOIN message m ON m.ROWID = latest.last_msg_id
             ORDER BY latest.last_date DESC
-            LIMIT @count
             """;
-        cmd.Parameters.AddWithValue("@count", count);
+
+        // Sibling rows are collapsed below, so @count can only be applied after
+        // grouping — the reader stops early once enough conversations are built.
+        var siblings = await LoadChatSiblingsAsync(conn, cancellationToken);
+        var alreadyListed = new HashSet<long>();
+        var listed = 0;
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         var sb = new StringBuilder();
         sb.AppendLine($"**Recent chats** (up to {count}):");
         sb.AppendLine();
 
-        while (await reader.ReadAsync(cancellationToken))
+        while (listed < count && await reader.ReadAsync(cancellationToken))
         {
             var chatId = reader.GetInt64(0);
+
+            // Rows are ordered newest-first, so the first row of a group is the one
+            // the conversation is currently living on.
+            if (!alreadyListed.Add(chatId)) continue;
+            var siblingIds = siblings.TryGetValue(chatId, out var group) ? group : [chatId];
+            foreach (var id in siblingIds)
+                alreadyListed.Add(id);
+
             var identifier = reader.GetString(1);
             var displayName = reader.IsDBNull(2) ? null : reader.GetString(2);
             var service = reader.IsDBNull(3) ? null : reader.GetString(3);
@@ -154,10 +166,44 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
                     sb.AppendLine($"  {dateStr}");
             }
             sb.AppendLine($"  Chat ID: `{chatId}`");
+            if (siblingIds.Count > 1)
+                sb.AppendLine($"  (one conversation across {siblingIds.Count} chat rows; reading this ID covers all)");
             sb.AppendLine();
+            listed++;
         }
 
         return TextResult(sb.ToString().TrimEnd());
+    }
+
+    /// <summary>
+    /// Loads every chat's participant roster and groups the rows that address the
+    /// same people under the same name. A thread that moved between RCS, SMS and
+    /// iMessage is several chat rows; Messages shows them as one conversation and
+    /// so should we.
+    /// </summary>
+    private static async Task<Dictionary<long, List<long>>> LoadChatSiblingsAsync(
+        SqliteConnection conn, CancellationToken cancellationToken)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT chj.chat_id, c.display_name, h.id
+            FROM chat_handle_join chj
+            INNER JOIN chat c ON c.ROWID = chj.chat_id
+            INNER JOIN handle h ON h.ROWID = chj.handle_id
+            """;
+
+        var rows = new List<(long ChatId, string? DisplayName, string Handle)>();
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (reader.IsDBNull(2)) continue;
+            rows.Add((
+                reader.GetInt64(0),
+                reader.IsDBNull(1) ? null : reader.GetString(1),
+                reader.GetString(2)));
+        }
+
+        return ChatRoster.GroupByRoster(rows);
     }
 
     /// <summary>
@@ -216,8 +262,15 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
         // yields one row per attachment, which both duplicates multi-attachment
         // messages and lets them consume @count, silently shortening the read. The
         // subquery runs only for rows that survive the LIMIT.
+        var siblings = await LoadChatSiblingsAsync(conn, cancellationToken);
+        var chatIds = siblings.TryGetValue(chatId.Value, out var group) ? group : [chatId.Value];
+        var idParameters = string.Join(", ", chatIds.Select((_, i) => $"@chat{i}"));
+
         await using var msgCmd = conn.CreateCommand();
-        msgCmd.CommandText = """
+        // Selecting by message id rather than joining chat_message_join keeps a
+        // message that belongs to more than one of the sibling rows from appearing
+        // twice.
+        msgCmd.CommandText = $"""
             SELECT
                 m.ROWID,
                 m.text,
@@ -234,13 +287,17 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
                 ) as audio_path,
                 m.attributedBody
             FROM message m
-            INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
             LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE cmj.chat_id = @chatId
+            WHERE m.ROWID IN (
+                SELECT cmj.message_id
+                FROM chat_message_join cmj
+                WHERE cmj.chat_id IN ({idParameters})
+            )
             ORDER BY m.date DESC
             LIMIT @count
             """;
-        msgCmd.Parameters.AddWithValue("@chatId", chatId.Value);
+        for (var i = 0; i < chatIds.Count; i++)
+            msgCmd.Parameters.AddWithValue($"@chat{i}", chatIds[i]);
         msgCmd.Parameters.AddWithValue("@count", count);
 
         await using var reader = await msgCmd.ExecuteReaderAsync(cancellationToken);
@@ -288,7 +345,10 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
         messages.Reverse(); // oldest first
 
         var sb = new StringBuilder();
-        sb.AppendLine($"**{chatLabel}** (last {messages.Count} messages):");
+        var merged = chatIds.Count > 1
+            ? $", merged from {chatIds.Count} chat rows across services"
+            : "";
+        sb.AppendLine($"**{chatLabel}** (last {messages.Count} messages{merged}):");
         sb.AppendLine();
         foreach (var msg in messages)
             sb.AppendLine(msg);

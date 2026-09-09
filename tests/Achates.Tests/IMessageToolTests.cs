@@ -41,6 +41,12 @@ public class IMessageToolTests : IDisposable
                 VALUES (10, 'chat9876543210', '', 'SMS');
             INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (10,1),(10,2),(10,3);
 
+            -- The SAME conversation as chat 10, kept as its own row because the
+            -- thread moved between services. Messages shows these as one.
+            INSERT INTO chat (ROWID, chat_identifier, display_name, service_name)
+                VALUES (30, 'chat1122334455', '', 'RCS');
+            INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (30,1),(30,2),(30,3);
+
             -- A one-to-one chat.
             INSERT INTO chat (ROWID, chat_identifier, display_name, service_name)
                 VALUES (20, '+15550001111', NULL, 'iMessage');
@@ -48,8 +54,10 @@ public class IMessageToolTests : IDisposable
 
             INSERT INTO message (ROWID, text, date, is_from_me, handle_id)
                 VALUES (100, 'group message', 700000000000000000, 0, 2),
-                       (200, 'direct message', 690000000000000000, 0, 1);
-            INSERT INTO chat_message_join (chat_id, message_id) VALUES (10,100),(20,200);
+                       (200, 'direct message', 690000000000000000, 0, 1),
+                       (600, 'sent before the thread moved services', 680000000000000000, 0, 3);
+            INSERT INTO chat_message_join (chat_id, message_id)
+                VALUES (10,100),(20,200),(30,600);
             """;
         cmd.ExecuteNonQuery();
 
@@ -251,6 +259,68 @@ public class IMessageToolTests : IDisposable
         Assert.Contains(AttributedOnlyText, text);
         Assert.Contains("[unreadable message]", text);
         Assert.Contains("group message", text);
+    }
+
+    [Fact]
+    public async Task Read_returns_messages_from_every_chat_row_sharing_the_participants()
+    {
+        SeedDatabase();
+        var tool = new IMessageTool(_dbPath, EmptyContacts());
+
+        var result = await tool.ExecuteAsync("call-8", new Dictionary<string, object?>
+        {
+            ["action"] = "read",
+            ["chat_id"] = 10L,
+        });
+        var text = TextOf(result);
+
+        // Chat 30 is the same conversation on another service; reading chat 10
+        // alone hands the agent a slice with no sign the rest exists.
+        Assert.Contains("sent before the thread moved services", text);
+        Assert.Contains("group message", text);
+    }
+
+    [Fact]
+    public async Task Read_reaches_the_same_conversation_from_either_chat_row()
+    {
+        SeedDatabase();
+        var tool = new IMessageTool(_dbPath, EmptyContacts());
+
+        var result = await tool.ExecuteAsync("call-9", new Dictionary<string, object?>
+        {
+            ["action"] = "read",
+            ["chat_id"] = 30L,
+        });
+
+        Assert.Contains("group message", TextOf(result));
+    }
+
+    [Fact]
+    public async Task Read_does_not_pull_in_a_chat_with_different_participants()
+    {
+        SeedDatabase();
+        var tool = new IMessageTool(_dbPath, EmptyContacts());
+
+        var result = await tool.ExecuteAsync("call-10", new Dictionary<string, object?>
+        {
+            ["action"] = "read",
+            ["chat_id"] = 10L,
+        });
+
+        Assert.DoesNotContain("direct message", TextOf(result));
+    }
+
+    [Fact]
+    public async Task Chats_listing_shows_a_split_conversation_once()
+    {
+        SeedDatabase();
+        var tool = new IMessageTool(_dbPath, EmptyContacts());
+
+        var result = await tool.ExecuteAsync("call-11", new Dictionary<string, object?> { ["action"] = "chats" });
+
+        // Chats 10 and 30 are one conversation, so only one group entry should
+        // appear; listing both invites reading half of it.
+        Assert.Equal(1, Occurrences(TextOf(result), "Participants:"));
     }
 
     public void Dispose()
