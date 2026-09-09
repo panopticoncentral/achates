@@ -285,7 +285,20 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
                       AND (a.mime_type LIKE 'audio/%' OR a.uti LIKE '%audio%' OR a.uti LIKE '%caf%')
                     LIMIT 1
                 ) as audio_path,
-                m.attributedBody
+                m.attributedBody,
+                (
+                    SELECT COUNT(*)
+                    FROM message_attachment_join maj
+                    WHERE maj.message_id = m.ROWID
+                ) as attachment_count,
+                (
+                    SELECT coalesce(a.mime_type, a.uti)
+                    FROM message_attachment_join maj
+                    INNER JOIN attachment a ON a.ROWID = maj.attachment_id
+                    WHERE maj.message_id = m.ROWID
+                    ORDER BY maj.attachment_id
+                    LIMIT 1
+                ) as attachment_kind
             FROM message m
             LEFT JOIN handle h ON m.handle_id = h.ROWID
             WHERE m.ROWID IN (
@@ -311,6 +324,8 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
             var sender = reader.IsDBNull(4) ? null : reader.GetString(4);
             var audioPath = reader.IsDBNull(5) ? null : reader.GetString(5);
             var attributedBody = reader.IsDBNull(6) ? null : reader.GetFieldValue<byte[]>(6);
+            var attachmentCount = reader.IsDBNull(7) ? 0 : reader.GetInt64(7);
+            var attachmentKind = reader.IsDBNull(8) ? null : reader.GetString(8);
 
             // Messages leaves `text` NULL for most rows and stores the content in
             // `attributedBody` instead, so reading `text` alone hides the majority
@@ -319,11 +334,15 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
 
             if (text is null && audioPath is null)
             {
-                // A row carrying a body we could not decode is a real message. Mark
-                // the gap rather than dropping it: an invisible hole reads to the
-                // agent as a complete conversation.
-                if (attributedBody is null) continue; // non-text, non-audio attachment
-                text = UnreadableMessage;
+                // Every branch here is a real message. Describe it rather than
+                // dropping it: an invisible hole reads to the agent as a complete
+                // conversation. Attachments are checked first because a photo's
+                // body decodes to nothing but is perfectly well understood.
+                text = attachmentCount > 0
+                    ? DescribeAttachments(attachmentCount, attachmentKind)
+                    : attributedBody is not null ? UnreadableMessage : null;
+
+                if (text is null) continue;
             }
 
             var dateStr = date.HasValue ? FormatDate(date.Value) : "";
@@ -463,6 +482,29 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
         var seconds = coreDataTimestamp / 1_000_000_000.0;
         var dt = CoreDataEpoch.AddSeconds(seconds);
         return TimeZoneInfo.ConvertTime(dt, TimeZoneInfo.Local).ToString("g");
+    }
+
+    /// <summary>
+    /// Names a message that carries attachments and no text of its own, so it reads
+    /// as "[Image]" rather than disappearing. `kind` is the mime type where the row
+    /// has one and the UTI otherwise, since real rows often leave mime_type unset.
+    /// </summary>
+    private static string DescribeAttachments(long count, string? kind)
+    {
+        bool Mentions(string token) =>
+            kind is not null && kind.Contains(token, StringComparison.OrdinalIgnoreCase);
+
+        var label = true switch
+        {
+            _ when Mentions("image") || Mentions("jpeg") || Mentions("jpg")
+                || Mentions("png") || Mentions("heic") || Mentions("gif") => "Image",
+            _ when Mentions("video") || Mentions("movie") || Mentions("mpeg-4") => "Video",
+            _ when Mentions("pdf") => "PDF",
+            _ when Mentions("vcard") || Mentions("contact") => "Contact",
+            _ => "Attachment",
+        };
+
+        return count > 1 ? $"[{label} ×{count}]" : $"[{label}]";
     }
 
     private static string ExpandHome(string path) =>

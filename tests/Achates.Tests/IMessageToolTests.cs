@@ -78,13 +78,32 @@ public class IMessageToolTests : IDisposable
                 (1, "~/Library/Messages/Attachments/note.caf", "audio/x-caf", "com.apple.coreaudio-format"),
                 (2, "~/Library/Messages/Attachments/photo.jpg", "image/jpeg", "public.jpeg"),
             ]);
+
+        // Bare attachments: no text, no body. These are real messages and were
+        // being dropped outright.
+        InsertWithAttachments(conn, rowId: 700, chatId: 10, date: 695000000000000000,
+            text: null,
+            attachments: [(3, "~/photo1.jpg", "image/jpeg", "public.jpeg")]);
+        InsertWithAttachments(conn, rowId: 800, chatId: 10, date: 694000000000000000,
+            text: null,
+            attachments:
+            [
+                (4, "~/photo2.jpg", "image/jpeg", "public.jpeg"),
+                (5, "~/photo3.png", "image/png", "public.png"),
+            ]);
+        InsertWithAttachments(conn, rowId: 900, chatId: 10, date: 693000000000000000,
+            text: null,
+            attachments: [(6, "~/clip.mov", NULL_MIME, "public.movie")]);
     }
+
+    /// <summary>Real rows often leave mime_type unset, so the UTI is the fallback.</summary>
+    private const string? NULL_MIME = null;
 
     private const string MultiAttachmentText = "voice note plus a photo";
 
     private static void InsertWithAttachments(
-        SqliteConnection conn, long rowId, long chatId, long date, string text,
-        (long Id, string Filename, string Mime, string Uti)[] attachments)
+        SqliteConnection conn, long rowId, long chatId, long date, string? text,
+        (long Id, string Filename, string? Mime, string Uti)[] attachments)
     {
         using var msg = conn.CreateCommand();
         msg.CommandText = """
@@ -95,7 +114,7 @@ public class IMessageToolTests : IDisposable
         msg.Parameters.AddWithValue("@rowId", rowId);
         msg.Parameters.AddWithValue("@chatId", chatId);
         msg.Parameters.AddWithValue("@date", date);
-        msg.Parameters.AddWithValue("@text", text);
+        msg.Parameters.AddWithValue("@text", (object?)text ?? DBNull.Value);
         msg.ExecuteNonQuery();
 
         foreach (var (id, filename, mime, uti) in attachments)
@@ -109,7 +128,7 @@ public class IMessageToolTests : IDisposable
                 """;
             att.Parameters.AddWithValue("@id", id);
             att.Parameters.AddWithValue("@filename", filename);
-            att.Parameters.AddWithValue("@mime", mime);
+            att.Parameters.AddWithValue("@mime", (object?)mime ?? DBNull.Value);
             att.Parameters.AddWithValue("@uti", uti);
             att.Parameters.AddWithValue("@rowId", rowId);
             att.ExecuteNonQuery();
@@ -321,6 +340,54 @@ public class IMessageToolTests : IDisposable
         // Chats 10 and 30 are one conversation, so only one group entry should
         // appear; listing both invites reading half of it.
         Assert.Equal(1, Occurrences(TextOf(result), "Participants:"));
+    }
+
+    [Fact]
+    public async Task Read_shows_a_message_carrying_only_a_photo()
+    {
+        SeedDatabase();
+        var tool = new IMessageTool(_dbPath, EmptyContacts());
+
+        var result = await tool.ExecuteAsync("call-12", new Dictionary<string, object?>
+        {
+            ["action"] = "read",
+            ["chat_id"] = 10L,
+            ["count"] = 50,
+        });
+
+        Assert.Contains("[Image]", TextOf(result));
+    }
+
+    [Fact]
+    public async Task Read_counts_multiple_bare_attachments()
+    {
+        SeedDatabase();
+        var tool = new IMessageTool(_dbPath, EmptyContacts());
+
+        var result = await tool.ExecuteAsync("call-13", new Dictionary<string, object?>
+        {
+            ["action"] = "read",
+            ["chat_id"] = 10L,
+            ["count"] = 50,
+        });
+
+        Assert.Contains("[Image ×2]", TextOf(result));
+    }
+
+    [Fact]
+    public async Task Read_names_an_attachment_kind_from_the_uti_when_mime_type_is_missing()
+    {
+        SeedDatabase();
+        var tool = new IMessageTool(_dbPath, EmptyContacts());
+
+        var result = await tool.ExecuteAsync("call-14", new Dictionary<string, object?>
+        {
+            ["action"] = "read",
+            ["chat_id"] = 10L,
+            ["count"] = 50,
+        });
+
+        Assert.Contains("[Video]", TextOf(result));
     }
 
     public void Dispose()
