@@ -81,6 +81,13 @@ public sealed class AgentConfig
     public string? ThinkingModel { get; set; }
 
     /// <summary>
+    /// Section headings found in AGENT.md that the loader does not understand. Almost always
+    /// an <c>##</c> heading written inside the Prompt body, which silently truncates the
+    /// prompt at that line. Not persisted — diagnostic only.
+    /// </summary>
+    public List<string> UnknownSections { get; set; } = [];
+
+    /// <summary>
     /// Per-agent voice id for TTS (e.g. "af_nicole" or a Kokoro blend like
     /// "af_nicole(0.7)+af_bella(0.3)"). Null/empty means the agent is
     /// voiceless — speech is not generated even when the per-session toggle

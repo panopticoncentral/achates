@@ -30,10 +30,12 @@ public static class SystemPrompt
     {
         var lines = new List<string>();
 
-        // Agent identity
-        if (agentPrompt is not null)
+        // Agent identity. A prompt that is blank — or that carries nothing but a
+        // markdown heading, which reads as configured but says nothing to the model —
+        // falls back to the description rather than shipping a bare title.
+        if (HasPromptContent(agentPrompt))
         {
-            lines.Add(agentPrompt);
+            lines.Add(agentPrompt!);
         }
         else if (agentDescription is not null)
         {
@@ -86,7 +88,6 @@ public static class SystemPrompt
             lines.Add("## Notebook");
             lines.Add("You have a notebook — a folder of markdown files for long-term notes, todos, drafts, and ideas that persist across sessions.");
             lines.Add("Use `notebook list` to see what's there, `notebook read` to open a file, `notebook write` to save (writes replace the whole file, so include everything you want to keep), and `notebook mkdir` to organize into subfolders.");
-            lines.Add("If the user wants you to track todos, keep them in `TODO.md` at the root of the notebook.");
             lines.Add("Only .md files can be read or written; other extensions are rejected.");
             lines.Add("");
         }
@@ -216,10 +217,27 @@ public static class SystemPrompt
             lines.Add("");
         }
 
-        lines.Add("## Style");
-        lines.Add("Be concise and direct. Lead with the answer, not the reasoning.");
-        lines.Add("Use markdown formatting when it improves readability.");
-
         return string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// True when the prompt has substance beyond markdown headings and whitespace.
+    /// An <c>AGENT.md</c> whose Prompt section is just <c>#&#160;Name</c> looks configured
+    /// but tells the model nothing, so it is treated as absent.
+    /// </summary>
+    private static bool HasPromptContent(string? prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt))
+            return false;
+
+        foreach (var line in prompt.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0 || trimmed.StartsWith('#'))
+                continue;
+            return true;
+        }
+
+        return false;
     }
 }

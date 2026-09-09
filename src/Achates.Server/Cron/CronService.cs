@@ -35,6 +35,11 @@ public sealed class CronService : IAsyncDisposable
     // are well under this and unaffected.
     private static readonly TimeSpan MaxDreamtimeReviewWindow = TimeSpan.FromDays(14);
 
+    // Cached across jobs: 16 scheduled jobs a day should not each rescan every session.
+    private static readonly TimeSpan ActivityCacheTtl = TimeSpan.FromMinutes(10);
+    private DateTimeOffset? _lastActivityAt;
+    private DateTimeOffset _lastActivityCheckedAt = DateTimeOffset.MinValue;
+
     private const string DreamtimeInstructions = """
 
         --- Dreamtime Mode ---
@@ -349,6 +354,48 @@ public sealed class CronService : IAsyncDisposable
         return due;
     }
 
+    /// <summary>
+    /// A line describing when the user was last active anywhere, appended to scheduled
+    /// prompts. Without it a job sees only its own unanswered messages and cannot
+    /// distinguish "not talking to me" from "not here" — so it explains the silence, and
+    /// the only explanation its context supports is about the user.
+    /// </summary>
+    private async Task<string> DescribeUserPresenceAsync(CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastActivityCheckedAt > ActivityCacheTtl)
+        {
+            try
+            {
+                _lastActivityAt = await _sessionStore.LastUserActivityAsync(_agents.Keys, ct: ct);
+                _lastActivityCheckedAt = now;
+            }
+            catch (Exception ex)
+            {
+                // Presence is context, not a precondition — never fail a job over it.
+                _logger.LogWarning(ex, "Could not determine last user activity");
+                return "";
+            }
+        }
+
+        if (_lastActivityAt is not { } last)
+            return "";
+
+        var elapsed = now - last;
+        var description = elapsed switch
+        {
+            { TotalMinutes: < 90 } => "within the last hour or so",
+            { TotalHours: < 24 } => $"about {(int)elapsed.TotalHours} hours ago",
+            { TotalDays: < 2 } => "about a day ago",
+            _ => $"about {(int)elapsed.TotalDays} days ago",
+        };
+
+        return $"\n\n[Context: the user last sent a message to any agent {description}. "
+             + "If that was a while back they have been away from the app generally, not "
+             + "avoiding you specifically — do not read it as withdrawal or treat an "
+             + "unanswered scheduled prompt as a response.]";
+    }
+
     private async Task<(string? Result, bool Skipped, string? Error)> ExecuteJobAsync(
         string agentName, AgentDefinition agentDef, CronStore store, CronJob job, CancellationToken ct)
     {
@@ -361,6 +408,7 @@ public sealed class CronService : IAsyncDisposable
         // via TemporalContext / MemoryContext transforms.
         var systemPrompt = agentDef.SystemPrompt;
         var tools = BuildJobTools(agentName, agentDef);
+        var model = agentDef.Model;
 
         if (job.Kind == CronJobKind.Dreamtime)
         {
@@ -378,6 +426,14 @@ public sealed class CronService : IAsyncDisposable
 
             systemPrompt = agentDef.SystemPrompt + DreamtimeInstructions;
             tools = BuildDreamtimeTools(agentName, agentDef, job);
+
+            // Consolidation is the most agentic work an agent does — deciding what is
+            // durable, what to relocate, and what to drop — and it runs unattended, so a
+            // bad call is only noticed later, in a memory that quietly lost something.
+            // Only agents that declare their own thinking model consolidate on it; the
+            // global default exists for the think tool and is not an instruction to spend
+            // it nightly on every agent.
+            model = agentDef.ConsolidationModel ?? agentDef.Model;
         }
 
         var temporal = TemporalContext.CreateTransform();
@@ -386,16 +442,18 @@ public sealed class CronService : IAsyncDisposable
 
         var agent = new AgentRuntime(new AgentOptions
         {
-            Model = agentDef.Model,
+            Model = model,
             SystemPrompt = systemPrompt,
             Tools = tools,
             CompletionOptions = agentDef.CompletionOptions,
             TransformContext = ctx => memory(temporal(ctx)),
         });
 
+        var presence = await DescribeUserPresenceAsync(ct);
+
         var stream = agent.PromptAsync(new UserMessage
         {
-            Text = $"{CronSessionMarker.FormatHeader(job.Name)}\n\n{job.Message}",
+            Text = $"{CronSessionMarker.FormatHeader(job.Name)}\n\n{job.Message}{presence}",
             Hidden = true,
         });
 

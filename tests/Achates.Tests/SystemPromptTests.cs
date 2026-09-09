@@ -95,13 +95,42 @@ public sealed class SystemPromptTests
 
     // --- Style section (always present) ---
 
+    // --- Identity fallback ---
+
     [Fact]
-    public void Always_includes_style_section()
+    public void Uses_prompt_when_it_has_content()
     {
+        var result = SystemPrompt.Build("a career coach", "You are Vera. You coach engineers.");
+
+        Assert.Contains("You are Vera. You coach engineers.", result);
+        Assert.DoesNotContain("You are a career coach.", result);
+    }
+
+    [Fact]
+    public void Falls_back_to_description_when_prompt_is_heading_only()
+    {
+        var result = SystemPrompt.Build("a career coach", "# Vera — Career Coach");
+
+        Assert.Contains("You are a career coach.", result);
+    }
+
+    [Fact]
+    public void Falls_back_to_description_when_prompt_is_whitespace()
+    {
+        var result = SystemPrompt.Build("a career coach", "   \n\n  ");
+
+        Assert.Contains("You are a career coach.", result);
+    }
+
+    [Fact]
+    public void Does_not_impose_a_house_style()
+    {
+        // Voice is inherently per-agent: a counselor and a cost reporter should not be told
+        // to sound the same. Agents that want concision say so in their own prompt.
         var result = SystemPrompt.Build();
 
-        Assert.Contains("## Style", result);
-        Assert.Contains("Be concise", result);
+        Assert.DoesNotContain("## Style", result);
+        Assert.DoesNotContain("Be concise", result);
     }
 
     // --- Optional sections ---
@@ -112,7 +141,17 @@ public sealed class SystemPromptTests
         var result = SystemPrompt.Build(hasNotebook: true);
 
         Assert.Contains("## Notebook", result);
-        Assert.Contains("TODO.md", result);
+        Assert.Contains("notebook list", result);
+    }
+
+    [Fact]
+    public void Notebook_section_does_not_prescribe_a_todo_file()
+    {
+        // Where the user's todo list lives is per-user data, not a framework fact:
+        // agents that own a todo list name the file in their own prompt.
+        var result = SystemPrompt.Build(hasNotebook: true);
+
+        Assert.DoesNotContain("TODO.md", result);
     }
 
     [Fact]

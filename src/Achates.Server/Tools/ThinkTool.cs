@@ -12,7 +12,10 @@ namespace Achates.Server.Tools;
 /// <summary>
 /// Escalates to a thinking model for complex reasoning tasks.
 /// </summary>
-internal sealed class ThinkTool(Model model) : AgentTool
+internal sealed class ThinkTool(
+    Model model,
+    string agentName,
+    CostLedger? costLedger = null) : AgentTool
 {
     private static readonly JsonElement _schema = ObjectSchema(
         new Dictionary<string, JsonElement>
@@ -58,6 +61,11 @@ internal sealed class ThinkTool(Model model) : AgentTool
 
             var result = await stream.ResultAsync;
 
+            // Escalations run outside the agent's own completion loop, so nothing else
+            // records them. Without this they are invisible to the cost tool — and the
+            // thinking model is the most expensive call an agent makes.
+            RecordCost(result);
+
             if (result.ErrorMessage is not null)
                 return TextResult($"Thinking failed: {result.ErrorMessage}");
 
@@ -76,6 +84,30 @@ internal sealed class ThinkTool(Model model) : AgentTool
         {
             return TextResult($"Thinking failed: {ex.Message}");
         }
+    }
+
+    private void RecordCost(CompletionAssistantMessage result)
+    {
+        if (costLedger is null)
+            return;
+
+        var usage = result.CompletionUsage;
+        _ = costLedger.AppendAsync(new CostEntry
+        {
+            Timestamp = DateTimeOffset.UtcNow,
+            Model = result.Model,
+            Channel = agentName,
+            Peer = "think",
+            InputTokens = usage.Input,
+            OutputTokens = usage.Output,
+            CacheReadTokens = usage.CacheRead,
+            CacheWriteTokens = usage.CacheWrite,
+            CostTotal = usage.Cost.Total,
+            CostInput = usage.Cost.Input,
+            CostOutput = usage.Cost.Output,
+            CostCacheRead = usage.Cost.CacheRead,
+            CostCacheWrite = usage.Cost.CacheWrite,
+        });
     }
 
     private static AgentToolResult TextResult(string text) =>

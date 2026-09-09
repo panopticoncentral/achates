@@ -545,6 +545,7 @@ public sealed class GatewayService(
         // Per-agent thinking model wins; fall back to the global default. Only consulted when the
         // agent enables the think tool — without one configured anywhere, the tool is skipped.
         Model? thinkingModel = null;
+        var thinkingModelIsExplicit = !string.IsNullOrWhiteSpace(agentConfig.ThinkingModel);
         if (agentConfig.Tools?.Contains("think") == true)
         {
             var thinkingModelId = !string.IsNullOrWhiteSpace(agentConfig.ThinkingModel)
@@ -570,8 +571,13 @@ public sealed class GatewayService(
         }
 
         var agentDir = Path.Combine(achatesHome, "agents", name);
+        // Built before the tools so the think tool can record its escalations: those run
+        // outside the agent's completion loop and are otherwise absent from the ledger.
+        var costLedgerPath = Path.Combine(achatesHome, "agents", name, "costs.jsonl");
+        var costLedger = new CostLedger(costLedgerPath);
+
         var tools = ResolveTools(agentConfig, toolsConfig, model, graphClients, withingsClient,
-            name, agentDir, transcribeModel, thinkingModel);
+            name, agentDir, transcribeModel, thinkingModel, costLedger);
         var hasTools = agentConfig.Tools ?? [];
         var graphAccountNames = graphClients.Keys.ToList();
         var systemPrompt = SystemPrompt.Build(agentConfig.Description, prompt, tools,
@@ -593,8 +599,6 @@ public sealed class GatewayService(
             sharedMemoryEnabled: agentConfig.SharedMemory ?? true);
         var memoryPath = Path.Combine(achatesHome, "agents", name, "memory.md");
         var workingMemoryPath = Path.Combine(achatesHome, "agents", name, "working.md");
-        var costLedgerPath = Path.Combine(achatesHome, "agents", name, "costs.jsonl");
-        var costLedger = new CostLedger(costLedgerPath);
         var cronStorePath = Path.Combine(achatesHome, "agents", name, "cron.json");
         var cronStore = hasTools.Contains("cron") || agentConfig.Dreamtime is not null
             ? new CronStore(cronStorePath)
@@ -609,6 +613,7 @@ public sealed class GatewayService(
         {
             Model = model,
             ThinkingModel = thinkingModel,
+            ConsolidationModel = thinkingModelIsExplicit ? thinkingModel : null,
             SystemPrompt = systemPrompt,
             Tools = tools,
             ToolNames = hasTools,
@@ -651,7 +656,8 @@ public sealed class GatewayService(
 
     private IReadOnlyList<AgentTool> ResolveTools(AgentConfig agentConfig, ToolsConfig? toolsConfig,
         Model model, IReadOnlyDictionary<string, GraphClient> graphClients, WithingsClient? withingsClient,
-        string agentName, string agentDir, Model? transcribeModel = null, Model? thinkingModel = null)
+        string agentName, string agentDir, Model? transcribeModel = null, Model? thinkingModel = null,
+        CostLedger? costLedger = null)
     {
         if (!model.Parameters.HasFlag(ModelParameters.Tools))
             return [];
@@ -738,7 +744,7 @@ public sealed class GatewayService(
                 case "think":
                     if (thinkingModel is null)
                     { logger.LogWarning("Agent '{Agent}': think tool skipped — no thinking model configured", agentName); break; }
-                    tools.Add(new ThinkTool(thinkingModel));
+                    tools.Add(new ThinkTool(thinkingModel, agentName, costLedger));
                     break;
                 case "location":
                     tools.Add(new LocationTool(_deviceBridge));

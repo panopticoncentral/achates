@@ -94,6 +94,44 @@ public sealed class MobileSessionStore(string basePath)
         return (filtered, hasMore);
     }
 
+    /// <summary>
+    /// Timestamp of the most recent message the user actually typed, across every named
+    /// agent. Scheduled jobs see only their own channel, where an unanswered prompt looks
+    /// identical whether the user is avoiding this agent or simply has not opened the app —
+    /// and every agent that cannot tell the difference reaches for the first reading.
+    /// Hidden messages are excluded: those are the scheduled prompts themselves.
+    /// Returns null when no user message is found in the scanned window.
+    /// </summary>
+    public async Task<DateTimeOffset?> LastUserActivityAsync(
+        IEnumerable<string> agentNames,
+        int sessionsPerAgent = 10,
+        CancellationToken ct = default)
+    {
+        long newest = 0;
+
+        foreach (var agentName in agentNames)
+        {
+            var (sessions, _) = await ListAsync(agentName, limit: sessionsPerAgent, ct: ct);
+            foreach (var info in sessions)
+            {
+                var session = await LoadAsync(agentName, info.Id, ct);
+                if (session is null)
+                    continue;
+
+                for (var i = session.Messages.Count - 1; i >= 0; i--)
+                {
+                    if (session.Messages[i] is not UserMessage { Hidden: false } user)
+                        continue;
+                    if (user.Timestamp > newest)
+                        newest = user.Timestamp;
+                    break;
+                }
+            }
+        }
+
+        return newest == 0 ? null : DateTimeOffset.FromUnixTimeMilliseconds(newest);
+    }
+
     public static string ChatSessionId(string originSessionId, string targetAgentId)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(originSessionId + "|" + targetAgentId));

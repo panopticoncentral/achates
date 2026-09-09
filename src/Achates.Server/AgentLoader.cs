@@ -43,6 +43,14 @@ public static class AgentLoader
                 continue;
 
             var name = Path.GetFileName(dir);
+            if (config.UnknownSections.Count > 0)
+            {
+                Console.Error.WriteLine(
+                    $"warning: agent '{name}' has unrecognized AGENT.md section(s): " +
+                    $"{string.Join(", ", config.UnknownSections)}. An '##' heading inside the " +
+                    "Prompt body ends the prompt — use '###' for headings within a prompt.");
+            }
+
             agents[name] = config;
         }
 
@@ -228,6 +236,12 @@ public static class AgentLoader
         // Prompt section — everything is the system prompt
         if (sections.TryGetValue("prompt", out var prompt))
             config.Prompt = prompt.Trim();
+
+        // An H2 inside the prompt body silently ends the prompt: everything below it lands
+        // in a section nobody reads, and the file still looks correct. Surface the leftovers
+        // so a truncated prompt is a visible problem rather than a quiet one.
+        config.UnknownSections = [.. sections.Keys
+            .Where(k => k is not ("_title" or "" or "capabilities" or "prompt"))];
 
         return config;
     }

@@ -14,6 +14,14 @@ public sealed record AgentDefinition
 {
     public required Model Model { get; init; }
     public Model? ThinkingModel { get; init; }
+
+    /// <summary>
+    /// Model used for nightly dreamtime consolidation. Set only when the agent declares its
+    /// own <c>**Thinking Model:**</c> — a globally configured thinking model is a fallback
+    /// for the think tool, not a statement about how this agent should consolidate memory.
+    /// Null means consolidate on the base model.
+    /// </summary>
+    public Model? ConsolidationModel { get; init; }
     public required string SystemPrompt { get; init; }
     public required IReadOnlyList<AgentTool> Tools { get; init; }
 

@@ -78,7 +78,13 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
                 c.service_name,
                 latest.last_date,
                 m.text as last_message,
-                m.is_from_me as last_is_from_me
+                m.is_from_me as last_is_from_me,
+                (
+                    SELECT GROUP_CONCAT(h.id, CHAR(31))
+                    FROM chat_handle_join chj
+                    INNER JOIN handle h ON h.ROWID = chj.handle_id
+                    WHERE chj.chat_id = c.ROWID
+                ) as participant_handles
             FROM chat c
             INNER JOIN (
                 SELECT cmj.chat_id, MAX(m2.date) as last_date, MAX(m2.ROWID) as last_msg_id
@@ -106,8 +112,14 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
             var lastDate = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4);
             var lastText = reader.IsDBNull(5) ? null : reader.GetString(5);
             var lastIsFromMe = !reader.IsDBNull(6) && reader.GetInt64(6) == 1;
+            var participantHandles = reader.IsDBNull(7) ? null : reader.GetString(7);
 
-            var label = !string.IsNullOrWhiteSpace(displayName) ? displayName : contacts.Resolve(identifier);
+            var participants = ResolveParticipants(participantHandles);
+            var label = !string.IsNullOrWhiteSpace(displayName)
+                ? displayName
+                : participants.Count > 1
+                    ? string.Join(", ", participants)
+                    : contacts.Resolve(identifier);
             var serviceTag = service switch
             {
                 "iMessage" => "iMessage",
@@ -116,6 +128,11 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
             };
 
             sb.AppendLine($"**{label}** [{serviceTag}]");
+            // Group chats are frequently unnamed, so display_name is empty and the
+            // identifier is opaque. Without the roster the only way to learn who is in a
+            // chat is to read it and infer from senders, one chat at a time.
+            if (participants.Count > 1)
+                sb.AppendLine($"  Participants: {string.Join(", ", participants)}");
             if (lastText is not null)
             {
                 var preview = lastIsFromMe ? $"You: {Truncate(lastText, 100)}" : Truncate(lastText, 100);
@@ -129,6 +146,28 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
         }
 
         return TextResult(sb.ToString().TrimEnd());
+    }
+
+    /// <summary>
+    /// Maps a chat's handle roster to contact names, falling back to the raw handle
+    /// (phone number or Apple ID) when a handle has no matching contact.
+    /// </summary>
+    private List<string> ResolveParticipants(string? packedHandles)
+    {
+        if (string.IsNullOrWhiteSpace(packedHandles))
+            return [];
+
+        var seen = new List<string>();
+        foreach (var handle in packedHandles.Split('\u001f', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var name = contacts.Resolve(handle);
+            if (string.IsNullOrWhiteSpace(name))
+                name = handle;
+            if (!seen.Contains(name))
+                seen.Add(name);
+        }
+
+        return seen;
     }
 
     private async Task<AgentToolResult> ReadChatAsync(

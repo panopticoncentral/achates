@@ -269,6 +269,53 @@ public sealed class AgentLoaderTests
     }
 
     [Fact]
+    public void Parse_FlagsHeadingsInsidePromptThatTruncateIt()
+    {
+        // An "##" heading in the prompt body ends the Prompt section: everything below it
+        // lands in a section nobody reads, and the file still looks correct.
+        var config = AgentLoader.Parse("""
+            # Sasha
+
+            A description.
+
+            ## Prompt
+
+            You are Sasha.
+
+            ## The protocols
+
+            You run standing rules for him.
+            """);
+
+        Assert.NotNull(config);
+        Assert.Equal("You are Sasha.", config!.Prompt);
+        Assert.Contains("the protocols", config.UnknownSections);
+    }
+
+    [Fact]
+    public void Parse_AcceptsH3HeadingsInsidePrompt()
+    {
+        var config = AgentLoader.Parse("""
+            # Sasha
+
+            A description.
+
+            ## Prompt
+
+            You are Sasha.
+
+            ### The protocols
+
+            You run standing rules for him.
+            """);
+
+        Assert.NotNull(config);
+        Assert.Contains("### The protocols", config!.Prompt);
+        Assert.Contains("You run standing rules", config.Prompt);
+        Assert.Empty(config.UnknownSections);
+    }
+
+    [Fact]
     public void Parse_ReadsMemoryBudgetCapability()
     {
         var md = """

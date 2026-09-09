@@ -54,7 +54,7 @@ Defaults used when an agent's AGENT.md doesn't declare its own `**Model:**` / `*
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `base` | string | _(none)_ | Fallback base model when an agent doesn't declare `**Model:**`. At least one source (per-agent or global) must be set or the agent fails to load. |
-| `thinking` | string | _(none)_ | Fallback thinking model when an agent doesn't declare `**Thinking Model:**`. Without one from either source, agents with the `think` tool simply skip the tool. |
+| `thinking` | string | _(none)_ | Fallback thinking model when an agent doesn't declare `**Thinking Model:**`. Without one from either source, agents with the `think` tool simply skip the tool. Used only by the `think` tool — unlike a per-agent `**Thinking Model:**`, it does not affect dreamtime. |
 
 These defaults can also be edited from the Apple app under **Settings → System → Default Models** without restarting the server — the change is written back to `config.yaml` and any agent that doesn't override the model is reloaded automatically.
 
@@ -177,7 +177,7 @@ Each agent is defined by a single `AGENT.md` file at `~/.achates/agents/{name}/A
 | `# Title` | yes | H1 heading. Display name for the agent. |
 | _(description)_ | no | Paragraph(s) between H1 and first H2. Used in system prompt and agent listing. |
 | `## Capabilities` | yes | Agent settings as `**Key:** value` lines (see below). |
-| `## Prompt` | no | Everything under this heading becomes the system prompt. |
+| `## Prompt` | no | Everything under this heading becomes the system prompt — until the next `##` heading. Use `###` for headings *within* a prompt: an `##` ends the section, and everything below it is silently dropped (the server warns at startup if this happens). A prompt that is blank or contains nothing but a heading falls back to the description. |
 
 ### Capabilities keys
 
@@ -187,7 +187,7 @@ Each capability is a `**Key:** value` line. List values (tools, allowed chats) u
 |-----|------|---------|-------------|
 | `Provider` | string | _(global)_ | Override the provider for this agent. |
 | `Model` | string | _(`models.base`)_ | Base model id for this agent. Falls back to `models.base` in config.yaml. |
-| `Thinking Model` | string | _(`models.thinking`)_ | Thinking model id used by the `think` tool. Falls back to `models.thinking`. Only consulted when `think` is enabled. |
+| `Thinking Model` | string | _(`models.thinking`)_ | Thinking model id used by the `think` tool. Falls back to `models.thinking`. Only consulted when `think` is enabled. Setting it here (rather than relying on `models.thinking`) also makes nightly dreamtime consolidation run on this model instead of the agent's base model — consolidation is unattended and agentic, so a stronger model is worth it where the base model is weak. The global fallback deliberately does *not* trigger this. |
 | `Tools` | list | _(none)_ | Tool names to enable. Available: `session`, `notebook`, `library`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cron`, `imessage`, `transcribe`, `think`, `health`, `chat`, `location`, `camera`, `image`, `profile`, `agent_manager`. Note: `memory` and `cost` are always available to every agent; listing them here is accepted but ignored. |
 | `Allowed Chats` | list | _(all)_ | Allowlist of agent names this agent can chat with. Omit to allow all. Only relevant when `chat` is in tools. |
 | `Reasoning Effort` | string | `medium` | Reasoning effort level. Only sent if the model supports it. |
