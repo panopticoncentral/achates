@@ -28,8 +28,10 @@ public class IMessageToolTests : IDisposable
             CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
             CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, chat_identifier TEXT, display_name TEXT, service_name TEXT);
             CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
-            CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, date INTEGER, is_from_me INTEGER, handle_id INTEGER);
+            CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, date INTEGER, is_from_me INTEGER, handle_id INTEGER, attributedBody BLOB);
             CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
+            CREATE TABLE attachment (ROWID INTEGER PRIMARY KEY, filename TEXT, mime_type TEXT, uti TEXT);
+            CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
 
             INSERT INTO handle (ROWID, id) VALUES
                 (1, '+15550001111'), (2, '+15550002222'), (3, '+15550003333');
@@ -49,6 +51,32 @@ public class IMessageToolTests : IDisposable
                        (200, 'direct message', 690000000000000000, 0, 1);
             INSERT INTO chat_message_join (chat_id, message_id) VALUES (10,100),(20,200);
             """;
+        cmd.ExecuteNonQuery();
+
+        // Most real messages leave `text` NULL and carry their content in
+        // `attributedBody`; one of these is undecodable to stand in for an
+        // archive shape the decoder does not understand.
+        InsertAttributedBody(conn, rowId: 300, chatId: 10, date: 710000000000000000,
+            body: TypedstreamFixture.Build(AttributedOnlyText));
+        InsertAttributedBody(conn, rowId: 400, chatId: 10, date: 705000000000000000,
+            body: [0x04, 0x0b, 0x99, 0x99]);
+    }
+
+    private const string AttributedOnlyText = "Sure—the deadline moved to Tuesday afternoon";
+
+    private static void InsertAttributedBody(
+        SqliteConnection conn, long rowId, long chatId, long date, byte[] body)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO message (ROWID, text, date, is_from_me, handle_id, attributedBody)
+                VALUES (@rowId, NULL, @date, 0, 2, @body);
+            INSERT INTO chat_message_join (chat_id, message_id) VALUES (@chatId, @rowId);
+            """;
+        cmd.Parameters.AddWithValue("@rowId", rowId);
+        cmd.Parameters.AddWithValue("@chatId", chatId);
+        cmd.Parameters.AddWithValue("@date", date);
+        cmd.Parameters.AddWithValue("@body", body);
         cmd.ExecuteNonQuery();
     }
 
@@ -82,6 +110,52 @@ public class IMessageToolTests : IDisposable
 
         var directSection = text[text.IndexOf("Chat ID: `20`", StringComparison.Ordinal)..];
         Assert.DoesNotContain("Participants:", directSection);
+    }
+
+    [Fact]
+    public async Task Read_surfaces_a_message_stored_only_in_attributed_body()
+    {
+        SeedDatabase();
+        var tool = new IMessageTool(_dbPath, EmptyContacts());
+
+        var result = await tool.ExecuteAsync("call-3", new Dictionary<string, object?>
+        {
+            ["action"] = "read",
+            ["chat_id"] = 10L,
+        });
+
+        Assert.Contains(AttributedOnlyText, TextOf(result));
+    }
+
+    [Fact]
+    public async Task Read_marks_an_undecodable_message_instead_of_dropping_it()
+    {
+        SeedDatabase();
+        var tool = new IMessageTool(_dbPath, EmptyContacts());
+
+        var result = await tool.ExecuteAsync("call-4", new Dictionary<string, object?>
+        {
+            ["action"] = "read",
+            ["chat_id"] = 10L,
+        });
+
+        // Dropping it silently hands the agent a transcript with an invisible hole.
+        Assert.Contains("[unreadable message]", TextOf(result));
+    }
+
+    [Fact]
+    public async Task Search_finds_a_message_stored_only_in_attributed_body()
+    {
+        SeedDatabase();
+        var tool = new IMessageTool(_dbPath, EmptyContacts());
+
+        var result = await tool.ExecuteAsync("call-5", new Dictionary<string, object?>
+        {
+            ["action"] = "search",
+            ["query"] = "deadline moved",
+        });
+
+        Assert.Contains(AttributedOnlyText, TextOf(result));
     }
 
     public void Dispose()

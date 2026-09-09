@@ -16,6 +16,12 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
     // macOS Core Data epoch: 2001-01-01 00:00:00 UTC
     private static readonly DateTimeOffset CoreDataEpoch = new(2001, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
+    /// <summary>
+    /// Stands in for a message whose body is present but could not be decoded, so a
+    /// gap in a transcript is visible to the agent reading it.
+    /// </summary>
+    private const string UnreadableMessage = "[unreadable message]";
+
     private static readonly JsonElement _schema = ObjectSchema(
         new Dictionary<string, JsonElement>
         {
@@ -79,6 +85,7 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
                 latest.last_date,
                 m.text as last_message,
                 m.is_from_me as last_is_from_me,
+                m.attributedBody as last_attributed_body,
                 (
                     SELECT GROUP_CONCAT(h.id, CHAR(31))
                     FROM chat_handle_join chj
@@ -112,7 +119,12 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
             var lastDate = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4);
             var lastText = reader.IsDBNull(5) ? null : reader.GetString(5);
             var lastIsFromMe = !reader.IsDBNull(6) && reader.GetInt64(6) == 1;
-            var participantHandles = reader.IsDBNull(7) ? null : reader.GetString(7);
+            var lastAttributedBody = reader.IsDBNull(7) ? null : reader.GetFieldValue<byte[]>(7);
+            var participantHandles = reader.IsDBNull(8) ? null : reader.GetString(8);
+
+            // Without this the preview is blank for every chat whose newest message
+            // stores its content in `attributedBody` — which is most of them.
+            lastText ??= AttributedBodyDecoder.Decode(lastAttributedBody);
 
             var participants = ResolveParticipants(participantHandles);
             var label = !string.IsNullOrWhiteSpace(displayName)
@@ -208,7 +220,8 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
                 m.is_from_me,
                 m.date,
                 h.id as sender,
-                a.filename as audio_path
+                a.filename as audio_path,
+                m.attributedBody
             FROM message m
             INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
             LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -232,8 +245,21 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
             var date = reader.IsDBNull(3) ? (long?)null : reader.GetInt64(3);
             var sender = reader.IsDBNull(4) ? null : reader.GetString(4);
             var audioPath = reader.IsDBNull(5) ? null : reader.GetString(5);
+            var attributedBody = reader.IsDBNull(6) ? null : reader.GetFieldValue<byte[]>(6);
 
-            if (text is null && audioPath is null) continue; // skip non-text, non-audio attachments
+            // Messages leaves `text` NULL for most rows and stores the content in
+            // `attributedBody` instead, so reading `text` alone hides the majority
+            // of a conversation.
+            text ??= AttributedBodyDecoder.Decode(attributedBody);
+
+            if (text is null && audioPath is null)
+            {
+                // A row carrying a body we could not decode is a real message. Mark
+                // the gap rather than dropping it: an invisible hole reads to the
+                // agent as a complete conversation.
+                if (attributedBody is null) continue; // non-text, non-audio attachment
+                text = UnreadableMessage;
+            }
 
             var dateStr = date.HasValue ? FormatDate(date.Value) : "";
             var who = isFromMe ? "You" : contacts.Resolve(sender);
@@ -283,7 +309,8 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
                 c.ROWID as chat_id,
                 c.chat_identifier,
                 c.display_name,
-                a.filename as audio_path
+                a.filename as audio_path,
+                m.attributedBody
             FROM message m
             INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
             INNER JOIN chat c ON cmj.chat_id = c.ROWID
@@ -292,10 +319,14 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
             LEFT JOIN attachment a ON maj.attachment_id = a.ROWID
                 AND (a.mime_type LIKE 'audio/%' OR a.uti LIKE '%audio%' OR a.uti LIKE '%caf%')
             WHERE m.text LIKE @query
+               OR (m.text IS NULL AND instr(m.attributedBody, @raw) > 0)
             ORDER BY m.date DESC
             LIMIT @count
             """;
         cmd.Parameters.AddWithValue("@query", $"%{query}%");
+        // The blob stores its payload as UTF-8, so the needle matches as raw bytes.
+        // Unlike LIKE this is case-sensitive; it only ever adds results.
+        cmd.Parameters.AddWithValue("@raw", Encoding.UTF8.GetBytes(query));
         cmd.Parameters.AddWithValue("@count", count);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
@@ -315,6 +346,10 @@ internal sealed class IMessageTool(string dbPath, ContactResolver contacts) : Ag
             var chatIdentifier = reader.GetString(6);
             var displayName = reader.IsDBNull(7) ? null : reader.GetString(7);
             var audioPath = reader.IsDBNull(8) ? null : reader.GetString(8);
+            var attributedBody = reader.IsDBNull(9) ? null : reader.GetFieldValue<byte[]>(9);
+
+            if (text.Length == 0)
+                text = AttributedBodyDecoder.Decode(attributedBody) ?? UnreadableMessage;
 
             var chatLabel = !string.IsNullOrWhiteSpace(displayName) ? displayName : contacts.Resolve(chatIdentifier);
             var who = isFromMe ? "You" : contacts.Resolve(sender);
