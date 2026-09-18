@@ -2,6 +2,22 @@
 
 A personal AI assistant that runs on your own devices and answers on the channels you use.
 
+## Apple app
+
+Open `apple/Achates.xcodeproj` and run the **Achates** scheme for iOS or macOS. Connect to your Achates server using an HTTP or HTTPS address. First-run setup stays visible until the connection succeeds.
+
+- Browse **Agents → Conversations → Messages**. iPhone uses a navigation stack; iPad at regular width and Mac use a resizable split view.
+- Unsent text and attachments stay with their conversation while the app is running, including when you switch agents or servers. Canceling a message edit restores the draft you were writing. Drafts are not persisted across app restarts.
+- Search filters the conversations already loaded in the list; **Find in Conversation** searches the open transcript. On Mac, agent search is in the toolbar and conversation search is inside its column. Select the conversation header to edit its agent, or use the conversation actions menu to rename it.
+- Agent, memory, avatar, and default-model editors protect unsaved changes. Nested prompt/model choices remain provisional until the parent editor is saved.
+- On Mac, use **⌘N** for a new conversation, **⌘F** to find, **⌘S** to save an active editor, and **⌘,** for Settings. Return sends a message; Shift–Return inserts a newline. During a response, you can keep drafting; Escape stops generation.
+- **Manage** on Mac and the **Manage** section in iOS Settings contain Memory, Scheduled Jobs, and Default Models. Costs includes daily spending and explicit rolling periods.
+- Open sent images and documents with native Quick Look. Attachment and dictation failures appear beside the composer.
+- Tool activity and thinking labels align with the assistant's message text; progress indicators appear after the label so the text stays in place.
+- iOS voice conversations have microphone pause/resume and retry controls. Dictation and reading replies aloud remain available on both platforms.
+
+See [UI implementation notes](docs/ui-implementation-2026-09-17.md) for validation and remaining design work.
+
 ## Outlook Mail & Calendar Setup
 
 Achates can read your Outlook email and calendar via the Microsoft Graph API. There are two setup paths depending on your account type.
@@ -330,7 +346,7 @@ Tokens are cached at `~/.achates/withings-tokens.json` and refresh automatically
 
 ## Voice (TTS) Setup
 
-Agents can speak their replies via a locally-hosted [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) sidecar. Fully private (no cloud), no content moderation, per-agent voice identity. You run the sidecar yourself (terminal, launchd, systemd, Docker — your call) and point Achates at it via `tools.speech.endpoint`. See [`docs/speech-setup.md`](docs/speech-setup.md) for the one-time install. Voice is per-agent (`**Voice:** af_nicole` in `AGENT.md`) and opt-in per session (speaker toggle in the chat nav bar).
+Agents can speak their replies via a locally-hosted [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) sidecar. Fully private (no cloud), no content moderation, per-agent voice identity. You run the sidecar yourself (terminal, launchd, systemd, Docker — your call) and point Achates at it via `tools.speech.endpoint`. See [`docs/speech-setup.md`](docs/speech-setup.md) for the one-time install. Voice is per-agent (`**Voice:** af_nicole` in `AGENT.md`) and opt-in per session (Read Replies Aloud in conversation actions (or the Mac speaker button)).
 
 ## Tools Reference
 

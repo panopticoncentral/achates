@@ -91,8 +91,8 @@ private struct ConnectionPane: View {
     }
 
     private func connect() {
-        guard let url = URL(string: urlString), url.scheme != nil else {
-            appState.lastConnectionError = "Invalid URL"
+        guard let url = ServerAddress.parse(urlString) else {
+            appState.lastConnectionError = "Enter a server address such as https://achates.example.com or http://192.168.1.100:5000."
             return
         }
         appState.lastConnectionError = nil
@@ -125,7 +125,7 @@ private struct AboutPane: View {
 
 // MARK: - First-run onboarding
 
-/// Shown as the main window's content until a server URL exists — a centered
+/// Shown as the main window's content until the first successful connection — a centered
 /// connect card instead of an iOS-shaped settings form filling the window.
 struct MacOnboardingView: View {
     @Environment(AppState.self) private var appState
@@ -148,10 +148,15 @@ struct MacOnboardingView: View {
                 .frame(maxWidth: 340)
                 .onSubmit(connect)
 
-            Button("Connect", action: connect)
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(urlString.isEmpty)
+            if appState.connectionStatus == .connecting || appState.connectionStatus == .reconnecting {
+                ProgressView("Connecting…")
+                Button("Cancel") { appState.disconnect() }
+            } else {
+                Button("Connect", action: connect)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(urlString.isEmpty)
+            }
 
             if let reason = appState.lastConnectionError {
                 Text(reason)
@@ -164,8 +169,8 @@ struct MacOnboardingView: View {
     }
 
     private func connect() {
-        guard let url = URL(string: urlString), url.scheme != nil else {
-            appState.lastConnectionError = "Invalid URL"
+        guard let url = ServerAddress.parse(urlString) else {
+            appState.lastConnectionError = "Enter a server address such as https://achates.example.com or http://192.168.1.100:5000."
             return
         }
         appState.lastConnectionError = nil
@@ -213,25 +218,17 @@ struct SystemWindowView: View {
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
         } detail: {
-            if appState.connectionStatus != .connected {
-                ContentUnavailableView(
-                    "Not Connected",
-                    systemImage: "wifi.slash",
-                    description: Text("Connect to a server to manage memory, jobs, and models.")
-                )
-            } else {
-                // Each section hosts its own stack so Memory can push its editor.
-                switch selection {
-                case .memory, nil:
-                    NavigationStack { MemoryListView() }
-                case .jobs:
-                    NavigationStack { JobsView() }
-                case .models:
-                    NavigationStack { DefaultModelsView() }
-                }
+            switch selection {
+            case .memory, nil:
+                NavigationStack { MemoryListView() }
+            case .jobs:
+                NavigationStack { JobsView() }
+            case .models:
+                NavigationStack { DefaultModelsPage() }
             }
         }
-        .navigationTitle("System")
+        .safeAreaInset(edge: .top, spacing: 0) { ConnectionStatusBanner() }
+        .navigationTitle("Manage")
     }
 }
 

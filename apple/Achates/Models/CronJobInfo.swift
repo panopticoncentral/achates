@@ -106,9 +106,10 @@ extension CronJobInfo.Schedule {
             f.timeStyle = .short
             return "Once at \(f.string(from: date))"
         case .every(let minutes):
-            if minutes >= 1440 { return "Every \(Int(minutes / 1440)) day(s)" }
-            if minutes >= 60 { return "Every \(Int(minutes / 60)) hour(s)" }
-            return "Every \(Int(minutes)) min"
+            let formatter = DateComponentsFormatter()
+            formatter.allowedUnits = [.day, .hour, .minute, .second]
+            formatter.unitsStyle = .full
+            return "Every \(formatter.string(from: max(0, minutes * 60)) ?? "0 seconds")"
         case .cron(let expression, let tz):
             return tz.map { "cron: \(expression) (\($0))" } ?? "cron: \(expression)"
         case .unknown:

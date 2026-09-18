@@ -1,5 +1,51 @@
 import SwiftUI
 
+struct DefaultModelsPage: View {
+    @Environment(AppState.self) private var appState
+    @State private var isEditing = false
+    @State private var base: String?
+    @State private var thinking: String?
+    @State private var isLoading = true
+    @State private var error: String?
+
+    var body: some View {
+        Form {
+            if isLoading { ProgressView("Loading default models…") }
+            else if let error {
+                InlineNotice(message: error, actionTitle: "Retry") { Task { await load() } }
+            } else {
+                Section {
+                    LabeledContent("Default Model", value: base.map(shortModelName) ?? "None")
+                    LabeledContent("Thinking Model", value: thinking.map(shortModelName) ?? "None")
+                    Button("Edit Default Models") { isEditing = true }
+                } footer: { Text("Used by agents that don’t have their own model settings.") }
+            }
+        }
+        #if os(macOS)
+        .formStyle(.grouped)
+        #endif
+        .navigationTitle("Default Models")
+        .task { await load() }
+        .sheet(isPresented: $isEditing, onDismiss: { Task { await load() } }) {
+            NavigationStack { DefaultModelsView() }
+                #if os(macOS)
+                .frame(minWidth: 500, idealWidth: 580, minHeight: 400)
+                #endif
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let models = try await appState.loadDefaultModels()
+            base = models.base
+            thinking = models.thinking
+            error = nil
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
 /// Settings → System → Default Models. Edits the global `models.base` /
 /// `models.thinking` in ~/.achates/config.yaml. A nil value means "no
 /// server-wide default" and renders as "None".
@@ -14,6 +60,8 @@ struct DefaultModelsView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var showError = false
+    @State private var hasLoaded = false
+    @State private var loadFailed = false
 
     private var isDirty: Bool { base != originalBase || thinking != originalThinking }
 
@@ -22,6 +70,12 @@ struct DefaultModelsView: View {
             if isLoading {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if loadFailed {
+                ContentUnavailableView {
+                    Label("Couldn’t Load Models", systemImage: "exclamationmark.triangle")
+                } description: { Text(errorMessage ?? "Try again.") } actions: {
+                    Button("Retry") { Task { await load() } }
+                }
             } else {
                 Form {
                     Section {
@@ -45,9 +99,10 @@ struct DefaultModelsView: View {
                             row(label: "Default Thinking Model", value: thinking)
                         }
                     } footer: {
-                        Text("Defaults for agents that don't set their own model. Stored in ~/.achates/config.yaml.")
+                        Text("Defaults for agents that don’t set their own model. Choose a model, then save your changes here.")
                     }
                 }
+                .disabled(isSaving)
                 #if os(macOS)
                 .formStyle(.grouped)
                 #endif
@@ -68,7 +123,8 @@ struct DefaultModelsView: View {
                         Text("Save")
                     }
                 }
-                .disabled(!isDirty || isSaving)
+                .disabled(!isDirty || isSaving || loadFailed)
+                .keyboardShortcut("s", modifiers: .command)
             }
         }
         .alert("Error", isPresented: $showError) {
@@ -76,7 +132,9 @@ struct DefaultModelsView: View {
         } message: {
             Text(errorMessage ?? "Unknown error")
         }
-        .task { await load() }
+        .focusedSceneValue(\.saveEditor, InterfaceCommand(isEnabled: isDirty && !isSaving && !loadFailed) { Task { await save() } })
+        .editorDismissal(isDirty: isDirty, isSaving: isSaving)
+        .task { if !hasLoaded { await load() } }
     }
 
     @ViewBuilder
@@ -91,15 +149,17 @@ struct DefaultModelsView: View {
 
     private func load() async {
         isLoading = true
+        loadFailed = false
         do {
             let loaded = try await appState.loadDefaultModels()
             base = loaded.base
             thinking = loaded.thinking
             originalBase = loaded.base
             originalThinking = loaded.thinking
+            hasLoaded = true
         } catch {
             errorMessage = error.localizedDescription
-            showError = true
+            loadFailed = true
         }
         isLoading = false
     }
@@ -110,6 +170,7 @@ struct DefaultModelsView: View {
             try await appState.saveDefaultModels(base: base, thinking: thinking)
             originalBase = base
             originalThinking = thinking
+            hasLoaded = true
         } catch {
             errorMessage = error.localizedDescription
             showError = true

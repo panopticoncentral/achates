@@ -8,21 +8,18 @@ import AppKit
 #endif
 
 struct ComposerView: View {
-    struct PendingEdit: Equatable {
-        let text: String
-        let attachments: [DraftAttachment]
-    }
-
     @Environment(AppState.self) private var appState
     @Bindable var speechService: SpeechService
-    @State private var text = ""
-    @State private var attachments: [DraftAttachment] = []
+    @Bindable var draft: ConversationDraft
     @State private var showDocumentPicker = false
+    @State private var notice: String?
+    @State private var isPreparingDictation = false
+    @State private var isLoadingPhotos = false
+    @State private var recordingTask: Task<Void, Never>?
     @FocusState private var isFocused: Bool
     #if os(macOS)
     @State private var composerHeight: CGFloat = 30
     #endif
-
     #if os(iOS)
     @State private var showSourceDialog = false
     @State private var showCamera = false
@@ -30,27 +27,19 @@ struct ComposerView: View {
     @State private var pickerItems: [PhotosPickerItem] = []
     #endif
 
-    @Binding var pendingEdit: PendingEdit?
     let onSend: (String, [DraftAttachment]) -> Void
     let onResubmit: (String, [DraftAttachment]) -> Void
     let onCancel: () -> Void
 
-    /// Convenience initializer for callers that don't need edit/resubmit support.
-    init(
-        speechService: SpeechService,
-        pendingEdit: Binding<PendingEdit?> = .constant(nil),
-        onSend: @escaping (String, [DraftAttachment]) -> Void,
-        onResubmit: @escaping (String, [DraftAttachment]) -> Void = { _, _ in },
-        onCancel: @escaping () -> Void
-    ) {
-        self.speechService = speechService
-        self._pendingEdit = pendingEdit
-        self.onSend = onSend
-        self.onResubmit = onResubmit
-        self.onCancel = onCancel
+    private var text: String {
+        get { draft.text }
+        nonmutating set { draft.text = newValue }
     }
-
-    private var isEditing: Bool { pendingEdit != nil }
+    private var attachments: [DraftAttachment] {
+        get { draft.attachments }
+        nonmutating set { draft.attachments = newValue }
+    }
+    private var isEditing: Bool { draft.pendingEdit != nil }
 
     private let maxAttachments = 4
     private static let maxPdfBytes = 32 * 1024 * 1024
@@ -70,8 +59,18 @@ struct ComposerView: View {
                 attachmentStrip
             }
 
+            if let notice {
+                InlineNotice(message: notice, actionTitle: "Dismiss", action: { self.notice = nil })
+            }
+            if isPreparingDictation || isLoadingPhotos {
+                ProgressView(isPreparingDictation ? "Preparing dictation…" : "Loading photos…")
+                    .font(.callout)
+                    .padding(8)
+            }
             inputRow
         }
+        .frame(maxWidth: InterfaceMetrics.readingWidth)
+        .frame(maxWidth: .infinity)
         .background(.bar)
         // Finder drags are the most natural way to attach on the Mac (and work
         // on iPad too). Images go through the normal resize path; PDFs/text
@@ -80,9 +79,11 @@ struct ComposerView: View {
             handleDroppedURLs(urls)
             return true
         }
-        .onAppear { applyPendingEditIfNeeded(pendingEdit) }
-        .onChange(of: pendingEdit) { _, newValue in
-            applyPendingEditIfNeeded(newValue)
+        .onAppear { isFocused = true }
+        .onChange(of: draft.pendingEdit) { _, _ in isFocused = true }
+        .onDisappear {
+            recordingTask?.cancel()
+            _ = speechService.stopRecording()
         }
         #if os(iOS)
         .confirmationDialog("Add Attachment", isPresented: $showSourceDialog, titleVisibility: .hidden) {
@@ -121,7 +122,7 @@ struct ComposerView: View {
         ) { result in
             switch result {
             case .success(let urls): addDocuments(urls)
-            case .failure(let error): print("Document picker failed: \(error)")
+            case .failure(let error): notice = "Couldn’t open the document. \(error.localizedDescription)"
             }
         }
     }
@@ -129,7 +130,7 @@ struct ComposerView: View {
     private var editingBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "pencil")
-                .foregroundStyle(.blue)
+                .foregroundStyle(.tint)
             Text("Editing message")
                 .font(.subheadline.weight(.medium))
             Spacer()
@@ -138,15 +139,16 @@ struct ComposerView: View {
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .symbolRenderingMode(.palette)
-                    .foregroundStyle(.secondary, Color(.systemGray5))
+                    .foregroundStyle(.secondary, Color.messageSurface)
                     .font(.system(size: 18))
+                    .frame(width: InterfaceMetrics.actionSize, height: InterfaceMetrics.actionSize)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Cancel editing")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color.blue.opacity(0.08))
+        .background(Color.accentColor.opacity(0.08))
     }
 
     private var recordingBanner: some View {
@@ -162,7 +164,7 @@ struct ComposerView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color(.systemGray6))
+        .background(Color.messageSurface)
     }
 
     private var attachmentStrip: some View {
@@ -186,8 +188,9 @@ struct ComposerView: View {
 
             #if os(macOS)
             MacComposerTextView(
-                text: $text,
+                text: $draft.text,
                 measuredHeight: $composerHeight,
+                isFocused: $isFocused,
                 placeholder: "Message",
                 minHeight: 30,
                 maxHeight: 240,
@@ -195,6 +198,7 @@ struct ComposerView: View {
                 onEscape: {
                     // Esc lands in the focused text view before ChatView's
                     // .onKeyPress can see it; stop generation from here.
+                    if isEditing { cancelEdit(); return true }
                     guard appState.isStreaming else { return false }
                     onCancel()
                     return true
@@ -209,18 +213,19 @@ struct ComposerView: View {
             .padding(.vertical, 2)
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(.systemGray6))
+                    .fill(Color.messageSurface)
             )
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.quaternary, lineWidth: 1))
             .focused($isFocused)
             #else
-            TextField("Message", text: $text, axis: .vertical)
+            TextField("Message", text: $draft.text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...6)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(Color(.systemGray6))
+                        .fill(Color.messageSurface)
                 )
                 .focused($isFocused)
                 .onSubmit { send() }
@@ -238,29 +243,31 @@ struct ComposerView: View {
         Button {
             showSourceDialog = true
         } label: {
-            Image(systemName: "plus.circle.fill")
-                .font(.system(size: 32))
-                .foregroundStyle(attachments.count >= maxAttachments ? Color.gray : Color.blue)
-                .frame(width: 36, height: 36)
+            Image(systemName: "plus")
+                .font(.system(size: 24, weight: .medium))
+                .foregroundStyle(attachments.count >= maxAttachments ? Color.secondary : Color.accentColor)
+                .frame(width: InterfaceMetrics.actionSize, height: InterfaceMetrics.actionSize)
         }
         .buttonStyle(.plain)
         .disabled(attachments.count >= maxAttachments)
         .accessibilityLabel("Add attachment")
+        .help("Add an attachment (up to four files)")
         #else
         Menu {
             Button("Photo...") { openMacPhotoPicker() }
             Button("Document...") { showDocumentPicker = true }
         } label: {
-            Image(systemName: "plus.circle.fill")
-                .font(.system(size: 32))
-                .foregroundStyle(attachments.count >= maxAttachments ? Color.gray : Color.blue)
-                .frame(width: 36, height: 36)
+            Image(systemName: "plus")
+                .font(.system(size: 24, weight: .medium))
+                .foregroundStyle(attachments.count >= maxAttachments ? Color.secondary : Color.accentColor)
+                .frame(width: InterfaceMetrics.actionSize, height: InterfaceMetrics.actionSize)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .disabled(attachments.count >= maxAttachments)
         .accessibilityLabel("Add attachment")
+        .help("Add an attachment (up to four files)")
         #endif
     }
 
@@ -269,34 +276,38 @@ struct ComposerView: View {
         if appState.isStreaming {
             Button(action: onCancel) {
                 Image(systemName: "stop.circle.fill")
-                    .font(.system(size: 32))
+                    .font(.system(size: 24, weight: .medium))
                     .foregroundStyle(.red)
-                    .frame(width: 36, height: 36)
+                    .frame(width: InterfaceMetrics.actionSize, height: InterfaceMetrics.actionSize)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Stop generating")
-        } else if isInputEmpty {
+        } else if isInputEmpty || speechService.isRecording {
             Button(action: toggleRecording) {
                 Image(systemName: speechService.isRecording ? "mic.fill" : "mic")
                     .font(.system(size: 20))
-                    .foregroundStyle(speechService.isRecording ? .red : .blue)
-                    .frame(width: 36, height: 36)
+                    .foregroundStyle(speechService.isRecording ? .red : .accentColor)
+                    .frame(width: InterfaceMetrics.actionSize, height: InterfaceMetrics.actionSize)
                     .background(
                         Circle()
-                            .fill(speechService.isRecording ? Color.red.opacity(0.15) : Color(.systemGray6))
+                            .fill(speechService.isRecording ? Color.red.opacity(0.15) : Color.messageSurface)
                     )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(speechService.isRecording ? "Stop recording" : "Start recording")
+            .disabled(isPreparingDictation)
+            .accessibilityLabel(speechService.isRecording ? "Finish dictation" : "Dictate message")
+            .help(speechService.isRecording ? "Finish dictation" : "Dictate message")
         } else {
             Button(action: send) {
                 Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 32))
-                    .foregroundStyle(.blue)
-                    .frame(width: 36, height: 36)
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(.tint)
+                    .frame(width: InterfaceMetrics.actionSize, height: InterfaceMetrics.actionSize)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Send message")
+            .disabled(!appState.canSubmitMessage)
+            .accessibilityLabel(isEditing ? "Save and resubmit" : "Send message")
+            .help(isEditing ? "Save and resubmit" : "Send message (Return)")
         }
     }
 
@@ -306,37 +317,25 @@ struct ComposerView: View {
 
     private func send() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !attachments.isEmpty else { return }
+        guard appState.canSubmitMessage, !speechService.isRecording,
+              !trimmed.isEmpty || !attachments.isEmpty else { return }
         #if os(iOS)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         #endif
         if isEditing {
             onResubmit(trimmed, attachments)
-            pendingEdit = nil
         } else {
             onSend(trimmed, attachments)
         }
-        text = ""
-        attachments = []
+        draft.didSubmit()
         #if os(macOS)
         composerHeight = 30
         #endif
-    }
-
-    private func applyPendingEditIfNeeded(_ edit: PendingEdit?) {
-        guard let edit else { return }
-        text = edit.text
-        attachments = edit.attachments
-        isFocused = true
     }
 
     private func cancelEdit() {
-        pendingEdit = nil
-        text = ""
-        attachments = []
-        #if os(macOS)
-        composerHeight = 30
-        #endif
+        draft.endEditing()
+        isFocused = true
     }
 
     private func toggleRecording() {
@@ -346,19 +345,29 @@ struct ComposerView: View {
                 text = transcript
             }
         } else {
-            Task {
+            recordingTask = Task {
                 do {
+                    isPreparingDictation = true
+                    defer { isPreparingDictation = false }
                     try await speechService.startRecording()
+                    if Task.isCancelled { _ = speechService.stopRecording() }
                 } catch {
-                    print("Failed to start recording: \(error)")
+                    guard !Task.isCancelled else { return }
+                    notice = "Couldn’t start dictation. \(error.localizedDescription) Check microphone and speech permissions in Settings."
                 }
             }
         }
     }
 
     private func addAttachment(from data: Data) {
-        guard attachments.count < maxAttachments,
-              let result = ImageProcessor.normalize(data) else { return }
+        guard attachments.count < maxAttachments else {
+            notice = "You can attach up to four files per message."
+            return
+        }
+        guard let result = ImageProcessor.normalize(data) else {
+            notice = "This image couldn’t be opened. Try a different image."
+            return
+        }
         attachments.append(DraftAttachment(
             data: result.data,
             mime: "image/jpeg",
@@ -370,14 +379,17 @@ struct ComposerView: View {
     /// through the document path (which enforces the PDF/text caps).
     private func handleDroppedURLs(_ urls: [URL]) {
         for url in urls {
-            if attachments.count >= maxAttachments { break }
+            if attachments.count >= maxAttachments {
+                notice = "You can attach up to four files. Additional files weren’t added."
+                break
+            }
             let isImage = UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false
             if isImage {
                 let didStart = url.startAccessingSecurityScopedResource()
                 defer { if didStart { url.stopAccessingSecurityScopedResource() } }
                 if let data = try? Data(contentsOf: url) {
                     addAttachment(from: data)
-                }
+                } else { notice = "Couldn’t read \(url.lastPathComponent)." }
             } else {
                 addDocuments([url])
             }
@@ -386,16 +398,28 @@ struct ComposerView: View {
 
     private func addDocuments(_ urls: [URL]) {
         for url in urls {
-            if attachments.count >= maxAttachments { break }
+            if attachments.count >= maxAttachments {
+                notice = "You can attach up to four files. Additional files weren’t added."
+                break
+            }
+            let fileType = UTType(filenameExtension: url.pathExtension)
+            guard fileType?.conforms(to: .pdf) == true || fileType?.conforms(to: .text) == true
+                || ["md", "markdown", "txt", "log", "json", "xml", "csv"].contains(url.pathExtension.lowercased()) else {
+                notice = "\(url.lastPathComponent) isn’t supported. Choose an image, PDF, or text file."
+                continue
+            }
             let didStart = url.startAccessingSecurityScopedResource()
             defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-            guard let data = try? Data(contentsOf: url) else { continue }
+            guard let data = try? Data(contentsOf: url) else {
+                notice = "Couldn’t read \(url.lastPathComponent)."
+                continue
+            }
 
             let type = UTType(filenameExtension: url.pathExtension)
             let isPdf = type?.conforms(to: .pdf) ?? (url.pathExtension.lowercased() == "pdf")
             if isPdf {
                 guard data.count <= Self.maxPdfBytes else {
-                    print("Skipping \(url.lastPathComponent): \(data.count) bytes exceeds 32 MB cap")
+                    notice = "\(url.lastPathComponent) exceeds the 32 MB PDF limit."
                     continue
                 }
                 attachments.append(DraftAttachment(
@@ -407,7 +431,7 @@ struct ComposerView: View {
                 // Treat everything else the picker allowed (public.text) as a text
                 // file: it's inlined into the prompt server-side, so cap it small.
                 guard data.count <= Self.maxTextBytes else {
-                    print("Skipping \(url.lastPathComponent): \(data.count) bytes exceeds 1 MB text cap")
+                    notice = "\(url.lastPathComponent) exceeds the 1 MB text-file limit."
                     continue
                 }
                 attachments.append(DraftAttachment(
@@ -439,11 +463,17 @@ struct ComposerView: View {
     #if os(iOS)
     private func loadPickerItems(_ items: [PhotosPickerItem]) async {
         guard !items.isEmpty else { return }
-        defer { pickerItems = [] }
+        isLoadingPhotos = true
+        defer { pickerItems = []; isLoadingPhotos = false }
         for item in items {
-            if attachments.count >= maxAttachments { break }
+            if attachments.count >= maxAttachments {
+                notice = "You can attach up to four files. Additional files weren’t added."
+                break
+            }
             if let data = try? await item.loadTransferable(type: Data.self) {
-                await MainActor.run { addAttachment(from: data) }
+                addAttachment(from: data)
+            } else {
+                notice = "One of the selected photos couldn’t be loaded."
             }
         }
     }
@@ -459,10 +489,13 @@ struct ComposerView: View {
         panel.message = "Choose photos to attach"
         if panel.runModal() == .OK {
             for url in panel.urls {
-                if attachments.count >= maxAttachments { break }
+                if attachments.count >= maxAttachments {
+                notice = "You can attach up to four files. Additional files weren’t added."
+                break
+            }
                 if let data = try? Data(contentsOf: url) {
                     addAttachment(from: data)
-                }
+                } else { notice = "Couldn’t read \(url.lastPathComponent)." }
             }
         }
     }
@@ -482,12 +515,12 @@ private struct AttachmentThumbnail: View {
                     .font(.system(size: 18))
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(.white, .black.opacity(0.7))
-                    .frame(width: 28, height: 28)
-                    .contentShape(Circle())
+                    .frame(width: InterfaceMetrics.actionSize, height: InterfaceMetrics.actionSize)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .offset(x: 6, y: -6)
-            .accessibilityLabel("Remove attachment")
+            .accessibilityLabel("Remove \(attachment.displayName ?? "image")")
         }
         .padding(4)
     }
@@ -547,6 +580,7 @@ private struct AttachmentThumbnail: View {
 struct MacComposerTextView: NSViewRepresentable {
     @Binding var text: String
     @Binding var measuredHeight: CGFloat
+    var isFocused: FocusState<Bool>.Binding
     let placeholder: String
     let minHeight: CGFloat
     let maxHeight: CGFloat
@@ -595,6 +629,7 @@ struct MacComposerTextView: NSViewRepresentable {
         }
         textView.string = text
         textView.placeholderString = placeholder
+        textView.setAccessibilityLabel("Message")
         textView.onPasteImage = onPasteImage
 
         scrollView.documentView = textView
@@ -614,6 +649,9 @@ struct MacComposerTextView: NSViewRepresentable {
         }
         textView.onPasteImage = onPasteImage
         context.coordinator.parent = self
+        if isFocused.wrappedValue, let window = textView.window, window.firstResponder !== textView {
+            window.makeFirstResponder(textView)
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -644,6 +682,9 @@ struct MacComposerTextView: NSViewRepresentable {
         @objc private func scrollViewFrameChanged(_ note: Notification) {
             scheduleMeasure()
         }
+
+        func textDidBeginEditing(_ notification: Notification) { parent.isFocused.wrappedValue = true }
+        func textDidEndEditing(_ notification: Notification) { parent.isFocused.wrappedValue = false }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }

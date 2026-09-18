@@ -40,8 +40,11 @@ struct AgentListView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 #if os(macOS)
-                agentListMac
+                selectableAgentList
                 #else
+                if appState.usesSplitNavigation {
+                    selectableAgentList
+                } else {
                 List(filteredAgents) { agent in
                     NavigationLink(value: agent) {
                         AgentRow(agent: agent)
@@ -56,11 +59,16 @@ struct AgentListView: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                 }
                 .listStyle(.plain)
-                .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search")
+                .safeAreaInset(edge: .top, spacing: 0) { ConnectionStatusBanner() }
+                .overlay {
+                    if filteredAgents.isEmpty { ContentUnavailableView.search(text: searchText) }
+                }
+                .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search agents")
+                }
                 #endif
             }
         }
-        .navigationTitle("Chats")
+        .navigationTitle("Agents")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
         #endif
@@ -70,15 +78,11 @@ struct AgentListView: View {
                 Button {
                     openWindow(id: "system")
                 } label: {
-                    Image(systemName: "wrench.and.screwdriver")
+                    Label("Manage", systemImage: "slider.horizontal.3")
                 }
-                .accessibilityLabel("System")
+                .accessibilityLabel("Manage memory, jobs, and models")
                 .help("Memory, scheduled jobs, and default models")
 
-                SettingsLink {
-                    Image(systemName: "gear")
-                }
-                .help("Settings")
             }
             #else
             ToolbarItem(placement: .automatic) {
@@ -104,9 +108,8 @@ struct AgentListView: View {
         }
     }
 
-    #if os(macOS)
     @ViewBuilder
-    private var agentListMac: some View {
+    private var selectableAgentList: some View {
         @Bindable var state = appState
         let selection = Binding<Agent.ID?>(
             get: { appState.currentAgent?.id },
@@ -127,19 +130,15 @@ struct AgentListView: View {
                     }
                 }
         }
-        .searchable(text: $searchText, prompt: "Search")
-        // The lists stay populated (and stale) through drops/reconnects; without
-        // this, only the open chat shows any sign the connection is down.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            ConnectionStatusBanner()
-        }
+        .searchable(text: $searchText, prompt: "Search agents")
+
     }
-    #endif
 }
 
 struct AgentAvatar: View {
     let agent: Agent
     var size: CGFloat = 60
+    var showsPhoto = true
 
     private static let avatarColors: [Color] = [
         .blue, .purple, .pink, .red, .orange, .yellow,
@@ -152,7 +151,7 @@ struct AgentAvatar: View {
     }
 
     var body: some View {
-        if let avatarImage = agent.avatarImage {
+        if showsPhoto, let avatarImage = agent.avatarImage {
             #if os(macOS)
             Image(nsImage: avatarImage)
                 .resizable()
@@ -169,11 +168,11 @@ struct AgentAvatar: View {
         } else {
             ZStack {
                 Circle()
-                    .fill(Self.avatarColor(for: agent.id).gradient)
+                    .fill(Self.avatarColor(for: agent.id).opacity(0.20).gradient)
                     .frame(width: size, height: size)
                 Text(agent.initials)
                     .font(.system(size: size * 0.4, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
         }
     }
@@ -181,9 +180,10 @@ struct AgentAvatar: View {
 
 private struct AgentRow: View {
     let agent: Agent
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .subheadline) private var dotSize: CGFloat = 10
 
-    /// The most useful secondary line in a list titled "Chats": the last message
+    /// The most useful secondary line in the agent list: the last message
     /// if we have one, otherwise the static agent description.
     private var subtitle: String {
         if let last = agent.lastMessage, !last.isEmpty { return last }
@@ -191,22 +191,23 @@ private struct AgentRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             AgentAvatar(agent: agent, size: 44)
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(agent.displayName)
-                        .font(.listRowTitle)
-                        .lineLimit(1)
-
-                    if agent.unreadCount > 0 {
-                        Circle()
-                            .fill(.tint)
-                            .frame(width: dotSize, height: dotSize)
+                let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 6))
+                layout {
+                    HStack(spacing: 6) {
+                        Text(agent.displayName)
+                            .font(.listRowTitle)
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                        if agent.unreadCount > 0 {
+                            Circle().fill(.tint)
+                                .frame(width: min(dotSize, 12), height: min(dotSize, 12))
+                                .accessibilityHidden(true)
+                        }
                     }
-
-                    Spacer(minLength: 4)
+                    if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
 
                     if let date = agent.lastActivity {
                         Text(date.chatListLabel())
@@ -219,7 +220,7 @@ private struct AgentRow: View {
                     Text(subtitle)
                         .font(.listRowSubtitle)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                 }
             }
         }
@@ -227,6 +228,7 @@ private struct AgentRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(subtitle.isEmpty ? agent.displayName : "\(agent.displayName). \(subtitle)")
         .accessibilityValue(agent.unreadCount > 0 ? "\(agent.unreadCount) unread" : "")
+        .accessibilityIdentifier("agent-row-\(agent.id)")
     }
 }
 

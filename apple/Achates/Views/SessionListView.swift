@@ -7,29 +7,27 @@ struct SessionListView: View {
     @State private var renameText = ""
     @State private var showDeleteAll = false
     @State private var showCosts = false
+    @State private var searchText = ""
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .subheadline) private var unreadDotSize: CGFloat = 8
 
     var body: some View {
-        Group {
-            if appState.sessions.isEmpty && appState.connectionStatus == .connected {
-                VStack(spacing: 16) {
-                    Image(systemName: "bubble.left.and.text.bubble.right")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.secondary)
-                    Text("No conversations yet")
-                        .foregroundStyle(.secondary)
-                    Button("Start a Conversation") {
-                        Task { await appState.startNewConversation(for: agent) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
+        VStack(spacing: 0) {
+            #if os(macOS)
+            // Only the agent sidebar owns the window's SwiftUI search item.
+            ColumnSearchField(text: $searchText, prompt: "Search loaded conversations")
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(10)
+            #endif
+            sessionContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                sessionList
-            }
         }
         .navigationTitle(agent.displayName)
         #if os(iOS)
+        .searchable(text: $searchText, prompt: "Search loaded conversations")
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !appState.usesSplitNavigation { ConnectionStatusBanner() }
+        }
         .navigationBarTitleDisplayMode(.large)
         #endif
         .toolbar {
@@ -39,7 +37,9 @@ struct SessionListView: View {
                 } label: {
                     Image(systemName: "square.and.pencil")
                 }
-                .accessibilityLabel("New Chat")
+                .accessibilityLabel("New Conversation")
+                .help("New conversation")
+                .disabled(appState.connectionStatus != .connected || appState.isStreaming)
 
                 Menu {
                     Button {
@@ -97,6 +97,37 @@ struct SessionListView: View {
     }
 
     @ViewBuilder
+    private var sessionContent: some View {
+        Group {
+            if appState.isLoadingSessions && appState.sessions.isEmpty {
+                ProgressView("Loading conversations…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if appState.sessions.isEmpty, let error = appState.sessionsLoadError {
+                ContentUnavailableView {
+                    Label("Couldn’t Load Conversations", systemImage: "exclamationmark.triangle")
+                } description: { Text(error) } actions: {
+                    Button("Retry") { Task { await appState.loadSessions(for: agent) } }
+                }
+            } else if appState.sessions.isEmpty && appState.connectionStatus == .connected {
+                VStack(spacing: 16) {
+                    Image(systemName: "bubble.left.and.text.bubble.right")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.secondary)
+                    Text("No conversations yet")
+                        .foregroundStyle(.secondary)
+                    Button("Start a Conversation") {
+                        Task { await appState.startNewConversation(for: agent) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                sessionList
+            }
+        }
+    }
+
+    @ViewBuilder
     private var sessionList: some View {
         List(selection: Binding<String?>(
             get: { appState.currentSessionId },
@@ -108,6 +139,14 @@ struct SessionListView: View {
             }
         )) {
             let grouped = groupedSessions
+            if grouped.isEmpty && !searchText.isEmpty {
+                ContentUnavailableView.search(text: searchText)
+            }
+            if let error = appState.sessionsLoadError, !appState.sessions.isEmpty {
+                InlineNotice(message: error, actionTitle: "Retry") {
+                    Task { await appState.loadSessions(for: agent) }
+                }
+            }
             ForEach(grouped, id: \.label) { group in
                 Section(group.label) {
                     ForEach(group.sessions) { session in
@@ -115,8 +154,12 @@ struct SessionListView: View {
                         sessionRow(session)
                             .tag(session.id)
                         #else
-                        NavigationLink(value: SessionSelection(agent: agent, sessionId: session.id)) {
-                            sessionRow(session)
+                        if appState.usesSplitNavigation {
+                            sessionRow(session).tag(session.id)
+                        } else {
+                            NavigationLink(value: SessionSelection(agent: agent, sessionId: session.id)) {
+                                sessionRow(session)
+                            }
                         }
                         #endif
                     }
@@ -139,7 +182,7 @@ struct SessionListView: View {
             }
         }
         #if os(iOS)
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         #endif
         #if os(iOS)
         .refreshable {
@@ -147,6 +190,7 @@ struct SessionListView: View {
         }
         .navigationDestination(for: SessionSelection.self) { selection in
             ChatView(agent: selection.agent)
+                .id(selection.sessionId)
                 .task { await appState.openSession(selection.sessionId, for: agent) }
         }
         #endif
@@ -155,17 +199,18 @@ struct SessionListView: View {
     @ViewBuilder
     private func sessionRow(_ session: SessionInfo) -> some View {
         HStack(spacing: 8) {
-            if session.unread > 0 {
-                Circle()
-                    .fill(.tint)
-                    .frame(width: unreadDotSize, height: unreadDotSize)
-            }
+            Circle()
+                .fill(.tint)
+                .frame(width: unreadDotSize, height: unreadDotSize)
+                .opacity(session.unread > 0 ? 1 : 0)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
+                let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 6))
+                layout {
                     Text(session.title ?? "New conversation")
                         .font(.listRowTitle)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
+                        .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                    if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
                     Text(session.updated.chatListLabel())
                         .font(.listRowCaption)
                         .foregroundStyle(session.unread > 0 ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
@@ -174,7 +219,7 @@ struct SessionListView: View {
                     Text(preview)
                         .font(.listRowSubtitle)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                 }
             }
         }
@@ -182,6 +227,7 @@ struct SessionListView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(session.title ?? "New conversation")
         .accessibilityValue(session.unread > 0 ? "unread" : "")
+        .accessibilityIdentifier("conversation-row-\(session.id)")
         .contextMenu {
             Button {
                 sessionToRename = session
@@ -212,7 +258,9 @@ struct SessionListView: View {
         var thisWeek: [SessionInfo] = []
         var earlier: [SessionInfo] = []
 
-        for session in appState.sessions {
+        for session in appState.sessions where searchText.isEmpty
+            || (session.title ?? "New Conversation").localizedCaseInsensitiveContains(searchText)
+            || (session.preview ?? "").localizedCaseInsensitiveContains(searchText) {
             if calendar.isDateInToday(session.updated) {
                 today.append(session)
             } else if calendar.isDateInYesterday(session.updated) {
@@ -228,7 +276,7 @@ struct SessionListView: View {
         var groups: [SessionGroup] = []
         if !today.isEmpty { groups.append(SessionGroup(label: "Today", sessions: today)) }
         if !yesterday.isEmpty { groups.append(SessionGroup(label: "Yesterday", sessions: yesterday)) }
-        if !thisWeek.isEmpty { groups.append(SessionGroup(label: "This Week", sessions: thisWeek)) }
+        if !thisWeek.isEmpty { groups.append(SessionGroup(label: "Last 7 Days", sessions: thisWeek)) }
         if !earlier.isEmpty { groups.append(SessionGroup(label: "Earlier", sessions: earlier)) }
         return groups
     }

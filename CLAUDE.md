@@ -44,3 +44,13 @@ Config file format, `AGENT.md` capabilities keys, environment variables, and dat
 - Collection expressions (`[]`) preferred over `new List<T>()`
 - Raw string literals for multi-line JSON/text
 - xUnit test project at `tests/Achates.Tests` (run via `dotnet test Achates.slnx`)
+
+## Apple client UI
+
+The shared SwiftUI client is in `apple/Achates`, with the `Achates` scheme and `AchatesTests` target in `apple/Achates.xcodeproj`. Use `xcodebuild test -project apple/Achates.xcodeproj -scheme Achates -destination 'platform=macOS' -only-testing:AchatesTests` or select an installed iOS simulator destination. Test hosts skip the live root view; appearance smoke tests supply isolated in-memory fixtures and retain rendered screenshots as test attachments.
+
+`AppState` owns navigation, explicit load/error state, and in-memory `ConversationDraft` objects keyed by server URL, agent ID, and session ID. Do not move drafts back into view-local state. `canSubmitMessage` is the shared gate for keyboard/button/voice sends and retries. Request identities prevent stale conversation/history loads from replacing the current selection.
+
+Use `EditorDismissal` for transactional editors, `EditorCommands`/focused values for Mac menu actions, and `InterfaceStyle`/`ConversationMarkdown` for shared semantic surfaces, metrics, and message formatting. Native containers adapt to the platform: compact iOS stacks, regular-width iPad/Mac split views, Mac Settings and Manage scenes. Attachment previews use Quick Look through `AttachmentPreview`. Keep nested editor changes provisional until the parent saves. Drafts currently survive navigation, not process restarts.
+
+On Mac, only the agent sidebar uses SwiftUI `.searchable` in the main window. AppKit forbids duplicate `com.apple.SwiftUI.search` toolbar identifiers; additional split-column filtering must use an inline `ColumnSearchField`. `AchatesUITests/AgentNavigationTests` launches a DEBUG-only, network-free fixture in the real app scene and tests agent selection and independent search fields. Run it with `-only-testing:AchatesUITests`; set `ACHATES_APP_BUNDLE_IDENTIFIER=AchatesSoftware.Achates.UIRegression` to keep the UI test app separate from a running development app (the normal bundle identifier is unchanged).

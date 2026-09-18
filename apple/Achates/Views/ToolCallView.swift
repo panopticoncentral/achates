@@ -7,6 +7,7 @@ struct ToolCallView: View {
     let result: String?
     @AppStorage("show_tool_activity") private var showToolActivity = false
     @State private var isExpanded = false
+    @State private var showFullResult = false
 
     private var canExpand: Bool {
         showToolActivity && result != nil && status != .running
@@ -20,17 +21,17 @@ struct ToolCallView: View {
                 }
             }) {
                 HStack(spacing: 5) {
+                    Text(label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     if status == .running {
                         ProgressView()
                             .controlSize(.mini)
                     }
-                    Text(label)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
                     if canExpand {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.quaternary)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .contentShape(.rect)
@@ -45,18 +46,31 @@ struct ToolCallView: View {
 
             if isExpanded, canExpand, let result {
                 Text(result)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color(.systemGray6))
+                            .fill(Color.subtleSurface)
                     )
-                    .lineLimit(20)
+                    .lineLimit(showFullResult ? nil : 20)
+                    .textSelection(.enabled)
+                HStack {
+                    Button(showFullResult ? "Show Less" : "Show Full Result") { showFullResult.toggle() }
+                    Button("Copy Result", systemImage: "doc.on.doc") {
+                        #if os(macOS)
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(result, forType: .string)
+                        #else
+                        UIPasteboard.general.string = result
+                        #endif
+                    }
+                }
+                .font(.callout)
             }
         }
-        .padding(.leading, 4)
+        .padding(.horizontal, InterfaceMetrics.messageContentInset)
         .padding(.vertical, 2)
     }
 

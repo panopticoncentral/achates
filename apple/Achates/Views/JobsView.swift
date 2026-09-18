@@ -17,10 +17,13 @@ struct JobsView: View {
 
     var body: some View {
         List {
+            if let error = appState.jobsLoadError {
+                InlineNotice(message: error, actionTitle: "Retry") { Task { await appState.loadJobs() } }
+            }
             if !hasLoaded {
                 HStack { Spacer(); ProgressView(); Spacer() }
                     .listRowSeparator(.hidden)
-            } else if appState.jobs.isEmpty {
+            } else if appState.jobs.isEmpty && appState.jobsLoadError == nil {
                 ContentUnavailableView(
                     "No Scheduled Jobs",
                     systemImage: "calendar.badge.clock",
@@ -72,7 +75,7 @@ private struct JobRow: View {
                     Text(job.name)
                         .fontWeight(.semibold)
                     if job.kind == .dreamtime {
-                        Text("system")
+                        Text("System")
                             .font(.caption2)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -83,7 +86,7 @@ private struct JobRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if let next = job.state.nextRunAt, job.enabled {
-                    Text("next: \(relative(next))")
+                    Text("Next: \(relative(next))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -96,13 +99,13 @@ private struct JobRow: View {
     @ViewBuilder
     private var statusBadge: some View {
         if !job.enabled {
-            badge("disabled", color: .gray)
+            badge("Paused", color: .gray)
         } else if job.state.lastStatus == "error" {
-            badge("error", color: .red)
+            badge("Failed", color: .red)
         } else if job.state.lastStatus == "ok" {
-            badge("ok", color: .green)
+            badge("Completed", color: .green)
         } else {
-            badge("pending", color: .blue)
+            badge("Scheduled", color: .blue)
         }
     }
 

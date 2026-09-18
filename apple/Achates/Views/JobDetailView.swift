@@ -20,9 +20,11 @@ struct JobDetailView: View {
         Form {
             Section("Identity") {
                 row("Name", value: liveJob.name)
-                row("Agent", value: liveJob.agent)
-                row("Kind", value: liveJob.kind.rawValue)
-                row("ID", value: liveJob.jobId, monospaced: true)
+                row("Agent", value: appState.agents.first { $0.id == liveJob.agent }?.displayName ?? liveJob.agent)
+                DisclosureGroup("Technical Details") {
+                    row("Kind", value: liveJob.kind == .dreamtime ? "Memory Review" : "Scheduled Task")
+                    row("ID", value: liveJob.jobId, monospaced: true)
+                }
             }
 
             Section("Schedule") {
@@ -30,11 +32,12 @@ struct JobDetailView: View {
                 if let next = liveJob.state.nextRunAt {
                     row("Next Run", value: formatted(next))
                 }
+                row("Display Time Zone", value: TimeZone.current.identifier)
                 if let last = liveJob.state.lastRunAt {
                     row("Last Run", value: formatted(last))
                 }
                 if let status = liveJob.state.lastStatus {
-                    row("Last Status", value: status)
+                    row("Last Status", value: status == "ok" ? "Completed" : status == "error" ? "Failed" : status.capitalized)
                 }
                 if liveJob.state.consecutiveErrors > 0 {
                     row("Consecutive Errors", value: "\(liveJob.state.consecutiveErrors)")
@@ -175,7 +178,7 @@ struct JobDetailView: View {
     }
 
     private func refresh() async {
-        await appState.loadJobs()
+        guard await appState.loadJobs() else { return }
         if let updated = appState.jobs.first(where: { $0.id == liveJob.id }) {
             liveJob = updated
         } else {

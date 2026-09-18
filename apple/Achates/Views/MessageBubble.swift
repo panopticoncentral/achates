@@ -1,6 +1,7 @@
 import SwiftUI
 import MarkdownUI
 import UniformTypeIdentifiers
+import QuickLook
 
 enum BubblePosition {
     case alone, first, middle, last
@@ -24,8 +25,9 @@ struct MessageBubble: View {
     var onResubmit: (() -> Void)? = nil
     var onBeginEdit: (() -> Void)? = nil
     @AppStorage("show_message_costs") private var showMessageCosts = false
-    @State private var fullscreenImageData: Data? = nil
-    @State private var fullscreenImageURL: URL? = nil
+    @State private var confirmResubmit = false
+    @State private var preview = AttachmentPreview()
+    @State private var imageRetry = 0
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 6) {
@@ -56,8 +58,9 @@ struct MessageBubble: View {
                         appState.speechPlayer.replay(turnId: turnId)
                     } label: {
                         Image(systemName: "play.circle")
-                            .font(.caption)
+                            .font(.body)
                             .foregroundStyle(.secondary)
+                            .frame(width: InterfaceMetrics.actionSize, height: InterfaceMetrics.actionSize)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Replay audio")
@@ -85,7 +88,7 @@ struct MessageBubble: View {
                         .padding(.vertical, 10)
                         .background(
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(Color(.systemGray5))
+                                .fill(Color.messageSurface)
                         )
                         .accessibilityElement()
                         .accessibilityLabel(agent.map { "\($0.displayName) is typing" } ?? "Assistant is typing")
@@ -100,8 +103,14 @@ struct MessageBubble: View {
         // ~80 characters and nothing else constrains them on a big Mac display.
         .frame(maxWidth: 700, alignment: message.role == .user ? .trailing : .leading)
         .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
-        .fullScreenImageViewer(imageData: $fullscreenImageData)
-        .fullScreenImageViewer(imageURL: $fullscreenImageURL)
+        .quickLookPreview($preview.url)
+        .onChange(of: preview.url) { _, url in if url == nil { preview.clearFiles() } }
+        .alert("Attachment Unavailable", isPresented: Binding(
+            get: { preview.error != nil }, set: { if !$0 { preview.error = nil } }
+        )) { Button("OK") { preview.error = nil } } message: { Text(preview.error ?? "") }
+        .overlay {
+            if preview.isLoading { ProgressView("Loading image…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) }
+        }
     }
 
     private var showAvatar: Bool {
@@ -127,8 +136,12 @@ struct MessageBubble: View {
         case .image(_, let data, _):
             imageBubble(data)
 
-        case .document(_, _, let name, let mime):
-            documentChip(name: name, mime: mime)
+        case .document(_, let data, let name, let mime):
+            Button { preview.show(data: data, name: name, mime: mime) } label: {
+                documentChip(name: name, mime: mime)
+            }
+            .buttonStyle(.plain)
+            .help("Preview attachment")
 
         case .agentTurn(let id, let agentName, let text, let collapsed):
             AgentTurnView(agentTurnId: id, agentName: agentName, text: text, collapsed: collapsed)
@@ -140,29 +153,18 @@ struct MessageBubble: View {
 
     @ViewBuilder
     private func imageBubble(_ data: Data) -> some View {
-        #if os(iOS)
-        if let uiImage = UIImage(data: data) {
-            Image(uiImage: uiImage)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: 260)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .onTapGesture { fullscreenImageData = data }
-                .accessibilityLabel(message.role == .user ? "Image from you" : "Image from assistant")
-                .accessibilityAddTraits(.isImage)
+        if let image = PlatformImage(data: data) {
+            Button { preview.show(data: data, name: nil, mime: "image/jpeg") } label: {
+                Image(platformImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 320)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(message.role == .user ? "Preview image from you" : "Preview image from assistant")
+            .help("Preview image")
         }
-        #else
-        if let nsImage = NSImage(data: data) {
-            Image(nsImage: nsImage)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: 260)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .onTapGesture { fullscreenImageData = data }
-                .accessibilityLabel(message.role == .user ? "Image from you" : "Image from assistant")
-                .accessibilityAddTraits(.isImage)
-        }
-        #endif
     }
 
     /// Chip for a non-image attachment (PDF, text file) on a user message —
@@ -185,7 +187,7 @@ struct MessageBubble: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(message.role == .user ? Color.accentColor : Color(.systemGray5))
+                .fill(message.role == .user ? Color.accentColor : Color.messageSurface)
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Attached document: \(name ?? "Document")")
@@ -196,64 +198,33 @@ struct MessageBubble: View {
         AsyncImage(url: url) { phase in
             switch phase {
             case .success(let image):
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: 260)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .onTapGesture { fullscreenImageURL = url }
+                Button { Task { await preview.show(remoteURL: url) } } label: {
+                    image.resizable().aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: 320)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Preview image")
             case .failure:
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.gray.opacity(0.2))
-                    .frame(width: 120, height: 80)
-                    .overlay {
-                        Image(systemName: "photo")
-                            .foregroundStyle(.secondary)
-                    }
+                Button { imageRetry += 1 } label: {
+                    Label("Retry Image", systemImage: "arrow.clockwise")
+                        .padding().background(Color.messageSurface, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
             default:
                 ProgressView()
                     .frame(width: 120, height: 80)
             }
         }
-        .accessibilityLabel("Image")
-        .accessibilityAddTraits(.isImage)
+        .id(imageRetry)
     }
 
     private func textBubble(_ text: String) -> some View {
         HStack(spacing: 0) {
             Markdown(text)
-                .markdownTextStyle {
-                    if message.role == .user {
-                        ForegroundColor(.white)
-                    }
-                }
-                .markdownBlockStyle(\.heading1) { configuration in
-                    configuration.label.markdownTextStyle { FontSize(.em(1.15)); FontWeight(.semibold) }
-                }
-                .markdownBlockStyle(\.heading2) { configuration in
-                    configuration.label.markdownTextStyle { FontSize(.em(1.1)); FontWeight(.semibold) }
-                }
-                .markdownBlockStyle(\.heading3) { configuration in
-                    configuration.label.markdownTextStyle { FontSize(.em(1.05)); FontWeight(.semibold) }
-                }
-                .markdownBlockStyle(\.codeBlock) { configuration in
-                    configuration.label
-                        .markdownTextStyle {
-                            FontFamilyVariant(.monospaced)
-                            FontSize(.em(0.9))
-                        }
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(message.role == .user
-                                      ? Color.white.opacity(0.15)
-                                      : Color(.systemGray6))
-                        )
-                }
-
-
+                .conversationMarkdown()
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, InterfaceMetrics.messageContentInset)
         .padding(.vertical, 8)
         .background(bubbleShape.fill(bubbleColor))
         .textSelection(.enabled)
@@ -265,11 +236,11 @@ struct MessageBubble: View {
             }
 
             if message.role == .user {
-                if let onResubmit {
+                if onResubmit != nil {
                     Button {
-                        onResubmit()
+                        confirmResubmit = true
                     } label: {
-                        Label("Resubmit", systemImage: "arrow.counterclockwise")
+                        Label("Resubmit From Here…", systemImage: "arrow.counterclockwise")
                     }
                 }
                 if isLastUserMessage, let onBeginEdit {
@@ -286,10 +257,16 @@ struct MessageBubble: View {
                     Button {
                         onResubmit()
                     } label: {
-                        Label("Retry", systemImage: "arrow.counterclockwise")
+                        Label("Regenerate Response", systemImage: "arrow.counterclockwise")
                     }
                 }
             }
+        }
+        .confirmationDialog("Resubmit this message?", isPresented: $confirmResubmit, titleVisibility: .visible) {
+            Button("Resubmit and Replace Later Messages", role: .destructive) { onResubmit?() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This replaces this message and everything after it with a new response.")
         }
         .accessibilityLabel(accessibilityText(text))
     }
@@ -332,7 +309,7 @@ struct MessageBubble: View {
     }
 
     private var bubbleColor: Color {
-        message.role == .user ? .accentColor : Color(.systemGray5)
+        message.role == .user ? .outgoingMessageSurface : .messageSurface
     }
 
     /// Messenger-style rounded rect with variable corner radii for grouped bubbles.
@@ -378,6 +355,7 @@ struct MessageBubble: View {
 /// Animated three-dot typing indicator, like iMessage.
 struct TypingIndicator: View {
     @State private var animating = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 4) {
@@ -385,10 +363,10 @@ struct TypingIndicator: View {
                 Circle()
                     .fill(Color.secondary)
                     .frame(width: 7, height: 7)
-                    .scaleEffect(animating ? 1.0 : 0.5)
-                    .opacity(animating ? 1.0 : 0.4)
+                    .scaleEffect(reduceMotion || animating ? 1.0 : 0.5)
+                    .opacity(reduceMotion || animating ? 1.0 : 0.4)
                     .animation(
-                        .easeInOut(duration: 0.5)
+                        reduceMotion ? nil : .easeInOut(duration: 0.5)
                         .repeatForever(autoreverses: true)
                         .delay(Double(i) * 0.15),
                         value: animating
@@ -396,128 +374,5 @@ struct TypingIndicator: View {
             }
         }
         .onAppear { animating = true }
-    }
-}
-
-
-// MARK: - Fullscreen Image Viewer
-
-private struct FullScreenImageViewer: View {
-    let imageData: Data?
-    let imageURL: URL?
-    let onDismiss: () -> Void
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            if let data = imageData {
-                #if os(iOS)
-                if let uiImage = UIImage(data: data) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .ignoresSafeArea()
-                }
-                #else
-                if let nsImage = NSImage(data: data) {
-                    Image(nsImage: nsImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                }
-                #endif
-            } else if let url = imageURL {
-                AsyncImage(url: url) { phase in
-                    if case .success(let image) = phase {
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .ignoresSafeArea()
-                    } else {
-                        ProgressView().tint(.white)
-                    }
-                }
-            }
-        }
-        .overlay(alignment: .topTrailing) {
-            Button(action: onDismiss) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.title)
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, .white.opacity(0.3))
-            }
-            .buttonStyle(.plain)
-            .padding()
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if let data = imageData {
-                ShareLink(item: ImageTransferable(data: data), preview: SharePreview("Image")) {
-                    Image(systemName: "square.and.arrow.up.circle.fill")
-                        .font(.title)
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, .white.opacity(0.3))
-                }
-                .buttonStyle(.plain)
-                .padding()
-            }
-        }
-    }
-}
-
-private struct ImageTransferable: Transferable {
-    let data: Data
-
-    static var transferRepresentation: some TransferRepresentation {
-        DataRepresentation(exportedContentType: .image) { item in
-            item.data
-        }
-    }
-}
-
-private extension View {
-    func fullScreenImageViewer(imageData: Binding<Data?>) -> some View {
-        #if os(iOS)
-        self.fullScreenCover(isPresented: .init(
-            get: { imageData.wrappedValue != nil },
-            set: { if !$0 { imageData.wrappedValue = nil } }
-        )) {
-            FullScreenImageViewer(imageData: imageData.wrappedValue, imageURL: nil) {
-                imageData.wrappedValue = nil
-            }
-        }
-        #else
-        self.sheet(isPresented: .init(
-            get: { imageData.wrappedValue != nil },
-            set: { if !$0 { imageData.wrappedValue = nil } }
-        )) {
-            FullScreenImageViewer(imageData: imageData.wrappedValue, imageURL: nil) {
-                imageData.wrappedValue = nil
-            }
-            .frame(minWidth: 600, minHeight: 500)
-        }
-        #endif
-    }
-
-    func fullScreenImageViewer(imageURL: Binding<URL?>) -> some View {
-        #if os(iOS)
-        self.fullScreenCover(isPresented: .init(
-            get: { imageURL.wrappedValue != nil },
-            set: { if !$0 { imageURL.wrappedValue = nil } }
-        )) {
-            FullScreenImageViewer(imageData: nil, imageURL: imageURL.wrappedValue) {
-                imageURL.wrappedValue = nil
-            }
-        }
-        #else
-        self.sheet(isPresented: .init(
-            get: { imageURL.wrappedValue != nil },
-            set: { if !$0 { imageURL.wrappedValue = nil } }
-        )) {
-            FullScreenImageViewer(imageData: nil, imageURL: imageURL.wrappedValue) {
-                imageURL.wrappedValue = nil
-            }
-            .frame(minWidth: 600, minHeight: 500)
-        }
-        #endif
     }
 }

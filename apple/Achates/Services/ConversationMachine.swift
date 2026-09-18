@@ -9,7 +9,7 @@ nonisolated enum ConversationState: Equatable {
     case listening
     case sending      // user turn submitted; awaiting/streaming the reply, no audio yet
     case speaking     // reply audio is playing
-    case paused       // system audio interruption in effect
+    case paused       // user paused or system audio interruption in effect
     case ended        // user ended the conversation
     case failed(String)
 }
@@ -23,6 +23,9 @@ nonisolated enum ConversationEvent: Equatable {
     case resumed                         // interruption ended
     case turnFailed(String)              // agent/network error mid-turn
     case startFailed(String)             // mic / recognizer unavailable
+    case pauseRequested
+    case resumeRequested
+    case retryRequested
     case endRequested                    // user tapped End
 }
 
@@ -36,6 +39,7 @@ nonisolated enum ConversationIntent: Equatable {
 
 struct ConversationMachine {
     private(set) var state: ConversationState = .idle
+    private var manuallyPaused = false
 
     @discardableResult
     mutating func handle(_ event: ConversationEvent) -> [ConversationIntent] {
@@ -72,6 +76,22 @@ struct ConversationMachine {
             return [.stopListening, .stopPlayback]
 
         case (.paused, .resumed):
+            guard !manuallyPaused else { return [] }
+            state = .listening
+            return [.startListening]
+
+        case (.listening, .pauseRequested), (.sending, .pauseRequested), (.speaking, .pauseRequested):
+            manuallyPaused = true
+            state = .paused
+            return [.stopListening]
+
+        case (.paused, .resumeRequested):
+            manuallyPaused = false
+            state = .listening
+            return [.startListening]
+
+        case (.failed, .retryRequested):
+            manuallyPaused = false
             state = .listening
             return [.startListening]
 

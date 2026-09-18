@@ -17,6 +17,7 @@ struct AchatesApp: App {
         }
         .defaultSize(width: 1000, height: 700)
         .commands {
+            EditorCommands()
             CommandGroup(replacing: .newItem) {
                 Button("New Conversation") {
                     Task {
@@ -26,7 +27,7 @@ struct AchatesApp: App {
                     }
                 }
                 .keyboardShortcut("n", modifiers: .command)
-                .disabled(appState.currentAgent == nil)
+                .disabled(appState.currentAgent == nil || appState.connectionStatus != .connected || appState.isStreaming)
             }
         }
 
@@ -37,7 +38,7 @@ struct AchatesApp: App {
 
         // Content management (memory, jobs, models) gets a real window instead
         // of pushes inside the settings pane. Also listed in the Window menu.
-        Window("System", id: "system") {
+        Window("Manage", id: "system") {
             SystemWindowView()
                 .environment(appState)
                 .frame(minWidth: 640, minHeight: 420)
@@ -50,15 +51,33 @@ struct AchatesApp: App {
         #endif
     }
 
+    @ViewBuilder
     private var mainContent: some View {
-        ContentView()
-            .environment(appState)
-            .task {
-                _ = try? await UNUserNotificationCenter.current()
-                    .requestAuthorization(options: [.badge])
-            }
-            .onChange(of: scenePhase) { _, newPhase in
-                appState.handleScenePhaseChange(newPhase)
-            }
+        #if DEBUG && os(macOS)
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-agent-navigation") {
+            AgentNavigationFixtureView()
+        } else {
+            liveContent
+        }
+        #else
+        liveContent
+        #endif
+    }
+
+    @ViewBuilder
+    private var liveContent: some View {
+        if NSClassFromString("XCTestCase") != nil {
+            Color.clear
+        } else {
+            ContentView()
+                .environment(appState)
+                .task {
+                    _ = try? await UNUserNotificationCenter.current()
+                        .requestAuthorization(options: [.badge])
+                }
+                .onChange(of: scenePhase) { _, newPhase in
+                    appState.handleScenePhaseChange(newPhase)
+                }
+        }
     }
 }

@@ -6,8 +6,30 @@ struct ChatView: View {
     @State private var speechService = SpeechService()
     @State private var isAtBottom = true
     @State private var scrollPos = ScrollPosition(idType: String.self)
-    @State private var pendingEdit: ComposerView.PendingEdit?
+    @State private var showAgentEditor = false
+    @State private var hasNewMessages = false
+    @State private var findText = ""
+    @State private var showFind = false
+    @State private var findIndex = 0
+    @FocusState private var isFindFocused: Bool
+    @State private var showRename = false
+    @State private var renameText = ""
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var draft: ConversationDraft {
+        appState.draft(for: agent.id, sessionID: appState.currentSessionId ?? "")
+    }
+
+    private var conversationTitle: String {
+        appState.sessions.first { $0.id == appState.currentSessionId }?.title ?? "New Conversation"
+    }
+
+    private var matches: [ChatMessage] {
+        guard !findText.isEmpty else { return [] }
+        return visibleMessages.filter { $0.textContent.localizedCaseInsensitiveContains(findText) }
+    }
     @State private var showConversation = false
+    @State private var showVoiceSetup = false
     @State private var priorSpeechEnabled = false
 
     /// Live agent data from AppState, falls back to the navigation snapshot.
@@ -18,7 +40,30 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ConnectionStatusBanner()
+            #if os(iOS)
+            if !appState.usesSplitNavigation { ConnectionStatusBanner() }
+            #endif
+            if showFind {
+                HStack {
+                    TextField("Find in conversation", text: $findText)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isFindFocused)
+                        .onSubmit { findNext() }
+                    Text("\(matches.count) matches").font(.caption).foregroundStyle(.secondary)
+                    Button("Next", action: findNext).disabled(matches.isEmpty)
+                    Button("Done") { showFind = false; findText = "" }
+                }
+                .padding(10)
+            }
+            if appState.isLoadingHistory {
+                ProgressView("Loading conversation…").padding()
+            } else if let error = appState.historyLoadError {
+                InlineNotice(message: error, actionTitle: "Retry") {
+                    if let id = appState.currentSessionId {
+                        Task { await appState.openSession(id, for: agent) }
+                    }
+                }
+            }
 
             ScrollView {
                 // Eager VStack (not LazyVStack): real bubble heights keep the
@@ -29,16 +74,16 @@ struct ChatView: View {
                 // but is correct; window the history later if it ever bites.
                 VStack(spacing: 2) {
                     let items = visibleMessages
-                    if items.isEmpty && !appState.isStreaming {
+                    if items.isEmpty && !appState.isStreaming && !appState.isLoadingHistory && appState.historyLoadError == nil {
                         emptyState
                     }
 
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, message in
                         // Show timestamp if >5 min gap from previous message
-                        if let gap = timeGap(at: index, in: items), gap {
-                            Text(items[index].timestamp.formatted(date: .omitted, time: .shortened))
+                        if let label = timestampLabel(at: index, in: items) {
+                            Text(label)
                                 .font(.caption2)
-                                .foregroundStyle(.quaternary)
+                                .foregroundStyle(.secondary)
                                 .padding(.top, 8)
                                 .padding(.bottom, 2)
                         }
@@ -69,37 +114,42 @@ struct ChatView: View {
                     }
                 }
                 .scrollTargetLayout()
-                .padding(.horizontal, 8)
+                .frame(maxWidth: InterfaceMetrics.readingWidth)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             }
             .scrollPosition($scrollPos)
             .defaultScrollAnchor(.bottom, for: .sizeChanges)
             .onChange(of: appState.messages.count) { _, _ in
-                // New message added — always scroll to bottom. Defer one tick so
-                // the new bubbles lay out before the animation captures its target.
                 guard appState.messages.last != nil else { return }
+                guard isAtBottom else { hasNewMessages = true; return }
                 Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(16))
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        scrollPos.scrollTo(edge: .bottom)
-                    }
-                    isAtBottom = true
+                    await Task.yield()
+                    scrollPos.scrollTo(edge: .bottom)
                 }
             }
+            .onChange(of: isAtBottom) { _, atBottom in
+                if atBottom { hasNewMessages = false }
+            }
+            .onChange(of: findText) { _, _ in findIndex = 0 }
+            .onChange(of: showFind) { _, visible in isFindFocused = visible }
+            #if os(iOS)
+            .scrollDismissesKeyboard(.interactively)
+            #endif
             .modifier(ScrollBottomDetector(isAtBottom: $isAtBottom))
             .overlay(alignment: .bottomTrailing) {
                 if !isAtBottom {
                     Button {
-                        withAnimation(.easeOut(duration: 0.2)) {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                             scrollPos.scrollTo(edge: .bottom)
                         }
                         isAtBottom = true
                     } label: {
-                        Image(systemName: "chevron.down.circle.fill")
-                            .font(.title2)
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.primary, Color(.systemGray5))
-                            .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                        Label(hasNewMessages ? "New messages" : "Latest messages", systemImage: "arrow.down")
+                            .font(.callout.weight(.medium))
+                            .padding(10)
+                            .background(.regularMaterial, in: Capsule())
                     }
                     .buttonStyle(.plain)
                     .padding(12)
@@ -114,11 +164,13 @@ struct ChatView: View {
 
             ComposerView(
                 speechService: speechService,
-                pendingEdit: $pendingEdit,
+                draft: draft,
                 onSend: { text, attachments in
+                    isAtBottom = true
                     Task { await appState.sendMessage(text, attachments: attachments) }
                 },
                 onResubmit: { text, attachments in
+                    isAtBottom = true
                     Task { await appState.resubmitLast(text: text, attachments: attachments) }
                 },
                 onCancel: {
@@ -139,52 +191,77 @@ struct ChatView: View {
         }
         #endif
         .toolbar {
-            #if os(iOS)
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 8) {
-                    AgentAvatar(agent: liveAgent, size: 32)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(liveAgent.displayName)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        if let label = connectionLabel {
-                            Text(label)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+                Button { showAgentEditor = true } label: {
+                    HStack(spacing: 8) {
+                        AgentAvatar(agent: liveAgent, size: 28)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(conversationTitle).font(.headline).lineLimit(1)
+                            Text(liveAgent.displayName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
+                    .foregroundStyle(.primary)
                 }
-                .accessibilityLabel(connectionLabel.map { "\(liveAgent.displayName), \($0)" } ?? liveAgent.displayName)
+                .buttonStyle(.plain)
+                .help("Edit \(liveAgent.displayName)")
+                .accessibilityLabel("\(conversationTitle), \(liveAgent.displayName). Edit agent")
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 12) {
-                    conversationButton
-                    speechToggleButton
-                }
-            }
-            #else
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 8) {
-                    AgentAvatar(agent: liveAgent, size: 24)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(liveAgent.displayName)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        if let label = connectionLabel {
-                            Text(label)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                        }
+            ToolbarItemGroup(placement: .primaryAction) {
+                #if os(iOS)
+                conversationButton
+                Menu {
+                    Button { Task { await appState.toggleSpeechForCurrentSession() } } label: {
+                        Label(appState.currentSpeechEnabled ? "Stop Reading Replies Aloud" : "Read Replies Aloud", systemImage: "speaker.wave.2")
                     }
-                }
-                .accessibilityLabel(connectionLabel.map { "\(liveAgent.displayName), \($0)" } ?? liveAgent.displayName)
-            }
-            ToolbarItem(placement: .primaryAction) {
+                    .disabled(appState.connectionStatus != .connected)
+                    Button("Find in Conversation", systemImage: "magnifyingglass") { showFind = true }
+                    Button("Rename Conversation…", systemImage: "pencil", action: beginRename)
+                        .disabled(!canRename)
+                    Button("Edit Agent", systemImage: "person.crop.circle") { showAgentEditor = true }
+                } label: { Label("Conversation Actions", systemImage: "ellipsis.circle") }
+                #else
                 speechToggleButton
+                Button { showFind.toggle() } label: {
+                    Label("Find in Conversation", systemImage: "magnifyingglass")
+                }
+                .keyboardShortcut("f", modifiers: .command)
+                .help("Find in conversation")
+                Menu {
+                    Button("Rename Conversation…", systemImage: "pencil", action: beginRename)
+                        .disabled(!canRename)
+                    Button("Edit Agent…", systemImage: "person.crop.circle") { showAgentEditor = true }
+                } label: { Label("Conversation Actions", systemImage: "ellipsis.circle") }
+                .help("Conversation actions")
+                #endif
             }
-            #endif
+        }
+        .focusedSceneValue(\.findConversation, InterfaceCommand { showFind = true })
+        .focusedSceneValue(\.renameConversation, InterfaceCommand(isEnabled: canRename, perform: beginRename))
+        .alert("Rename Conversation", isPresented: $showRename) {
+            TextField("Conversation title", text: $renameText)
+            Button("Rename") {
+                if let id = appState.currentSessionId {
+                    let title = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    Task { await appState.renameSession(id, title: title, for: agent) }
+                }
+            }
+            .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        }
+        .sheet(isPresented: $showAgentEditor) {
+            NavigationStack { AgentEditView(agent: liveAgent) }
+                #if os(macOS)
+                .frame(minWidth: 540, idealWidth: 620, minHeight: 600)
+                #endif
         }
         #if os(iOS)
+        .alert("No Voice Configured", isPresented: $showVoiceSetup) {
+            Button("Edit Agent") { showAgentEditor = true }
+            Button("Continue with Text Replies") { startConversation(checkVoice: false) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Choose a voice for \(liveAgent.displayName) to hear replies, or continue using dictation with text replies.")
+        }
         .fullScreenCover(isPresented: $showConversation, onDismiss: {
             Task { @MainActor in await appState.setSpeechForCurrentSession(priorSpeechEnabled) }
         }) {
@@ -211,8 +288,17 @@ struct ChatView: View {
     /// Ensure a session exists, force speech on for the call, and present the
     /// full-screen conversation view. The prior speech setting is restored when
     /// the cover is dismissed.
-    private func startConversation() {
+    private func startConversation(checkVoice: Bool = true) {
         Task {
+            if checkVoice {
+                do {
+                    let config = try await appState.loadAgentConfig(liveAgent)
+                    if config.voice?.isEmpty != false { showVoiceSetup = true; return }
+                } catch {
+                    appState.error = "Couldn’t check voice settings. \(error.localizedDescription)"
+                    return
+                }
+            }
             if appState.currentSessionId == nil,
                let id = await appState.createSession(for: agent) {
                 await appState.openSession(id, for: agent)
@@ -232,9 +318,10 @@ struct ChatView: View {
             Task { await appState.toggleSpeechForCurrentSession() }
         } label: {
             Image(systemName: on ? "speaker.wave.2.fill" : "speaker.slash")
-                .accessibilityLabel(on ? "Disable speech for this session" : "Enable speech for this session")
+                .accessibilityLabel(on ? "Stop reading replies aloud" : "Read replies aloud")
         }
-        .disabled(appState.currentSessionId == nil)
+        .disabled(appState.currentSessionId == nil || appState.connectionStatus != .connected)
+        .help(on ? "Stop reading replies aloud" : "Read replies aloud")
     }
 
     /// Inline strip above the composer when a chat.send never reached the server.
@@ -245,14 +332,16 @@ struct ChatView: View {
             Text("Message failed to send.")
                 .font(.footnote)
             Spacer()
-            Button("Retry") {
+            Button("Retry Sending") {
                 Task { await appState.retryFailedSend() }
             }
+            .disabled(!appState.canSubmitMessage)
             .font(.footnote.weight(.semibold))
             Button {
                 appState.failedSend = nil
             } label: {
                 Image(systemName: "xmark")
+                    .frame(width: InterfaceMetrics.actionSize, height: InterfaceMetrics.actionSize)
             }
             .buttonStyle(.borderless)
             .accessibilityLabel("Dismiss")
@@ -278,11 +367,19 @@ struct ChatView: View {
         .padding(.vertical, 40)
     }
 
-    private func timeGap(at index: Int, in items: [ChatMessage]) -> Bool? {
-        guard index > 0 else { return nil }
-        let current = items[index]
-        let previous = items[index - 1]
-        return current.timestamp.timeIntervalSince(previous.timestamp) > 300
+    private func timestampLabel(at index: Int, in items: [ChatMessage]) -> String? {
+        let date = items[index].timestamp
+        if index == 0 || !Calendar.current.isDate(date, inSameDayAs: items[index - 1].timestamp) {
+            return date.formatted(date: .abbreviated, time: .shortened)
+        }
+        return date.timeIntervalSince(items[index - 1].timestamp) > 300
+            ? date.formatted(date: .omitted, time: .shortened) : nil
+    }
+
+    private func findNext() {
+        guard !matches.isEmpty else { return }
+        scrollPos.scrollTo(id: matches[findIndex % matches.count].id, anchor: .center)
+        findIndex += 1
     }
 
     private func isLastAssistantMessage(at index: Int, in items: [ChatMessage]) -> Bool {
@@ -328,10 +425,7 @@ struct ChatView: View {
 
     private func beginEditingLastUserMessage() {
         guard let original = appState.lastUserMessage else { return }
-        pendingEdit = ComposerView.PendingEdit(
-            text: original.textContent,
-            attachments: appState.draftAttachments(from: original)
-        )
+        draft.beginEditing(.init(text: original.textContent, attachments: appState.draftAttachments(from: original)))
     }
 
     private var visibleMessages: [ChatMessage] {
@@ -344,19 +438,20 @@ struct ChatView: View {
             // Keep if message has any non-tool-call blocks, or any still-running tool calls
             return message.blocks.contains { block in
                 if case .toolCall(_, _, let status, _) = block {
-                    return status == .running
+                    return status == .running || status == .failed
                 }
                 return true
             }
         }
     }
 
-    private var connectionLabel: String? {
-        switch appState.connectionStatus {
-        case .connected: return nil
-        case .connecting, .reconnecting: return "Connecting..."
-        case .disconnected: return "Offline"
-        }
+    private var canRename: Bool {
+        appState.currentSessionId != nil && appState.connectionStatus == .connected
+    }
+
+    private func beginRename() {
+        renameText = conversationTitle
+        showRename = true
     }
 
     private func bubblePosition(for index: Int, in items: [ChatMessage]) -> BubblePosition {

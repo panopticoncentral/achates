@@ -24,9 +24,13 @@ struct ConversationView: View {
                     .padding(.horizontal)
             }
             stateIndicator
-            endButton
+            HStack(spacing: 32) {
+                microphoneButton
+                endButton
+            }
         }
         .padding()
+        .safeAreaInset(edge: .top, spacing: 0) { ConnectionStatusBanner() }
         .task {
             let c = ConversationController(appState: appState)
             controller = c
@@ -112,7 +116,7 @@ struct ConversationView: View {
                 .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(isUser ? Color.blue.opacity(0.15) : Color(.systemGray6))
+                        .fill(isUser ? Color.accentColor.opacity(0.15) : Color.subtleSurface)
                 )
                 .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
         }
@@ -129,7 +133,7 @@ struct ConversationView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
         }
-        .frame(height: 28)
+        .frame(minHeight: 28)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)
     }
@@ -142,6 +146,25 @@ struct ConversationView: View {
         case .paused:    return ("Paused", "pause.circle", .orange)
         case .failed:    return ("Unavailable", "exclamationmark.triangle", .red)
         default:         return ("…", "circle", .secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var microphoneButton: some View {
+        switch controller?.state {
+        case .failed(let reason):
+            VStack {
+                Text(reason).font(.footnote).foregroundStyle(.secondary)
+                Button("Retry", systemImage: "arrow.clockwise") { controller?.retry() }
+                    .buttonStyle(.bordered)
+            }
+        case .paused:
+            Button("Resume Microphone", systemImage: "mic") { controller?.resume() }
+                .buttonStyle(.bordered)
+                .disabled(appState.isStreaming || appState.connectionStatus != .connected)
+        default:
+            Button("Pause Microphone", systemImage: "mic.slash") { controller?.pause() }
+                .buttonStyle(.bordered)
         }
     }
 

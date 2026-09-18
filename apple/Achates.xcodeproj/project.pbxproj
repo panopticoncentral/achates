@@ -57,6 +57,11 @@
 			path = AchatesTests;
 			sourceTree = "<group>";
 		};
+		A17E57012F6900000003022C /* AchatesUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AchatesUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -90,6 +95,7 @@
 			children = (
 				8B8BF0D22F6864A5005E11BC /* Achates */,
 				8BAC11A02F6900000003022C /* AchatesTests */,
+				A17E57012F6900000003022C /* AchatesUITests */,
 				8B8BF0D12F6864A5005E11BC /* Products */,
 			);
 			sourceTree = "<group>";
@@ -165,6 +171,9 @@
 			);
 			dependencies = (
 				8B8BF0EB2F6864A6005E11BC /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A17E57012F6900000003022C /* AchatesUITests */,
 			);
 			name = AchatesUITests;
 			packageProductDependencies = (
@@ -412,6 +421,7 @@
 		8B8BF0F42F6864A6005E11BC /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ACHATES_APP_BUNDLE_IDENTIFIER = AchatesSoftware.Achates;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Achates/Achates.entitlements;
@@ -440,7 +450,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = AchatesSoftware.Achates;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(ACHATES_APP_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -455,6 +465,7 @@
 		8B8BF0F52F6864A6005E11BC /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ACHATES_APP_BUNDLE_IDENTIFIER = AchatesSoftware.Achates;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Achates/Achates.entitlements;
@@ -483,7 +494,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = AchatesSoftware.Achates;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(ACHATES_APP_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;

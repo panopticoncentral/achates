@@ -1,38 +1,23 @@
 import SwiftUI
 
-/// Full-width strip shown while the socket is down or reconnecting. Renders
-/// nothing when connected. Used above the chat transcript and pinned beneath
-/// the macOS sidebar so a dropped connection is visible outside the open
-/// conversation too (the lists otherwise look live while frozen).
 struct ConnectionStatusBanner: View {
     @Environment(AppState.self) private var appState
-
     var body: some View {
-        if appState.connectionStatus == .disconnected {
-            HStack(spacing: 6) {
-                Image(systemName: "wifi.slash")
-                    .font(.caption)
-                Text("No connection")
-                    .font(.caption.weight(.medium))
+        switch appState.connectionStatus {
+        case .connected: EmptyView()
+        case .connecting, .reconnecting:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Connecting to server…").font(.callout)
+                Spacer()
+                Button("Cancel") { appState.disconnect() }.buttonStyle(.borderless)
             }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .background(.red.opacity(0.85))
-            .accessibilityLabel("Disconnected from server")
-        } else if appState.connectionStatus == .reconnecting {
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.mini)
-                    .tint(.white)
-                Text("Reconnecting...")
-                    .font(.caption.weight(.medium))
+            .padding(12)
+            .background(.bar)
+        case .disconnected:
+            InlineNotice(message: "Offline. Your draft is kept while you reconnect.", symbol: "wifi.slash", actionTitle: "Reconnect") {
+                appState.connectToServer()
             }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .background(.orange.opacity(0.85))
-            .accessibilityLabel("Reconnecting to server")
         }
     }
 }

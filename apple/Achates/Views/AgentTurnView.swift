@@ -22,21 +22,7 @@ struct AgentTurnView: View {
             }
 
             Markdown(text)
-                .markdownTextStyle {
-                    FontSize(.em(0.95))
-                }
-                .markdownBlockStyle(\.codeBlock) { configuration in
-                    configuration.label
-                        .markdownTextStyle {
-                            FontFamilyVariant(.monospaced)
-                            FontSize(.em(0.85))
-                        }
-                        .padding(8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color(.systemGray6))
-                        )
-                }
+                .conversationMarkdown()
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(10)

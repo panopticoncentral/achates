@@ -43,6 +43,27 @@ final class ConversationController {
         apply(machine.handle(.endRequested))
     }
 
+    func pause() { apply(machine.handle(.pauseRequested)) }
+
+    func resume() {
+        guard appState.connectionStatus == .connected, !appState.isStreaming else {
+            banner = "Reconnect and wait for the current reply before resuming."
+            return
+        }
+        banner = nil
+        apply(machine.handle(.resumeRequested))
+    }
+
+    func retry() {
+        guard appState.connectionStatus == .connected else {
+            banner = "Reconnect to the server before retrying."
+            return
+        }
+        banner = nil
+        observeInterruptions()
+        apply(machine.handle(.retryRequested))
+    }
+
     /// From `.onChange(of: appState.isStreaming)` when it flips to false.
     func turnDidComplete() {
         apply(machine.handle(.turnCompleted(isPlaying: speechPlayer.isPlaying)))
@@ -55,11 +76,10 @@ final class ConversationController {
 
     /// From `.onChange(of: appState.connectionStatus)` when the socket drops. If
     /// it drops mid-turn the `done` event never arrives, so without this the loop
-    /// would hang in `.sending`. Resolves to resume listening (STT is on-device).
+    /// would hang in `.sending`. Pause until the user reconnects and resumes.
     func connectionDidDrop() {
-        guard state == .sending || state == .speaking else { return }
-        banner = "Connection lost — resumed listening."
-        apply(machine.handle(.turnFailed("connection lost")))
+        banner = "Connection lost. Reconnect, then resume the microphone."
+        apply(machine.handle(.pauseRequested))
     }
 
     // MARK: - Intent execution
@@ -88,6 +108,7 @@ final class ConversationController {
             guard let self else { return }
             do {
                 try await self.speech.startRecording(continuous: true)
+                if self.state != .listening { _ = self.speech.stopRecording() }
             } catch {
                 self.apply(self.machine.handle(.startFailed(error.localizedDescription)))
             }
@@ -102,6 +123,11 @@ final class ConversationController {
     }
 
     private func sendTurn(_ text: String) {
+        guard appState.canSubmitMessage else {
+            banner = "The message couldn’t be sent. Reconnect, then resume the microphone."
+            apply(machine.handle(.pauseRequested))
+            return
+        }
         configurePlaybackSession()
         Task { [weak self] in await self?.appState.sendMessage(text) }
     }

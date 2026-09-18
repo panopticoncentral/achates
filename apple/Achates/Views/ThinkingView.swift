@@ -14,17 +14,17 @@ struct ThinkingView: View {
                 }
             }) {
                 HStack(spacing: 5) {
+                    Text(collapsed ? "Thought for a moment" : "Thinking...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     if !collapsed {
                         ProgressView()
                             .controlSize(.mini)
                     }
-                    Text(collapsed ? "Thought for a moment" : "Thinking...")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
                     if collapsed {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.quaternary)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .contentShape(.rect)
@@ -39,17 +39,17 @@ struct ThinkingView: View {
 
             if isExpanded && collapsed {
                 Text(text)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color(.systemGray6))
+                            .fill(Color.subtleSurface)
                     )
             }
         }
-        .padding(.leading, 4)
+        .padding(.horizontal, InterfaceMetrics.messageContentInset)
         .padding(.vertical, 2)
     }
 }

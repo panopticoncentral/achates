@@ -41,11 +41,11 @@ struct ModelBrowseView: View {
                 ProgressView("Loading models…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let loadError {
-                ContentUnavailableView(
-                    "Couldn't load models",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(loadError)
-                )
+                ContentUnavailableView {
+                    Label("Couldn’t Load Models", systemImage: "exclamationmark.triangle")
+                } description: { Text(loadError) } actions: {
+                    Button("Retry") { Task { await loadModels() } }
+                }
             } else {
                 List {
                     Section {
@@ -77,9 +77,10 @@ struct ModelBrowseView: View {
                     } footer: {
                         Text(nilMeansNone
                             ? "Agents without their own model setting will have no model."
-                            : "Falls back to models.base in ~/.achates/config.yaml.")
+                            : "Uses the corresponding server-wide default. Changes are saved in the parent editor.")
                     }
 
+                    if filteredModels.isEmpty { ContentUnavailableView.search(text: searchText) }
                     ForEach(groupedModels, id: \.provider) { group in
                         Section(group.provider) {
                             ForEach(group.models) { model in
@@ -98,7 +99,7 @@ struct ModelBrowseView: View {
                                         Spacer()
                                         if model.id == selectedModel {
                                             Image(systemName: "checkmark")
-                                                .foregroundStyle(.blue)
+                                                .foregroundStyle(.tint)
                                         }
                                     }
                                 }
@@ -117,6 +118,8 @@ struct ModelBrowseView: View {
     }
 
     private func loadModels() async {
+        isLoading = true
+        defer { isLoading = false }
         do {
             models = try await appState.loadAvailableModels()
             loadError = nil

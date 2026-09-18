@@ -13,6 +13,7 @@ struct MemoryEditView: View {
     @State private var showConflictBanner = false
     @State private var errorMessage: String?
     @State private var showError = false
+    @State private var showReloadConfirm = false
 
     private var isDirty: Bool { content != original }
 
@@ -41,6 +42,8 @@ struct MemoryEditView: View {
                     }
                     TextEditor(text: $content)
                         .font(.system(.body, design: .monospaced))
+                        .accessibilityLabel("Memory content")
+                        .disabled(isSaving)
                         .autocorrectionDisabled()
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
@@ -64,14 +67,23 @@ struct MemoryEditView: View {
                     }
                 }
                 .disabled(!isDirty || isSaving || loadFailed)
+                .keyboardShortcut("s", modifiers: .command)
             }
+        }
+        .focusedSceneValue(\.saveEditor, InterfaceCommand(isEnabled: isDirty && !isSaving && !loadFailed) { Task { await save() } })
+        .editorDismissal(isDirty: isDirty, isSaving: isSaving)
+        .confirmationDialog("Discard changes and reload?", isPresented: $showReloadConfirm, titleVisibility: .visible) {
+            Button("Discard Changes and Reload", role: .destructive) {
+                Task { await load(); showConflictBanner = false }
+            }
+            Button("Keep Editing", role: .cancel) {}
         }
         .alert("Error", isPresented: $showError) {
             Button("OK") {}
         } message: {
             Text(errorMessage ?? "Unknown error")
         }
-        .task { await load() }
+        .task { if isLoading { await load() } }
         .onChange(of: appState.memoryUpdateEvent) { _, new in
             guard let new, new.scope == memory.scope else { return }
             if isDirty {
@@ -90,19 +102,16 @@ struct MemoryEditView: View {
             Text("This memory was changed elsewhere.")
                 .font(.footnote)
             Spacer()
-            Button("Reload") {
-                Task {
-                    await load()
-                    showConflictBanner = false
-                }
-            }
+            Button("Reload") { showReloadConfirm = true }
             .font(.footnote)
             Button {
                 showConflictBanner = false
             } label: {
                 Image(systemName: "xmark")
+                    .frame(width: InterfaceMetrics.actionSize, height: InterfaceMetrics.actionSize)
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel("Dismiss update notice")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -125,9 +134,10 @@ struct MemoryEditView: View {
 
     private func save() async {
         isSaving = true
+        let snapshot = content
         do {
-            try await appState.saveMemory(scope: memory.scope, content: content)
-            original = content
+            try await appState.saveMemory(scope: memory.scope, content: snapshot)
+            original = snapshot
             showConflictBanner = false
         } catch {
             errorMessage = error.localizedDescription

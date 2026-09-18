@@ -21,12 +21,32 @@ struct AgentEditView: View {
     @State private var previewPlayer = SpeechPreviewPlayer()
     @State private var isPreviewLoading = false
     @State private var previewError: String?
+    @State private var loadFailed = false
+    @State private var temperatureText = ""
+    @State private var maxTokensText = ""
+    @State private var showCustomVoice = false
+
+    private var numberError: String? {
+        if !temperatureText.isEmpty, Double(temperatureText.replacingOccurrences(of: ",", with: "."))?.isFinite != true {
+            return "Enter a valid temperature, or leave it empty for the default."
+        }
+        if !maxTokensText.isEmpty, (Int(maxTokensText) ?? 0) <= 0 {
+            return "Max tokens must be a positive whole number."
+        }
+        return nil
+    }
 
     var body: some View {
         Group {
             if isLoading {
                 ProgressView("Loading...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if loadFailed {
+                ContentUnavailableView {
+                    Label("Couldn’t Load Agent", systemImage: "exclamationmark.triangle")
+                } description: { Text(errorMessage ?? "Try again.") } actions: {
+                    Button("Retry") { Task { await load() } }
+                }
             } else if let _ = config {
                 formContent
             }
@@ -46,12 +66,12 @@ struct AgentEditView: View {
                         Text("Save")
                     }
                 }
-                .disabled(!saveEnabled || isSaving)
-            }
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
+                .disabled(!saveEnabled || isSaving || numberError != nil)
+                .keyboardShortcut("s", modifiers: .command)
             }
         }
+        .focusedSceneValue(\.saveEditor, InterfaceCommand(isEnabled: saveEnabled && !isSaving && numberError == nil) { Task { await save() } })
+        .editorDismissal(isDirty: saveEnabled || numberError != nil, isSaving: isSaving || isDeleting)
         .onChange(of: config) { _, _ in
             if let config, let original {
                 saveEnabled = config != original
@@ -102,9 +122,13 @@ struct AgentEditView: View {
                 HStack {
                     Spacer()
                     Button { showAvatarSheet = true } label: {
-                        avatarPreview
+                        VStack(spacing: 6) {
+                            avatarPreview
+                            Text("Edit Photo").font(.caption).foregroundStyle(.tint)
+                        }
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Edit agent photo")
                     Spacer()
                 }
                 .listRowBackground(Color.clear)
@@ -112,7 +136,7 @@ struct AgentEditView: View {
                 HStack {
                     Text("Name")
                     Spacer()
-                    TextField("", text: binding(\.displayName))
+                    TextField("Name", text: binding(\.displayName)).labelsHidden()
                         .multilineTextAlignment(.trailing)
                         .foregroundStyle(.secondary)
                 }
@@ -120,7 +144,8 @@ struct AgentEditView: View {
                 HStack {
                     Text("Description")
                     Spacer()
-                    TextField("", text: binding(\.description))
+                    TextField("Description", text: binding(\.description), axis: .vertical)
+                        .labelsHidden().lineLimit(2...4)
                         .multilineTextAlignment(.trailing)
                         .foregroundStyle(.secondary)
                 }
@@ -137,7 +162,7 @@ struct AgentEditView: View {
                 }
             }
 
-            Section("Generation") {
+            Section("Behavior") {
                 NavigationLink {
                     ModelBrowseView(
                         selectedModel: binding(\.model),
@@ -161,6 +186,7 @@ struct AgentEditView: View {
                 }
 
                 reasoningEffortPicker
+                if let numberError { Text(numberError).font(.callout).foregroundStyle(.red) }
 
                 HStack {
                     Text("Temperature")
@@ -208,8 +234,9 @@ struct AgentEditView: View {
 
             Section {
                 voicePicker
+                DisclosureGroup("Custom Voice", isExpanded: $showCustomVoice) {
                 HStack {
-                    Text("Custom blend")
+                    Text("Blend")
                     Spacer()
                     TextField("af_nicole(0.7)+af_bella(0.3)", text: voiceBinding)
                         .multilineTextAlignment(.trailing)
@@ -218,6 +245,7 @@ struct AgentEditView: View {
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
                         #endif
+                }
                 }
                 speechRateRow
                 if config?.speechRate != nil {
@@ -232,7 +260,7 @@ struct AgentEditView: View {
                     Text(err)
                         .foregroundStyle(.red)
                 } else if let reg = voiceRegistry, reg.voices.isEmpty, !reg.isLoading {
-                    Text("Speech is not configured on the server. Configure tools.speech in ~/.achates/config.yaml and restart to enable.")
+                    Text("Speech isn’t available on this server. Ask the server administrator to enable speech to use voice replies.")
                 } else {
                     Text("Voice plays for sessions where the speaker toggle is on. Empty makes the agent silent. Rate ranges from 0.5× (slow) to 2× (fast); 1.0× is normal.")
                 }
@@ -262,7 +290,7 @@ struct AgentEditView: View {
                         )
                     } label: {
                         HStack {
-                            Text("Allowed Chats")
+                            Text("Agent Communication")
                             Spacer()
                             Text(config?.allowedChats.isEmpty == true ? "All" : "\(config?.allowedChats.count ?? 0) agents")
                                 .foregroundStyle(.secondary)
@@ -288,6 +316,7 @@ struct AgentEditView: View {
                 .disabled(isSaving || isDeleting)
             }
         }
+        .disabled(isSaving || isDeleting)
         #if os(iOS)
         .scrollDismissesKeyboard(.interactively)
         #else
@@ -315,17 +344,12 @@ struct AgentEditView: View {
 
     @ViewBuilder
     private var reasoningEffortPicker: some View {
-        HStack {
-            Text("Reasoning")
-            Spacer()
-            Picker("", selection: reasoningBinding) {
-                Text("Low").tag("low")
-                Text("Med").tag("medium")
-                Text("High").tag("high")
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 180)
+        Picker("Reasoning", selection: reasoningBinding) {
+            Text("Low").tag("low")
+            Text("Medium").tag("medium")
+            Text("High").tag("high")
         }
+        .pickerStyle(.menu)
     }
 
     private var reasoningBinding: Binding<String> {
@@ -341,11 +365,12 @@ struct AgentEditView: View {
 
     private var temperatureBinding: Binding<String> {
         Binding(
-            get: { config?.temperature.map { String($0) } ?? "" },
+            get: { temperatureText },
             set: { newValue in
                 guard var c = config else { return }
+                temperatureText = newValue
                 if newValue.isEmpty { c.temperature = nil }
-                else if let v = Double(newValue) { c.temperature = v }
+                else if let v = Double(newValue.replacingOccurrences(of: ",", with: ".")) { c.temperature = v }
                 config = c
             }
         )
@@ -353,9 +378,10 @@ struct AgentEditView: View {
 
     private var maxTokensBinding: Binding<String> {
         Binding(
-            get: { config?.maxTokens.map { String($0) } ?? "" },
+            get: { maxTokensText },
             set: { newValue in
                 guard var c = config else { return }
+                maxTokensText = newValue
                 if newValue.isEmpty { c.maxTokens = nil }
                 else if let v = Int(newValue) { c.maxTokens = v }
                 config = c
@@ -404,8 +430,8 @@ struct AgentEditView: View {
         HStack {
             Text("Voice")
             Spacer()
-            Picker("", selection: voicePickerBinding) {
-                Text("Voiceless").tag("")
+            Picker("Voice", selection: voicePickerBinding) {
+                Text("No Voice").tag("")
                 ForEach(known, id: \.self) { v in
                     Text(v).tag(v)
                 }
@@ -597,23 +623,7 @@ struct AgentEditView: View {
         } else if config?.hasAvatar == true, !config!.removeAvatar {
             AgentAvatar(agent: agent, size: size)
         } else {
-            ZStack {
-                Circle()
-                    .fill(.blue.gradient)
-                    .frame(width: size, height: size)
-                Text(agent.initials)
-                    .font(.system(size: size * 0.4, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .overlay(alignment: .bottom) {
-                Text("Edit")
-                    .font(.caption2)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background(.black.opacity(0.5), in: Capsule())
-                    .offset(y: -4)
-            }
+            AgentAvatar(agent: agent, size: size, showsPhoto: false)
         }
     }
 
@@ -646,16 +656,22 @@ struct AgentEditView: View {
     }
 
     private func load() async {
+        isLoading = true
+        loadFailed = false
+        defer { isLoading = false }
         do {
             async let loadedConfig = appState.loadAgentConfig(agent)
             async let loadedTools = appState.loadAvailableTools()
             config = try await loadedConfig
             original = config
+            temperatureText = config?.temperature.map { String($0) } ?? ""
+            maxTokensText = config?.maxTokens.map { String($0) } ?? ""
             availableTools = (try? await loadedTools) ?? []
             isLoading = false
         } catch {
             errorMessage = error.localizedDescription
-            showError = true
+            loadFailed = true
+            return
         }
 
         // Kick off voice list refresh in the background; the picker shows
@@ -667,7 +683,7 @@ struct AgentEditView: View {
     }
 
     private func save() async {
-        guard let config else { return }
+        guard let config, numberError == nil else { return }
         isSaving = true
         do {
             try await appState.saveAgentConfig(agent, config: config, original: original!)

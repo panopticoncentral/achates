@@ -3,9 +3,13 @@ import SwiftUI
 struct MemoryListView: View {
     @Environment(AppState.self) private var appState
     @State private var hasLoaded = false
+    @State private var editingMemory: MemoryInfo?
 
     var body: some View {
         List {
+            if let error = appState.memoryLoadError {
+                InlineNotice(message: error, actionTitle: "Retry") { Task { await appState.loadMemories() } }
+            }
             if !hasLoaded {
                 HStack {
                     Spacer()
@@ -13,7 +17,7 @@ struct MemoryListView: View {
                     Spacer()
                 }
                 .listRowSeparator(.hidden)
-            } else if appState.memories.isEmpty {
+            } else if appState.memories.isEmpty && appState.memoryLoadError == nil {
                 ContentUnavailableView(
                     "No Memory Files",
                     systemImage: "brain",
@@ -21,15 +25,20 @@ struct MemoryListView: View {
                 )
             } else {
                 ForEach(appState.memories) { memory in
-                    NavigationLink {
-                        MemoryEditView(memory: memory)
-                    } label: {
+                    Button { editingMemory = memory } label: {
                         MemoryRow(memory: memory)
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
         .navigationTitle("Memory")
+        .sheet(item: $editingMemory) { memory in
+            NavigationStack { MemoryEditView(memory: memory) }
+                #if os(macOS)
+                .frame(minWidth: 560, idealWidth: 700, minHeight: 500)
+                #endif
+        }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -44,7 +53,8 @@ struct MemoryListView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .keyboardShortcut("r", modifiers: .command)
-                .accessibilityLabel("Refresh")
+                    .accessibilityLabel("Refresh")
+                    .help("Refresh memories")
             }
         }
         #endif
@@ -56,13 +66,22 @@ struct MemoryListView: View {
 }
 
 private struct MemoryRow: View {
+    @Environment(AppState.self) private var appState
     let memory: MemoryInfo
+
+    private var title: String {
+        if memory.isShared { return "Shared Memory" }
+        return appState.agents.first { $0.name == memory.scope || $0.id == memory.scope }?.displayName ?? memory.displayName
+    }
 
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(memory.displayName)
+                Text(title)
                     .fontWeight(memory.isShared ? .semibold : .regular)
+                if memory.isShared {
+                    Text("Available to every agent").font(.caption).foregroundStyle(.secondary)
+                }
                 Text("\(formatSize(memory.size)) · \(relative(memory.updated))")
                     .font(.caption)
                     .foregroundStyle(.secondary)

@@ -9,6 +9,7 @@ import SwiftUI
 /// instead.
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
+    var isOnboarding = false
     @AppStorage("show_message_costs") private var showMessageCosts = false
     @AppStorage("show_tool_activity") private var showToolActivity = false
     @State private var urlString = ""
@@ -19,27 +20,29 @@ struct SettingsView: View {
 
     var body: some View {
         formContent
-            .navigationTitle("Settings")
+            .navigationTitle(isOnboarding ? "Welcome" : "Settings")
     }
 
     @ViewBuilder
     private var formContent: some View {
         Form {
             #if os(iOS)
-            Section {
-                VStack(alignment: .center, spacing: 16) {
-                    Image(systemName: "bubble.left.and.bubble.right")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.blue)
-                    Text("Achates")
-                        .font(.largeTitle.bold())
-                    Text("Connect to your Achates server")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+            if isOnboarding {
+                Section {
+                    VStack(alignment: .center, spacing: 16) {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.tint)
+                        Text("Achates")
+                            .font(.largeTitle.bold())
+                        Text("Connect to your Achates server")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+                    .listRowBackground(Color.clear)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
-                .listRowBackground(Color.clear)
             }
             #endif
 
@@ -63,79 +66,62 @@ struct SettingsView: View {
             }
 
             Section {
-                if appState.connectionStatus == .connecting {
-                    Button(action: { appState.disconnect() }) {
-                        HStack {
-                            Spacer()
-                            Text("Cancel")
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.red)
-                            Spacer()
-                        }
+                switch appState.connectionStatus {
+                case .connected:
+                    Label("Connected", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    Button("Disconnect") { appState.disconnect() }
+                case .connecting, .reconnecting:
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Text("Connecting…")
+                        Spacer()
+                        Button("Cancel") { appState.disconnect() }
                     }
-                } else {
-                    Button(action: connect) {
-                        HStack {
-                            Spacer()
-                            Text("Connect")
-                                .fontWeight(.semibold)
-                            Spacer()
-                        }
-                    }
-                    .disabled(urlString.isEmpty)
+                case .disconnected:
+                    Button("Connect", action: connect).disabled(urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
 
-            if isConnected {
+            if !isOnboarding {
+                Section("Display") {
+                    Toggle("Show message costs", isOn: $showMessageCosts)
+                    Toggle("Show tool activity", isOn: $showToolActivity)
+                }
+
                 Section {
-                    Label("Connected", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                    NavigationLink {
+                        MemoryListView()
+                    } label: {
+                        Label("Memory", systemImage: "brain")
+                    }
 
-                    Button(action: { appState.disconnect() }) {
-                        Text("Disconnect")
-                            .foregroundStyle(.red)
+                    NavigationLink {
+                        JobsView()
+                    } label: {
+                        Label("Scheduled Jobs", systemImage: "calendar.badge.clock")
+                    }
+
+                    NavigationLink {
+                        DefaultModelsPage()
+                    } label: {
+                        Label("Default Models", systemImage: "cpu")
+                    }
+                } header: {
+                    Text("Manage")
+                } footer: {
+                    if !isConnected {
+                        Text("Connect to a server to manage memory, jobs, and models.")
                     }
                 }
-            }
+                .disabled(!isConnected)
 
-            Section("Display") {
-                Toggle("Show message costs", isOn: $showMessageCosts)
-                Toggle("Show tool activity", isOn: $showToolActivity)
-            }
-
-            Section {
-                NavigationLink {
-                    MemoryListView()
-                } label: {
-                    Label("Memory", systemImage: "brain")
-                }
-
-                NavigationLink {
-                    JobsView()
-                } label: {
-                    Label("Scheduled Jobs", systemImage: "calendar.badge.clock")
-                }
-
-                NavigationLink {
-                    DefaultModelsView()
-                } label: {
-                    Label("Default Models", systemImage: "cpu")
-                }
-            } header: {
-                Text("System")
-            } footer: {
-                if !isConnected {
-                    Text("Connect to a server to manage memory, jobs, and models.")
-                }
-            }
-            .disabled(!isConnected)
-
-            Section("About") {
-                HStack {
-                    Text("Version")
-                    Spacer()
-                    Text(AppVersion.display)
-                        .foregroundStyle(.secondary)
+                Section("About") {
+                    HStack {
+                        Text("Version")
+                        Spacer()
+                        Text(AppVersion.display)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -155,8 +141,8 @@ struct SettingsView: View {
     }
 
     private func connect() {
-        guard let url = URL(string: urlString), url.scheme != nil else {
-            errorMessage = "Invalid URL"
+        guard let url = ServerAddress.parse(urlString) else {
+            errorMessage = "Enter a server address such as https://achates.example.com or http://192.168.1.100:5000."
             showError = true
             return
         }

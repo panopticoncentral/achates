@@ -30,6 +30,7 @@ final class AppState {
     var agents: [Agent] = []
     var currentAgent: Agent?
     var navigationPath = NavigationPath()
+    var usesSplitNavigation = false
     var isStreaming = false
     var streamingMessageId: String?
     var client: WebSocketClient?
@@ -46,6 +47,29 @@ final class AppState {
     /// Sessions for the currently selected agent
     var sessions: [SessionInfo] = []
     var hasMoreSessions = false
+    var isLoadingSessions = false
+    var sessionsLoadError: String?
+    var isLoadingHistory = false
+    var historyLoadError: String?
+    var memoryLoadError: String?
+    var jobsLoadError: String?
+    var costLoadErrors: [String: String] = [:]
+    @ObservationIgnored private var historyRequestID = UUID()
+    @ObservationIgnored private var sessionListRequestID = UUID()
+    @ObservationIgnored private var drafts: [ConversationKey: ConversationDraft] = [:]
+
+    func draft(for agentID: String, sessionID: String) -> ConversationDraft {
+        let key = ConversationKey(server: serverURL?.absoluteString ?? "", agentID: agentID, sessionID: sessionID)
+        if let draft = drafts[key] { return draft }
+        let draft = ConversationDraft()
+        drafts[key] = draft
+        return draft
+    }
+
+    var canSubmitMessage: Bool {
+        connectionStatus == .connected && currentAgent != nil && currentSessionId != nil
+            && !isStreaming && !isLoadingHistory && historyLoadError == nil
+    }
 
     /// Messages for the currently open session
     var messages: [ChatMessage] = []
@@ -77,6 +101,16 @@ final class AppState {
     }
 
     func saveServerURL(_ url: URL) {
+        if serverURL != url {
+            disconnect()
+            client = nil
+            memories = []
+            jobs = []
+            costSummaries = [:]
+            memoryLoadError = nil
+            jobsLoadError = nil
+            costLoadErrors = [:]
+        }
         serverURL = url
         UserDefaults.standard.set(url.absoluteString, forKey: "achates_server_url")
     }
@@ -92,6 +126,10 @@ final class AppState {
 
     func disconnect() {
         client?.disconnect()
+        historyRequestID = UUID()
+        sessionListRequestID = UUID()
+        isLoadingHistory = false
+        isLoadingSessions = false
         connectionStatus = .disconnected
         agents = []
         currentAgent = nil
@@ -140,24 +178,35 @@ final class AppState {
         if currentAgent?.id != agent.id {
             currentSessionId = nil
             messages = []
+            sessions = []
+            hasMoreSessions = false
+            historyRequestID = UUID()
+            isLoadingHistory = false
+            historyLoadError = nil
         }
         currentAgent = agent
         await loadSessions(for: agent)
     }
 
     func loadSessions(for agent: Agent) async {
-        guard client != nil else { return }
-
+        let requestID = UUID()
+        sessionListRequestID = requestID
+        isLoadingSessions = true
+        sessionsLoadError = nil
+        defer { if sessionListRequestID == requestID { isLoadingSessions = false } }
         do {
-            let payload = try await client?.sendRequest(method: "sessions.list", params: [
+            guard let client else { throw FrameError.notConnected }
+            let payload = try await client.sendRequest(method: "sessions.list", params: [
                 "agent": .string(agent.id),
             ])
-            if let payload {
-                sessions = SessionInfo.fromList(payload)
-                hasMoreSessions = payload["has_more"]?.boolValue ?? false
-            }
+            guard sessionListRequestID == requestID, currentAgent?.id == agent.id else { return }
+            guard let payload else { throw AgentEditError.invalidResponse }
+            sessions = SessionInfo.fromList(payload)
+            hasMoreSessions = payload["has_more"]?.boolValue ?? false
         } catch {
-            self.error = "Failed to load sessions: \(error.localizedDescription)"
+            if sessionListRequestID == requestID {
+                sessionsLoadError = "Couldn't load conversations. \(error.localizedDescription)"
+            }
         }
     }
 
@@ -165,19 +214,23 @@ final class AppState {
         guard client != nil, hasMoreSessions, let oldest = sessions.last else { return }
 
         let beforeMs = Int(oldest.updated.timeIntervalSince1970 * 1000)
+        let requestID = sessionListRequestID
 
         do {
             let payload = try await client?.sendRequest(method: "sessions.list", params: [
                 "agent": .string(agent.id),
                 "before": .int(beforeMs),
             ])
+            guard requestID == sessionListRequestID, currentAgent?.id == agent.id else { return }
             if let payload {
                 let older = SessionInfo.fromList(payload)
                 hasMoreSessions = payload["has_more"]?.boolValue ?? false
                 sessions.append(contentsOf: older)
             }
         } catch {
-            self.error = "Failed to load sessions: \(error.localizedDescription)"
+            if sessionListRequestID == requestID {
+                sessionsLoadError = "Couldn't load conversations. \(error.localizedDescription)"
+            }
         }
     }
 
@@ -212,31 +265,37 @@ final class AppState {
     func startNewConversation(for agent: Agent) async {
         guard let sessionId = await createSession(for: agent) else { return }
         #if os(iOS)
-        navigationPath.append(SessionSelection(agent: agent, sessionId: sessionId))
+        if usesSplitNavigation { await openSession(sessionId, for: agent) }
+        else { navigationPath.append(SessionSelection(agent: agent, sessionId: sessionId)) }
         #else
         await openSession(sessionId, for: agent)
         #endif
     }
 
     func openSession(_ sessionId: String, for agent: Agent) async {
-        guard client != nil else { return }
+        let requestID = UUID()
+        historyRequestID = requestID
         currentSessionId = sessionId
         messages = []
         failedSend = nil
-
+        historyLoadError = nil
+        isLoadingHistory = true
+        defer { if historyRequestID == requestID { isLoadingHistory = false } }
         do {
-            let payload = try await client?.sendRequest(method: "sessions.get", params: [
+            guard let client else { throw FrameError.notConnected }
+            let payload = try await client.sendRequest(method: "sessions.get", params: [
                 "agent": .string(agent.id),
                 "session_id": .string(sessionId),
             ])
-            if let payload {
-                messages = parseSessionMessages(payload, serverURL: serverURL)
-            }
+            guard historyRequestID == requestID, currentSessionId == sessionId else { return }
+            guard let payload else { throw AgentEditError.invalidResponse }
+            messages = parseSessionMessages(payload, serverURL: serverURL)
+            markCurrentSessionAsRead()
         } catch {
-            self.error = "Failed to load session: \(error.localizedDescription)"
+            if historyRequestID == requestID {
+                historyLoadError = "Couldn't load this conversation. \(error.localizedDescription)"
+            }
         }
-
-        markCurrentSessionAsRead()
     }
 
     func deleteSession(_ sessionId: String, for agent: Agent) async {
@@ -480,12 +539,17 @@ final class AppState {
     }
 
     func loadCostSummary(agent: String, period: String) async {
-        guard let payload = try? await client?.sendRequest(method: "costs.summary", params: [
-            "agent": .string(agent),
-            "period": .string(period),
-        ]),
-              let summary = CostSummary.from(payload) else { return }
-        costSummaries["\(agent):\(period)"] = summary
+        let key = "\(agent):\(period)"
+        costLoadErrors[key] = nil
+        do {
+            guard let client else { throw FrameError.notConnected }
+            guard let payload = try await client.sendRequest(method: "costs.summary", params: [
+                "agent": .string(agent), "period": .string(period),
+            ]), let summary = CostSummary.from(payload) else { throw AgentEditError.invalidResponse }
+            costSummaries[key] = summary
+        } catch {
+            costLoadErrors[key] = "Couldn't load costs. \(error.localizedDescription)"
+        }
     }
 
     /// Invalidate cached cost summaries so the next read refetches from the server.
@@ -496,10 +560,20 @@ final class AppState {
 
     // MARK: - Memory
 
-    func loadMemories() async {
-        guard let payload = try? await client?.sendRequest(method: "memory.list")
-        else { return }
-        memories = MemoryInfo.fromList(payload)
+    @discardableResult
+    func loadMemories() async -> Bool {
+        memoryLoadError = nil
+        do {
+            guard let client else { throw FrameError.notConnected }
+            guard let payload = try await client.sendRequest(method: "memory.list") else {
+                throw AgentEditError.invalidResponse
+            }
+            memories = MemoryInfo.fromList(payload)
+            return true
+        } catch {
+            memoryLoadError = "Couldn't load memories. \(error.localizedDescription)"
+            return false
+        }
     }
 
     func loadMemory(scope: String) async throws -> String {
@@ -522,10 +596,20 @@ final class AppState {
 
     // MARK: - Scheduled jobs
 
-    func loadJobs() async {
-        guard let payload = try? await client?.sendRequest(method: "jobs.list")
-        else { return }
-        jobs = CronJobInfo.fromList(payload)
+    @discardableResult
+    func loadJobs() async -> Bool {
+        jobsLoadError = nil
+        do {
+            guard let client else { throw FrameError.notConnected }
+            guard let payload = try await client.sendRequest(method: "jobs.list") else {
+                throw AgentEditError.invalidResponse
+            }
+            jobs = CronJobInfo.fromList(payload)
+            return true
+        } catch {
+            jobsLoadError = "Couldn't load jobs. \(error.localizedDescription)"
+            return false
+        }
     }
 
     func setJobEnabled(agent: String, jobId: String, enabled: Bool) async throws {
@@ -640,7 +724,7 @@ final class AppState {
     var failedSend: FailedSend?
 
     func sendMessage(_ text: String, attachments: [DraftAttachment] = []) async {
-        guard currentAgent != nil, currentSessionId != nil else { return }
+        guard canSubmitMessage else { return }
         failedSend = nil
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -675,7 +759,7 @@ final class AppState {
     /// Re-send a failed chat.send: the failed bubble is dropped and the same
     /// text/attachments go through `sendMessage` again (which re-appends it).
     func retryFailedSend() async {
-        guard let failed = failedSend else { return }
+        guard canSubmitMessage, let failed = failedSend else { return }
         failedSend = nil
         messages.removeAll { $0.id == failed.messageId }
         await sendMessage(failed.text, attachments: failed.attachments)
@@ -719,7 +803,7 @@ final class AppState {
     /// optionally replace the user prompt's text/attachments, then stream a fresh response.
     /// Pass `text: nil` / `attachments: nil` to preserve the original values.
     func resubmitLast(text: String?, attachments: [DraftAttachment]?) async {
-        guard client != nil, currentAgent != nil, currentSessionId != nil else { return }
+        guard canSubmitMessage, client != nil else { return }
         guard let originalIndex = messages.lastIndex(where: { $0.role == .user }) else { return }
         await performResubmit(at: originalIndex, promptIndex: nil, text: text, attachments: attachments)
     }
@@ -728,7 +812,7 @@ final class AppState {
     /// everything after it, then re-stream a fresh response. The original prompt's
     /// text/attachments are preserved unchanged.
     func resubmit(promptIndex: Int, messageId: String) async {
-        guard client != nil, currentAgent != nil, currentSessionId != nil else { return }
+        guard canSubmitMessage, client != nil else { return }
         guard let originalIndex = messages.firstIndex(where: { $0.id == messageId }),
               messages[originalIndex].role == .user else { return }
         await performResubmit(at: originalIndex, promptIndex: promptIndex, text: nil, attachments: nil)

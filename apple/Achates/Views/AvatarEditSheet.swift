@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct AvatarEditSheet: View {
     let agent: Agent
@@ -18,6 +19,9 @@ struct AvatarEditSheet: View {
     @State private var errorMessage: String?
     @State private var showError = false
     @State private var generateTask: Task<Void, Never>?
+    @State private var showFilePicker = false
+    @State private var originalImage: Data?
+    @State private var originalRemove = false
 
     /// The image to display: local working copy > existing agent avatar
     private var displayImage: Data? {
@@ -32,7 +36,7 @@ struct AvatarEditSheet: View {
     }
 
     private var hasLocalChanges: Bool {
-        localImageData != nil || localRemove
+        localImageData != originalImage || localRemove != originalRemove
     }
 
     var body: some View {
@@ -56,20 +60,26 @@ struct AvatarEditSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        generateTask?.cancel()
-                        dismiss()
-                    }
-                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
+                    Button("Use Photo") {
                         commitChanges()
                         dismiss()
                     }
                     .fontWeight(.semibold)
-                    .disabled(!hasLocalChanges)
+                    .disabled(!hasLocalChanges || isGenerating)
                 }
+            }
+            .editorDismissal(isDirty: hasLocalChanges || isGenerating)
+            .onDisappear { generateTask?.cancel() }
+            .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.image]) { result in
+                do {
+                    let url = try result.get()
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    guard let image = resizeAvatar(try Data(contentsOf: url)) else { throw CocoaError(.fileReadCorruptFile) }
+                    localImageData = image
+                    localRemove = false
+                } catch { errorMessage = error.localizedDescription; showError = true }
             }
             .alert("Error", isPresented: $showError) {
                 Button("OK") {}
@@ -77,6 +87,8 @@ struct AvatarEditSheet: View {
                 Text(errorMessage ?? "Unknown error")
             }
             .onAppear {
+                originalImage = newAvatarData
+                originalRemove = removeAvatar
                 // Initialize from existing state
                 if let existing = newAvatarData {
                     localImageData = existing
@@ -102,14 +114,7 @@ struct AvatarEditSheet: View {
             if let data = displayImage {
                 avatarImage(from: data, size: size)
             } else {
-                ZStack {
-                    Circle()
-                        .fill(.blue.gradient)
-                        .frame(width: size, height: size)
-                    Text(agent.initials)
-                        .font(.system(size: size * 0.35, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
+                AgentAvatar(agent: agent, size: size, showsPhoto: false)
             }
 
             if isGenerating {
@@ -146,7 +151,11 @@ struct AvatarEditSheet: View {
 
     @ViewBuilder
     private var actionButtons: some View {
-        HStack(spacing: 32) {
+        HStack(spacing: 24) {
+            #if os(macOS)
+            Button { showFilePicker = true } label: { Label("Choose File", systemImage: "folder") }
+                .disabled(isGenerating)
+            #endif
             PhotosPicker(selection: $photoItem, matching: .images) {
                 VStack(spacing: 6) {
                     Image(systemName: "photo.on.rectangle")
@@ -154,7 +163,7 @@ struct AvatarEditSheet: View {
                     Text("Photo Library")
                         .font(.caption)
                 }
-                .foregroundStyle(.blue)
+                .foregroundStyle(.tint)
             }
             .buttonStyle(.plain)
             .disabled(isGenerating)
@@ -164,10 +173,16 @@ struct AvatarEditSheet: View {
                     if let data = try? await item.loadTransferable(type: Data.self) {
                         localImageData = resizeAvatar(data)
                         localRemove = false
+                    } else {
+                        errorMessage = "This photo couldn’t be loaded."; showError = true
                     }
                 }
             }
 
+            if hasLocalChanges {
+                Button("Revert") { localImageData = originalImage; localRemove = originalRemove }
+                    .disabled(isGenerating)
+            }
             if displayImage != nil {
                 Button {
                     localImageData = nil
@@ -198,6 +213,7 @@ struct AvatarEditSheet: View {
                 .padding(.horizontal)
 
             TextEditor(text: $promptText)
+                .accessibilityLabel("Avatar description")
                 .frame(minHeight: 80, maxHeight: 120)
                 .padding(8)
                 .scrollContentBackground(.hidden)
@@ -206,7 +222,7 @@ struct AvatarEditSheet: View {
                         #if os(macOS)
                         .fill(Color(.controlBackgroundColor))
                         #else
-                        .fill(Color(.systemGray6))
+                        .fill(Color.subtleSurface)
                         #endif
                 )
                 .padding(.horizontal)
@@ -220,7 +236,7 @@ struct AvatarEditSheet: View {
                         ProgressView()
                             .controlSize(.small)
                             .tint(.white)
-                        Text("Generating...")
+                        Text("Generating…")
                     } else {
                         Image(systemName: "sparkles")
                         Text("Generate")
