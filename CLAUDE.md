@@ -45,6 +45,10 @@ Config file format, `AGENT.md` capabilities keys, environment variables, and dat
 - Raw string literals for multi-line JSON/text
 - xUnit test project at `tests/Achates.Tests` (run via `dotnet test Achates.slnx`)
 
+## Data root
+
+`ConfigLoader.DataDir` resolves `ACHATES_HOME` (default `~/.achates`). All configuration and persistent agent/shared data must use this root instead of constructing a home-directory path. `ACHATES_CONFIG_PATH` overrides only the YAML file location. Paths shown above use the default root.
+
 ## Apple client UI
 
 The shared SwiftUI client is in `apple/Achates`, with the `Achates` scheme and `AchatesTests` target in `apple/Achates.xcodeproj`. Use `xcodebuild test -project apple/Achates.xcodeproj -scheme Achates -destination 'platform=macOS' -only-testing:AchatesTests` or select an installed iOS simulator destination. Test hosts skip the live root view; appearance smoke tests supply isolated in-memory fixtures and retain rendered screenshots as test attachments.

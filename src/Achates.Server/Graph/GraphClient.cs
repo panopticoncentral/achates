@@ -73,9 +73,7 @@ public sealed class GraphClient
 
             // Persist token cache to disk so user doesn't re-auth on every restart
             var cachePath = tokenCachePath
-                ?? Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".achates", "graph-token-cache.bin");
+                ?? Path.Combine(ConfigLoader.DataDir, "graph-token-cache.bin");
             EnableTokenCache(_publicApp.UserTokenCache, cachePath);
 
             _basePath = "https://graph.microsoft.com/v1.0/me";

@@ -3,6 +3,8 @@
 <!-- NOTE: Keep this file in sync with AchatesConfig.cs, AgentLoader.cs, ConfigLoader.cs, and GatewayService.cs.
      When adding/removing/renaming config fields, update the matching section here. -->
 
+The data root defaults to `~/.achates`. Set `ACHATES_HOME` before starting the server to use another directory (for example, `export ACHATES_HOME="$HOME/Documents/Achates"`). All `~/.achates` data paths below are relative to that chosen root. `ACHATES_CONFIG_PATH` can independently override the YAML file location.
+
 Achates configuration is split into two parts:
 - **Global config** at `~/.achates/config.yaml` — provider and shared tool settings
 - **Agent definitions** at `~/.achates/agents/{name}/AGENT.md` — one file per agent
@@ -281,13 +283,16 @@ You are Paul's personal assistant...
 
 | Variable | Purpose |
 |----------|---------|
-| `ACHATES_CONFIG_PATH` | Override the config file path (default: `~/.achates/config.yaml`). |
+| `ACHATES_HOME` | Root for configuration and all persistent data (default: `~/.achates`). Unset or blank uses the default; `~` and `~/` expand to your home directory; relative paths resolve from the server’s working directory. Set before launch and restart to change it. |
+| `ACHATES_CONFIG_PATH` | Override only the config file path (default: `config.yaml` under `ACHATES_HOME`). Does not relocate agent data. |
 | `OPENROUTER_API_KEY` | **Required.** API key for the OpenRouter provider. |
 | `BRAVE_API_KEY` | Brave Search API key fallback. |
 | `GRAPH_CLIENT_SECRET` | Microsoft Graph client secret fallback. |
 | `WITHINGS_CLIENT_SECRET` | Withings client secret fallback. |
 
 ## Data paths
+
+To relocate existing data, stop the server, copy the contents of the old root into the new root (excluding the `bin/` install directory), set `ACHATES_HOME` in the server launcher’s environment, and restart. Existing data is not moved automatically. An empty root gets default configuration and a default agent. The executable location is independent of the data root. Explicit notebook/library roots and other configured external paths keep their own locations.
 
 | Path | Purpose |
 |------|---------|

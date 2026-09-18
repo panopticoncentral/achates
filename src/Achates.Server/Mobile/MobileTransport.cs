@@ -679,9 +679,7 @@ public sealed class MobileTransport
         await sessionStore.DeleteAllAsync(agentName, ct);
 
         // Delete generated images
-        var imagesDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".achates", "agents", agentName, "images");
+        var imagesDir = Path.Combine(ConfigLoader.DataDir, "agents", agentName, "images");
         if (Directory.Exists(imagesDir))
             Directory.Delete(imagesDir, recursive: true);
 
@@ -755,7 +753,7 @@ public sealed class MobileTransport
         var synth = _serviceProvider.GetService<Speech.ISpeechSynthesizer>();
         if (synth is null)
             return ResponseFrame.Failure(request.Id, "speech_not_configured",
-                "Speech is not configured on the server. Set tools.speech in ~/.achates/config.yaml and restart.");
+                "Speech is not configured on the server. Set tools.speech in your config.yaml and restart.");
 
         var voice = GetStringParam(request.Params, "voice");
         if (string.IsNullOrWhiteSpace(voice))
@@ -1102,9 +1100,7 @@ public sealed class MobileTransport
         if (!_agents.ContainsKey(agentName))
             return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
 
-        var agentFile = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".achates", "agents", agentName, "AGENT.md");
+        var agentFile = Path.Combine(ConfigLoader.DataDir, "agents", agentName, "AGENT.md");
 
         if (!File.Exists(agentFile))
             return ResponseFrame.Failure(request.Id, "not_found", "AGENT.md file not found.");
@@ -1148,9 +1144,7 @@ public sealed class MobileTransport
 
         var p = request.Params;
 
-        var agentFile = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".achates", "agents", agentName, "AGENT.md");
+        var agentFile = Path.Combine(ConfigLoader.DataDir, "agents", agentName, "AGENT.md");
 
         // The update rewrites the whole AGENT.md, so capabilities the client doesn't
         // send (display name, provider, memory budget) must be carried forward from
@@ -2177,10 +2171,9 @@ public sealed class MobileTransport
         return preview;
     }
 
-    private static readonly string AchatesHome = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates");
+    private static string AchatesHome => ConfigLoader.DataDir;
 
-    private static readonly string SharedMemoryPath = Path.Combine(AchatesHome, "memory.md");
+    private static string SharedMemoryPath => Path.Combine(AchatesHome, "memory.md");
 
     private AgentRuntime CreateRuntime(AgentDefinition agentDef, string agentName, string sessionId,
         IReadOnlyList<AgentMessage>? messages = null,

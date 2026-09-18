@@ -8,11 +8,27 @@ public static class ConfigLoader
     public static readonly string DefaultConfigDir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates");
 
-    public static readonly string DefaultConfigPath =
-        Path.Combine(DefaultConfigDir, "config.yaml");
+    /// <summary>Root for configuration and persistent data; set before starting the server.</summary>
+    public static string DataDir => ResolveDataDir(Environment.GetEnvironmentVariable("ACHATES_HOME"));
+
+    public static string DefaultConfigPath => Path.Combine(DataDir, "config.yaml");
+
+    public static string ResolveDataDir(string? home)
+    {
+        if (string.IsNullOrWhiteSpace(home))
+            return DefaultConfigDir;
+
+        var userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (home == "~")
+            home = userHome;
+        else if (home.StartsWith("~/", StringComparison.Ordinal))
+            home = Path.Combine(userHome, home[2..]);
+
+        return Path.GetFullPath(home);
+    }
 
     /// <summary>
-    /// Load config from ACHATES_CONFIG_PATH env var, or ~/.achates/config.yaml.
+    /// Load config from ACHATES_CONFIG_PATH, or config.yaml under ACHATES_HOME (default ~/.achates).
     /// Creates a default config file if one does not exist.
     /// </summary>
     public static AchatesConfig Load()

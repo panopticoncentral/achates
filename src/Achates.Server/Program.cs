@@ -3,7 +3,7 @@ using Achates.Server.Speech;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Load user config (~/.achates/config.yaml)
+// Load user config from ACHATES_CONFIG_PATH or the configured data root.
 var userConfig = ConfigLoader.Load();
 
 builder.Services.AddSingleton(userConfig);
@@ -70,7 +70,7 @@ app.MapGet("/agents/{agentName}/images/{fileName}", (string agentName, string fi
     if (agentName.Contains("..") || fileName.Contains(".."))
         return Results.BadRequest();
 
-    var filePath = Path.Combine(ConfigLoader.DefaultConfigDir, "agents", agentName, "images", fileName);
+    var filePath = Path.Combine(ConfigLoader.DataDir, "agents", agentName, "images", fileName);
     if (!File.Exists(filePath))
         return Results.NotFound();
 

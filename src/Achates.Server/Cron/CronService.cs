@@ -584,8 +584,7 @@ public sealed class CronService : IAsyncDisposable
             tools.Add(tool);
         }
 
-        var sharedMemoryPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
+        var sharedMemoryPath = Path.Combine(ConfigLoader.DataDir, "memory.md");
         tools.AddRange(UniversalTools.Build(agentName, agentDef, sharedMemoryPath, BuildCostLedgerRegistry()));
 
         return tools;
@@ -606,8 +605,7 @@ public sealed class CronService : IAsyncDisposable
         }
         tools.Add(new SessionsTool(_sessionStore, agentName, currentSessionId: null, since));
 
-        var sharedMemoryPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".achates", "memory.md");
+        var sharedMemoryPath = Path.Combine(ConfigLoader.DataDir, "memory.md");
         tools.AddRange(UniversalTools.Build(agentName, agentDef, sharedMemoryPath, BuildCostLedgerRegistry()));
 
         return tools;

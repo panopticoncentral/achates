@@ -2,6 +2,21 @@
 
 A personal AI assistant that runs on your own devices and answers on the channels you use.
 
+## Configuration and data location
+
+By default, configuration and persistent data live in `~/.achates`. Set `ACHATES_HOME` before starting the server to use another folder:
+
+```bash
+export ACHATES_HOME="$HOME/Documents/Achates"
+~/.achates/bin/Achates.Server
+```
+
+This selects the root for `config.yaml`, `agents/` (definitions, sessions, memories, images, schedules, and costs), shared memory, and token caches. The executable can stay in its current location. Set this variable in the environment of whichever shell or service launches the server, and restart after changing it.
+
+To keep existing data, stop the server and copy the contents of `~/.achates` into the new folder, excluding `bin/`, before restarting. Achates does not move existing files automatically; an empty folder gets default configuration and a default agent.
+
+`ACHATES_CONFIG_PATH` still overrides only the YAML file location; agent data stays under `ACHATES_HOME`. Paths below show the default layout. See [Configuration Reference](docs/configuration.md) for details.
+
 ## Apple app
 
 Open `apple/Achates.xcodeproj` and run the **Achates** scheme for iOS or macOS. Connect to your Achates server using an HTTP or HTTPS address. First-run setup stays visible until the connection succeeds.

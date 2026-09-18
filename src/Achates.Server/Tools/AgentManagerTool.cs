@@ -35,7 +35,7 @@ internal sealed class AgentManagerTool(
             ["max_tokens"] = NumberSchema("Max output tokens. Optional ('modify' only)."),
             ["allowed_chats"] = ArraySchema(StringSchema("Agent id."), "Agents this agent may chat with. Optional ('modify' only); replaces the whole list."),
             ["dreamtime"] = StringSchema("Dreamtime, e.g. '3:00 AM', or 'off' to disable. Optional ('modify' only)."),
-            ["shared_memory"] = BooleanSchema("When false, the agent's memory tool only sees its own private notes (the universal user memory at ~/.achates/memory.md is hidden). Useful for roleplay or in-character agents. Optional ('modify' only)."),
+            ["shared_memory"] = BooleanSchema("When false, the agent's memory tool only sees its own private notes (the universal user memory in the data root’s memory.md is hidden). Useful for roleplay or in-character agents. Optional ('modify' only)."),
             ["voice"] = StringSchema("Per-agent TTS voice id (e.g. 'af_nicole' or a Kokoro blend). Empty string clears the voice. Only used with 'modify' or 'create'."),
             ["speech_rate"] = NumberSchema("Per-agent TTS rate. 1.0 is normal speed; Kokoro accepts [0.25, 4.0]. Practical range: 0.85–1.25. Pass 0 to revert to default (1.0). Only used with 'modify' or 'create'."),
             ["avatar"] = StringSchema("Avatar image: a file path from the image tool or base64-encoded data. Optional ('modify' only)."),

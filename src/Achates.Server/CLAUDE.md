@@ -73,3 +73,7 @@ For the config file format, AGENT.md capabilities keys, and data paths, see `doc
 - Device commands (server-to-client requests): `device.location`, `device.camera`.
 - Per-session tool injection: `CreateRuntime` adds the universal tools (memory + cost) and CronTool per-session, plus SessionsTool when the agent's tools list contains `sessions`. (NotebookTool is opt-in via the agent's `Tools:` list.)
 
+
+## Data root
+
+`ConfigLoader.DataDir` resolves `ACHATES_HOME` (default `~/.achates`). All configuration and persistent agent/shared data must use this root instead of constructing a home-directory path. `ACHATES_CONFIG_PATH` overrides only the YAML file location. Paths shown above use the default root.

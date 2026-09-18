@@ -43,9 +43,7 @@ public sealed class WithingsClient
         _httpClient = httpClient;
         _logger = logger;
         _tokenPath = tokenPath
-            ?? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".achates", "withings-tokens.json");
+            ?? Path.Combine(ConfigLoader.DataDir, "withings-tokens.json");
 
         LoadTokens();
     }

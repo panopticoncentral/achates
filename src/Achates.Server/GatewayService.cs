@@ -75,9 +75,7 @@ public sealed class GatewayService(
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        _achatesHome = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".achates");
+        _achatesHome = ConfigLoader.DataDir;
 
         var agentConfigs = AgentLoader.LoadAgents(_achatesHome);
         if (agentConfigs.Count == 0)
@@ -88,7 +86,7 @@ public sealed class GatewayService(
 
         if (agentConfigs.Count == 0)
             throw new InvalidOperationException(
-                "No agents found. Create AGENT.md in ~/.achates/agents/{name}/");
+                "No agents found. Create AGENT.md in the agents/{name}/ directory under ACHATES_HOME (default ~/.achates).");
 
         var agents = new Dictionary<string, AgentDefinition>();
 
@@ -830,7 +828,7 @@ public sealed class GatewayService(
             ?? throw new InvalidOperationException("No provider specified.");
         if (string.IsNullOrWhiteSpace(modelId))
             throw new InvalidOperationException(
-                "No model specified. Set **Model:** in the agent's AGENT.md or models.base in ~/.achates/config.yaml.");
+                "No model specified. Set **Model:** in the agent's AGENT.md or models.base in your config.yaml.");
 
         var provider = ModelProviders.Create(providerId)
             ?? throw new InvalidOperationException($"Unknown provider: {providerId}");
