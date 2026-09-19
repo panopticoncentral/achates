@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// iOS settings screen (pushed from the agent list, or shown at first run
-/// wrapped in a NavigationStack by ContentView). It deliberately does NOT
+/// iOS settings screen (pushed on compact screens, presented in a sheet in the
+/// iPad split layout, or shown at first run in ContentView). It deliberately does NOT
 /// create its own NavigationStack — when pushed, a nested stack would double
 /// the navigation bars and break swipe-back.
 ///

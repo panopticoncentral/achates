@@ -1,4 +1,4 @@
-#if DEBUG && os(macOS)
+#if DEBUG
 import SwiftUI
 
 /// Isolated data inside the real app scene, so UI tests exercise native toolbars.

@@ -75,3 +75,11 @@ Follow-up verification: **36 Mac unit/layout tests passed**, the **full-window a
 ## Activity-label alignment follow-up
 
 Tool activity and thinking labels now use the same shared 12-point horizontal content inset as message text on both platforms. Progress indicators follow the label instead of moving its leading edge while work is running. The existing Mac/iOS conversation appearance fixtures include completed tools, collapsed thinking, and running tools for visual review.
+
+## iPad Settings dismissal follow-up — September 18
+
+Settings opened through a sidebar navigation link in the iPad split view, which could leave it without a back action. Regular-width iPad now presents Settings in its own navigation sheet with an explicit Done button. Compact iOS retains its normal push and back button; first-run setup and Mac Settings keep their existing presentation.
+
+The network-free app-scene fixture now runs on iOS as well. The Settings UI regression passed on an iPad Pro 13-inch and an iPhone 17 Pro simulator running iOS 26.5, covering dismissal in portrait and landscape; the iPad check also closes and reopens the sheet in each orientation.
+
+The iPad test suite reported zero failures, but Xcode stalled during result collection afterward and was stopped. The iPhone run completed normally.

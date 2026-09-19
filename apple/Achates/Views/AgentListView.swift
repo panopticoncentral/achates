@@ -7,6 +7,9 @@ struct AgentListView: View {
     #endif
     @State private var searchText = ""
     @State private var agentToEdit: Agent?
+    #if os(iOS)
+    @State private var showingSettings = false
+    #endif
 
     private var filteredAgents: [Agent] {
         if searchText.isEmpty { return appState.agents }
@@ -86,13 +89,32 @@ struct AgentListView: View {
             }
             #else
             ToolbarItem(placement: .automatic) {
-                NavigationLink(destination: SettingsView()) {
-                    Image(systemName: "gear")
+                if appState.usesSplitNavigation {
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Label("Settings", systemImage: "gear")
+                    }
+                } else {
+                    NavigationLink(destination: SettingsView()) {
+                        Label("Settings", systemImage: "gear")
+                    }
                 }
-                .accessibilityLabel("Settings")
             }
             #endif
         }
+        #if os(iOS)
+        .sheet(isPresented: $showingSettings) {
+            NavigationStack {
+                SettingsView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showingSettings = false }
+                        }
+                    }
+            }
+        }
+        #endif
         .onAppear {
             if appState.connectionStatus == .disconnected && appState.serverURL != nil {
                 appState.connectToServer()

@@ -53,7 +53,7 @@ struct AchatesApp: App {
 
     @ViewBuilder
     private var mainContent: some View {
-        #if DEBUG && os(macOS)
+        #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-test-agent-navigation") {
             AgentNavigationFixtureView()
         } else {

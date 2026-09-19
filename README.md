@@ -22,6 +22,7 @@ To keep existing data, stop the server and copy the contents of `~/.achates` int
 Open `apple/Achates.xcodeproj` and run the **Achates** scheme for iOS or macOS. Connect to your Achates server using an HTTP or HTTPS address. First-run setup stays visible until the connection succeeds.
 
 - Browse **Agents → Conversations → Messages**. iPhone uses a navigation stack; iPad at regular width and Mac use a resizable split view.
+- In the iPad split view, Settings opens as a sheet; tap **Done** to return to your conversations. On iPhone, use the back button.
 - Unsent text and attachments stay with their conversation while the app is running, including when you switch agents or servers. Canceling a message edit restores the draft you were writing. Drafts are not persisted across app restarts.
 - Search filters the conversations already loaded in the list; **Find in Conversation** searches the open transcript. On Mac, agent search is in the toolbar and conversation search is inside its column. Select the conversation header to edit its agent, or use the conversation actions menu to rename it.
 - Agent, memory, avatar, and default-model editors protect unsaved changes. Nested prompt/model choices remain provisional until the parent editor is saved.
