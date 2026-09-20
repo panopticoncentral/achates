@@ -242,12 +242,16 @@ final class WebSocketClient {
         }
     }
 
-    private func handleEvent(_ evt: EventFrame) {
+    func handleEvent(_ evt: EventFrame) {
         let payload = evt.payload ?? [:]
 
-        // Streaming events are broadcast to all clients. Only apply them to the
-        // currently-visible session — otherwise a cron job (or another tab/session)
-        // streaming on the same connection would corrupt the user's open chat.
+        // Text and reply lifecycle updates follow their owning conversation,
+        // including while it is offscreen. Audio playback stays with the visible chat.
+        let conversation: ChatSessionState? = {
+            guard let agentID = payload["agent"]?.stringValue,
+                  let sessionID = payload["session_id"]?.stringValue else { return nil }
+            return appState.conversation(agentID: agentID, sessionID: sessionID)
+        }()
         let matchesCurrentSession: Bool = {
             guard let agentId = payload["agent"]?.stringValue,
                   let sessionId = payload["session_id"]?.stringValue else { return false }
@@ -256,47 +260,47 @@ final class WebSocketClient {
 
         switch evt.event {
         case "text.delta":
-            guard matchesCurrentSession else { break }
+            guard let conversation else { break }
             let delta = payload["delta"]?.stringValue ?? ""
-            appState.appendTextDelta(delta)
+            conversation.appendTextDelta(delta)
 
         case "text.end":
             break
 
         case "thinking.delta":
-            guard matchesCurrentSession else { break }
+            guard let conversation else { break }
             let delta = payload["delta"]?.stringValue ?? ""
             let thinkingId = payload["id"]?.stringValue ?? "default"
-            appState.appendThinkingDelta(delta, thinkingId: thinkingId)
+            conversation.appendThinkingDelta(delta, thinkingId: thinkingId)
 
         case "thinking.end":
-            guard matchesCurrentSession else { break }
+            guard let conversation else { break }
             let thinkingId = payload["id"]?.stringValue ?? "default"
-            appState.collapseThinking(thinkingId: thinkingId)
+            conversation.collapseThinking(thinkingId: thinkingId)
 
         case "image.block":
-            guard matchesCurrentSession else { break }
+            guard let conversation else { break }
             if let b64 = payload["data"]?.stringValue,
                let data = Data(base64Encoded: b64) {
                 let mimeType = payload["mime_type"]?.stringValue ?? "image/jpeg"
-                appState.appendImage(data: data, mimeType: mimeType)
+                conversation.appendImage(data: data, mimeType: mimeType)
             }
 
         case "tool.start":
-            guard matchesCurrentSession else { break }
+            guard let conversation else { break }
             let toolId = payload["tool_call_id"]?.stringValue ?? UUID().uuidString
             let name = payload["tool_name"]?.stringValue ?? "unknown"
-            appState.addToolCall(toolId: toolId, name: name)
+            conversation.addToolCall(toolId: toolId, name: name)
 
         case "tool.end":
-            guard matchesCurrentSession else { break }
+            guard let conversation else { break }
             let toolId = payload["tool_call_id"]?.stringValue ?? ""
             let result = payload["result"]?.stringValue
             let success = !(payload["is_error"]?.boolValue ?? false)
-            appState.completeToolCall(toolId: toolId, result: result, success: success)
+            conversation.completeToolCall(toolId: toolId, result: result, success: success)
 
         case "agent_turn.start":
-            guard matchesCurrentSession else { break }
+            guard let conversation else { break }
             // Mint a fresh, unique block id per utterance. The payload `id` is
             // the speaker agent id, which is constant across multiple rounds by
             // the same speaker in one initiator turn — reusing it would merge
@@ -304,38 +308,38 @@ final class WebSocketClient {
             // reload). A fresh UUID guarantees each utterance gets its own block.
             let turnId = UUID().uuidString
             let name = payload["agent_name"]?.stringValue ?? "agent"
-            appState.startAgentTurn(agentTurnId: turnId, agentName: name)
+            conversation.startAgentTurn(agentTurnId: turnId, agentName: name)
 
         case "agent_turn.delta":
-            guard matchesCurrentSession else { break }
-            appState.appendAgentTurnDelta(payload["delta"]?.stringValue ?? "")
+            guard let conversation else { break }
+            conversation.appendAgentTurnDelta(payload["delta"]?.stringValue ?? "")
 
         case "agent_turn.end":
-            guard matchesCurrentSession else { break }
+            guard let conversation else { break }
             // `text` is the full final text of this utterance. Apply it as the
             // authoritative content (fills the no-delta initiator line and
             // reconciles the streamed target line) before collapsing.
             let text = payload["text"]?.stringValue ?? ""
-            appState.endAgentTurn(text)
+            conversation.endAgentTurn(text)
 
         case "audio.block":
-            guard matchesCurrentSession,
+            guard matchesCurrentSession, let conversation,
                   let turnId = payload["turn_id"]?.stringValue,
                   let sentenceIndex = payload["sentence_index"]?.intValue,
                   let dataString = payload["data"]?.stringValue,
                   let data = Data(base64Encoded: dataString) else { break }
             appState.speechPlayer.enqueue(turnId: turnId, sentenceIndex: sentenceIndex, mp3Data: data)
             let speechText = payload["text"]?.stringValue ?? ""
-            appState.recordAudioMetadata(turnId: turnId, sentenceIndex: sentenceIndex, text: speechText)
+            conversation.recordAudioMetadata(turnId: turnId, sentenceIndex: sentenceIndex, text: speechText)
 
         case "audio.error":
-            guard matchesCurrentSession else { break }
+            guard matchesCurrentSession, let conversation else { break }
             let turnId = payload["turn_id"]?.stringValue ?? "<unknown>"
             let message = payload["message"]?.stringValue ?? "Speech unavailable."
-            appState.recordAudioError(turnId: turnId, message: message)
+            conversation.recordAudioError(turnId: turnId, message: message)
 
         case "message.end":
-            guard matchesCurrentSession else { break }
+            guard let conversation else { break }
             var messageUsage: MessageUsage?
             if let usageDict = payload["usage"]?.objectValue,
                let input = usageDict["input"]?.intValue,
@@ -343,14 +347,12 @@ final class WebSocketClient {
                 let cost = usageDict["cost"]?.doubleValue ?? Double(usageDict["cost"]?.intValue ?? 0)
                 messageUsage = MessageUsage(inputTokens: input, outputTokens: output, cost: cost)
             }
-            appState.finalizeStreamingMessage(usage: messageUsage)
+            conversation.finalizeStreamingMessage(usage: messageUsage)
 
         case "done":
-            // Only clear the streaming spinner when the done is for what we're showing;
-            // otherwise a cron's done would yank the spinner off a real in-flight chat.
+            conversation?.isStreaming = false
+            conversation?.streamingMessageId = nil
             if matchesCurrentSession {
-                appState.isStreaming = false
-                appState.streamingMessageId = nil
                 appState.markCurrentSessionAsRead()
             }
             // The cost ledger just changed — drop any cached summaries so the

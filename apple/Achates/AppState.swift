@@ -31,8 +31,14 @@ final class AppState {
     var currentAgent: Agent?
     var navigationPath = NavigationPath()
     var usesSplitNavigation = false
-    var isStreaming = false
-    var streamingMessageId: String?
+    var isStreaming: Bool {
+        get { currentConversation.isStreaming }
+        set { currentConversation.isStreaming = newValue }
+    }
+    var streamingMessageId: String? {
+        get { currentConversation.streamingMessageId }
+        set { currentConversation.streamingMessageId = newValue }
+    }
     var client: WebSocketClient?
     var error: String?
 
@@ -58,6 +64,35 @@ final class AppState {
     @ObservationIgnored private var sessionListRequestID = UUID()
     @ObservationIgnored private var drafts: [ConversationKey: ConversationDraft] = [:]
 
+    @ObservationIgnored private var conversations: [ConversationKey: ChatSessionState] = [:]
+    private let unselectedConversation = ChatSessionState()
+
+    var currentConversation: ChatSessionState {
+        guard let agentID = currentAgent?.id, let sessionID = currentSessionId else {
+            return unselectedConversation
+        }
+        let key = ConversationKey(server: serverURL?.absoluteString ?? "", agentID: agentID, sessionID: sessionID)
+        if let conversation = conversations[key] { return conversation }
+        let conversation = ChatSessionState()
+        conversations[key] = conversation
+        return conversation
+    }
+
+    /// Route broadcasts only to conversations this client has opened.
+    func conversation(agentID: String, sessionID: String) -> ChatSessionState? {
+        let key = ConversationKey(server: serverURL?.absoluteString ?? "", agentID: agentID, sessionID: sessionID)
+        return conversations[key]
+    }
+
+    private func discardInactiveConversations() {
+        let visible = currentConversation
+        // Retain background replies, but avoid caching every transcript and attachment
+        // opened during a long app session. Completed chats reload from the server.
+        conversations = conversations.filter {
+            $0.value === visible || $0.value.isStreaming || $0.value.failedSend != nil
+        }
+    }
+
     func draft(for agentID: String, sessionID: String) -> ConversationDraft {
         let key = ConversationKey(server: serverURL?.absoluteString ?? "", agentID: agentID, sessionID: sessionID)
         if let draft = drafts[key] { return draft }
@@ -72,7 +107,10 @@ final class AppState {
     }
 
     /// Messages for the currently open session
-    var messages: [ChatMessage] = []
+    var messages: [ChatMessage] {
+        get { currentConversation.messages }
+        set { currentConversation.messages = newValue }
+    }
     var currentSessionId: String?
 
     /// Memory files across all agents (loaded on demand by MemoryListView).
@@ -136,6 +174,7 @@ final class AppState {
         sessions = []
         messages = []
         currentSessionId = nil
+        conversations.removeAll()
         isStreaming = false
         streamingMessageId = nil
         failedSend = nil
@@ -185,6 +224,7 @@ final class AppState {
             historyLoadError = nil
         }
         currentAgent = agent
+        discardInactiveConversations()
         await loadSessions(for: agent)
     }
 
@@ -275,7 +315,16 @@ final class AppState {
     func openSession(_ sessionId: String, for agent: Agent) async {
         let requestID = UUID()
         historyRequestID = requestID
+        currentAgent = agent
         currentSessionId = sessionId
+        discardInactiveConversations()
+        // Keep the live transcript when returning before the reply finishes.
+        if isStreaming {
+            historyLoadError = nil
+            isLoadingHistory = false
+            markCurrentSessionAsRead()
+            return
+        }
         messages = []
         failedSend = nil
         historyLoadError = nil
@@ -704,7 +753,8 @@ final class AppState {
                 "agent": .string(agent.id),
                 "session_id": .string(sessionId),
             ])
-            if let payload, !isStreaming {
+            if let payload, currentAgent?.id == agent.id,
+               currentSessionId == sessionId, !isStreaming {
                 messages = parseSessionMessages(payload, serverURL: serverURL)
             }
         } catch {
@@ -721,10 +771,14 @@ final class AppState {
         let attachments: [DraftAttachment]
     }
 
-    var failedSend: FailedSend?
+    var failedSend: FailedSend? {
+        get { currentConversation.failedSend }
+        set { currentConversation.failedSend = newValue }
+    }
 
     func sendMessage(_ text: String, attachments: [DraftAttachment] = []) async {
         guard canSubmitMessage else { return }
+        let conversation = currentConversation
         failedSend = nil
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -749,10 +803,10 @@ final class AppState {
         } catch {
             // The send never reached the server: drop the placeholder (or it renders
             // as a typing indicator forever), keep the user's bubble, offer retry.
-            messages.removeAll { $0.id == assistantId }
-            isStreaming = false
-            streamingMessageId = nil
-            failedSend = FailedSend(messageId: userMessage.id, text: trimmed, attachments: attachments)
+            conversation.messages.removeAll { $0.id == assistantId }
+            conversation.isStreaming = false
+            conversation.streamingMessageId = nil
+            conversation.failedSend = FailedSend(messageId: userMessage.id, text: trimmed, attachments: attachments)
         }
     }
 
@@ -823,6 +877,7 @@ final class AppState {
     /// placeholder, and ask the server to rewind. `promptIndex` is the 0-based
     /// user-turn ordinal sent to the server (nil = latest turn).
     private func performResubmit(at index: Int, promptIndex: Int?, text: String?, attachments: [DraftAttachment]?) async {
+        let conversation = currentConversation
         let original = messages[index]
         let trimmedNewText = text?.trimmingCharacters(in: .whitespacesAndNewlines)
         let effectiveText = trimmedNewText ?? original.textContent
@@ -848,11 +903,12 @@ final class AppState {
         do {
             try await client?.resubmit(promptIndex: promptIndex, text: text, attachments: attachments)
         } catch {
-            isStreaming = false
-            streamingMessageId = nil
+            conversation.isStreaming = false
+            conversation.streamingMessageId = nil
             // The local rewind already happened but the server refused; drop the
             // placeholder and resync so the transcript reflects server truth.
-            messages.removeAll { $0.id == assistantId }
+            conversation.messages.removeAll { $0.id == assistantId }
+            guard currentConversation === conversation else { return }
             self.error = "Failed to resubmit: \(error.localizedDescription)"
             if let agent = currentAgent, let sessionId = currentSessionId {
                 await reloadCurrentSessionMessages(agent: agent, sessionId: sessionId)
@@ -862,105 +918,5 @@ final class AppState {
 
     func cancelStreaming() async {
         await client?.cancelStreaming()
-    }
-
-    // MARK: - Streaming updates
-
-    func appendTextDelta(_ delta: String) {
-        guard let id = streamingMessageId,
-              let index = lastMessageIndex(id: id) else { return }
-        messages[index].appendText(delta)
-    }
-
-    func appendThinkingDelta(_ delta: String, thinkingId: String) {
-        guard let id = streamingMessageId,
-              let index = lastMessageIndex(id: id) else { return }
-        messages[index].appendThinking(delta, thinkingId: thinkingId)
-    }
-
-    func collapseThinking(thinkingId: String) {
-        guard let id = streamingMessageId,
-              let index = lastMessageIndex(id: id) else { return }
-        messages[index].collapseThinking(thinkingId)
-    }
-
-    func appendImage(data: Data, mimeType: String) {
-        guard let id = streamingMessageId,
-              let index = lastMessageIndex(id: id) else { return }
-        messages[index].appendImage(data: data, mimeType: mimeType)
-    }
-
-    func addToolCall(toolId: String, name: String) {
-        guard let id = streamingMessageId,
-              let index = lastMessageIndex(id: id) else { return }
-        messages[index].addToolCall(toolId: toolId, name: name)
-    }
-
-    func completeToolCall(toolId: String, result: String?, success: Bool) {
-        guard let id = streamingMessageId,
-              let index = lastMessageIndex(id: id) else { return }
-        messages[index].completeToolCall(toolId: toolId, result: result, success: success)
-    }
-
-    func startAgentTurn(agentTurnId: String, agentName: String) {
-        guard let id = streamingMessageId,
-              let index = lastMessageIndex(id: id) else { return }
-        messages[index].appendAgentTurn("", agentTurnId: agentTurnId, agentName: agentName)
-    }
-
-    func appendAgentTurnDelta(_ delta: String) {
-        guard let id = streamingMessageId,
-              let index = lastMessageIndex(id: id) else { return }
-        messages[index].appendAgentTurnDelta(delta)
-    }
-
-    func endAgentTurn(_ text: String) {
-        guard let id = streamingMessageId,
-              let index = lastMessageIndex(id: id) else { return }
-        messages[index].endAgentTurn(text)
-    }
-
-    func finalizeStreamingMessage(usage: MessageUsage? = nil) {
-        if let usage, let id = streamingMessageId, let index = lastMessageIndex(id: id) {
-            messages[index].usage = usage
-        }
-    }
-
-    /// Tag the currently-streaming assistant message with a turn id and append a
-    /// sentence to its audio transcript. The first audio block of a turn binds
-    /// the id; later blocks for the same turn append text only.
-    func recordAudioMetadata(turnId: String, sentenceIndex: Int, text: String) {
-        let index: Int? = {
-            if let id = streamingMessageId, let i = lastMessageIndex(id: id) { return i }
-            return messages.lastIndex(where: { $0.role == .assistant })
-        }()
-        guard let index else { return }
-        if messages[index].audioTurnId == nil {
-            messages[index].audioTurnId = turnId
-        }
-        if messages[index].audioTurnId == turnId {
-            messages[index].audioTranscript.append(text)
-        }
-    }
-
-    /// Surface an `audio.error` on whichever assistant message owns the turn,
-    /// falling back to the latest assistant message when the turn id hasn't
-    /// been bound yet (synth was unavailable before any sentence landed).
-    func recordAudioError(turnId: String, message: String) {
-        let index: Int? = {
-            if let i = messages.lastIndex(where: { $0.role == .assistant && $0.audioTurnId == turnId }) {
-                return i
-            }
-            if let id = streamingMessageId, let i = lastMessageIndex(id: id) { return i }
-            return messages.lastIndex(where: { $0.role == .assistant })
-        }()
-        guard let index else { return }
-        messages[index].audioError = message
-    }
-
-    // MARK: - Private helpers
-
-    private func lastMessageIndex(id: String) -> Int? {
-        messages.lastIndex(where: { $0.id == id })
     }
 }

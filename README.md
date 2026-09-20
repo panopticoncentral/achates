@@ -24,6 +24,7 @@ Open `apple/Achates.xcodeproj` and run the **Achates** scheme for iOS or macOS. 
 - Browse **Agents → Conversations → Messages**. iPhone uses a navigation stack; iPad at regular width and Mac use a resizable split view.
 - In the iPad split view, Settings opens as a sheet; tap **Done** to return to your conversations. On iPhone, use the back button.
 - Unsent text and attachments stay with their conversation while the app is running, including when you switch agents or servers. Canceling a message edit restores the draft you were writing. Drafts are not persisted across app restarts.
+- Reply progress and the Stop button belong to each conversation. You can switch conversations during a reply and return while it streams or after it finishes.
 - Search filters the conversations already loaded in the list; **Find in Conversation** searches the open transcript. On Mac, agent search is in the toolbar and conversation search is inside its column. Select the conversation header to edit its agent, or use the conversation actions menu to rename it.
 - Agent, memory, avatar, and default-model editors protect unsaved changes. Nested prompt/model choices remain provisional until the parent editor is saved.
 - On Mac, use **⌘N** for a new conversation, **⌘F** to find, **⌘S** to save an active editor, and **⌘,** for Settings. Return sends a message; Shift–Return inserts a newline. During a response, you can keep drafting; Escape stops generation.
