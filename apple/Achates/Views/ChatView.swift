@@ -74,6 +74,7 @@ struct ChatView: View {
                 // but is correct; window the history later if it ever bites.
                 VStack(spacing: 2) {
                     let items = visibleMessages
+                    let streamingID = streamingPresentationID
                     if items.isEmpty && !appState.isStreaming && !appState.isLoadingHistory && appState.historyLoadError == nil {
                         emptyState
                     }
@@ -91,7 +92,7 @@ struct ChatView: View {
                         let position = bubblePosition(for: index, in: items)
                         let isLast = isLastAssistantMessage(at: index, in: items)
                         let isLastUser = isLastUserMessage(at: index, in: items)
-                        let isStreamingMsg = appState.isStreaming && appState.streamingMessageId == message.id
+                        let isStreamingMsg = appState.isStreaming && streamingID == message.id
                         let canResubmit = !appState.isStreaming && hasResubmittableUserMessage
                         MessageBubble(
                             message: message,
@@ -447,11 +448,22 @@ struct ChatView: View {
         draft.beginEditing(.init(text: original.textContent, attachments: appState.draftAttachments(from: original)))
     }
 
+    private var presentedMessages: [PresentedMessage] {
+        PresentedMessage.make(from: appState.messages)
+    }
+
+    private var streamingPresentationID: String? {
+        guard let id = appState.streamingMessageId else { return nil }
+        return presentedMessages.first { $0.sourceIDs.contains(id) }?.message.id
+    }
+
     private var visibleMessages: [ChatMessage] {
-        if showToolActivity { return appState.messages }
-        return appState.messages.filter { message in
+        let messages = presentedMessages.map(\.message)
+        if showToolActivity { return messages }
+        let streamingID = streamingPresentationID
+        return messages.filter { message in
             // Always show the currently streaming message
-            if appState.isStreaming && message.id == appState.streamingMessageId {
+            if appState.isStreaming && message.id == streamingID {
                 return true
             }
             // Keep if message has any non-tool-call blocks, or any still-running tool calls

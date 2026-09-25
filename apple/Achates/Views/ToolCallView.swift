@@ -83,7 +83,7 @@ struct ToolCallView: View {
             : Self.completedLabel(for: name)
     }
 
-    private static func runningLabel(for tool: String) -> String {
+    static func runningLabel(for tool: String) -> String {
         switch tool {
         case "web_search": return "Searching the web..."
         case "web_fetch": return "Reading webpage..."

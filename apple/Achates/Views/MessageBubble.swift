@@ -42,8 +42,12 @@ struct MessageBubble: View {
             }
 
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
-                ForEach(visibleBlocks) { block in
-                    blockView(block)
+                ForEach(MessageBlockGroup.make(from: visibleBlocks)) { group in
+                    if group.isActivity {
+                        ActivityGroupView(group: group)
+                    } else if let block = group.blocks.first {
+                        blockView(block)
+                    }
                 }
 
                 if showMessageCosts, message.role == .assistant, let usage = message.usage {
