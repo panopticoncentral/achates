@@ -7,8 +7,35 @@ import Observation
 final class ChatSessionState {
     var messages: [ChatMessage] = []
     var isStreaming = false
-    var streamingMessageId: String?
+    var streamingMessageId: String? {
+        didSet {
+            if let streamingMessageId, streamingMessageId != oldValue {
+                turnRevision += 1
+            }
+        }
+    }
+    private(set) var turnRevision = 0
     var failedSend: AppState.FailedSend?
+    var interruption: String?
+    var canContinue = false
+
+    func applyTurnOutcome(_ payload: [String: JSONValue]) {
+        // A reconnect may have missed done while the server finished the reply.
+        if payload["is_running"]?.boolValue == false {
+            isStreaming = false
+            streamingMessageId = nil
+        }
+        canContinue = payload["can_continue"]?.boolValue ?? false
+        interruption = payload["interruption"]?.stringValue
+        if canContinue && interruption == nil {
+            interruption = "This response was interrupted. Continue from the saved conversation."
+        }
+    }
+
+    func clearInterruption() {
+        interruption = nil
+        canContinue = false
+    }
 
     // MARK: - Streaming updates
 

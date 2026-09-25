@@ -36,6 +36,9 @@ public sealed class MobileSession
     /// </summary>
     public bool SpeechEnabled { get; set; }
 
+    /// <summary>Durable notice for an interrupted reply; cleared when another turn starts.</summary>
+    public string? Interruption { get; set; }
+
     public List<AgentMessage> Messages { get; set; } = [];
 
     /// <summary>
@@ -60,6 +63,7 @@ public sealed class MobileSession
             OriginSessionId = existing?.OriginSessionId,
             PeerAgentId = existing?.PeerAgentId,
             SpeechEnabled = existing?.SpeechEnabled ?? false,
+            Interruption = existing?.Interruption,
             Messages = [.. messages],
         };
     }

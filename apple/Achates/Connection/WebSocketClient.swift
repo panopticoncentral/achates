@@ -7,19 +7,40 @@ enum ConnectionStatus: String, Sendable {
     case reconnecting
 }
 
+/// The socket boundary also lets lifecycle tests simulate a suspended connection.
+@MainActor
+protocol WebSocketTransport: AnyObject {
+    var maximumMessageSize: Int { get set }
+    var closeCode: URLSessionWebSocketTask.CloseCode { get }
+    func resume()
+    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?)
+    func send(_ message: URLSessionWebSocketTask.Message) async throws
+    func receive() async throws -> URLSessionWebSocketTask.Message
+}
+
+extension URLSessionWebSocketTask: WebSocketTransport {}
+
 @MainActor
 final class WebSocketClient {
+    // History responses include inline attachments and can exceed 16 MiB.
+    static let maximumMessageSize = 64 * 1024 * 1024
+
     private let appState: AppState
     private let router: DeviceCommandRouter
+    private let makeSocket: (URL) -> any WebSocketTransport
+    private var connectionGeneration = UUID()
 
     private let pendingRequests = PendingRequestStore()
     private let webSocketHolder = WebSocketTaskHolder()
     private let reconnectAttemptsHolder = AtomicInt()
     private let shouldReconnectHolder = AtomicBool(true)
 
-    init(appState: AppState) {
+    init(appState: AppState, makeSocket: @escaping (URL) -> any WebSocketTransport = {
+        URLSession(configuration: .default).webSocketTask(with: $0)
+    }) {
         self.appState = appState
         self.router = DeviceCommandRouter()
+        self.makeSocket = makeSocket
     }
 
     func connect(url: URL, agent: String) {
@@ -28,6 +49,7 @@ final class WebSocketClient {
         // The reconnect path in handleDisconnect() nils out the holder before
         // calling us, so it still proceeds.
         guard webSocketHolder.get() == nil else { return }
+        connectionGeneration = UUID()
         shouldReconnectHolder.set(true)
         reconnectAttemptsHolder.set(0)
         appState.connectionStatus = .connecting
@@ -38,9 +60,8 @@ final class WebSocketClient {
         if components.scheme == "http" { components.scheme = "ws" }
         else if components.scheme == "https" { components.scheme = "wss" }
 
-        let session = URLSession(configuration: .default)
-        let task = session.webSocketTask(with: components.url!)
-        task.maximumMessageSize = 16 * 1024 * 1024 // 16 MB
+        let task = makeSocket(components.url!)
+        task.maximumMessageSize = Self.maximumMessageSize
         webSocketHolder.set(task)
         task.resume()
 
@@ -49,14 +70,16 @@ final class WebSocketClient {
         }
 
         Task { [weak self] in
-            await self?.performConnect()
+            await self?.performConnect(task: task)
         }
     }
 
     func disconnect() {
+        connectionGeneration = UUID()
         shouldReconnectHolder.set(false)
         webSocketHolder.get()?.cancel(with: .normalClosure, reason: nil)
         webSocketHolder.set(nil)
+        pendingRequests.failAll(with: FrameError.notConnected)
         appState.connectionStatus = .disconnected
     }
 
@@ -159,7 +182,8 @@ final class WebSocketClient {
 
     // MARK: - Private
 
-    private func performConnect() async {
+    private func performConnect(task: any WebSocketTransport) async {
+        guard webSocketHolder.get() === task else { return }
         do {
             // Step 1: Handshake
             #if os(macOS)
@@ -174,12 +198,14 @@ final class WebSocketClient {
                 "version": .string("1.0"),
                 "capabilities": .array(capabilities)
             ])
+            guard webSocketHolder.get() === task else { return }
             reconnectAttemptsHolder.set(0)
             appState.connectionStatus = .connected
             appState.lastConnectionError = nil
 
             // Step 2: Fetch agent list
             if let agentsPayload = try await sendRequest(method: "agents.list") {
+                guard webSocketHolder.get() === task else { return }
                 appState.agents = Agent.fromList(agentsPayload)
                 appState.updateAppBadge()
             }
@@ -189,6 +215,7 @@ final class WebSocketClient {
             // currently on screen.
             await appState.resyncCurrentView()
         } catch {
+            guard webSocketHolder.get() === task else { return }
             // Keep the reason around: the settings/onboarding surfaces show it so a
             // failed connect isn't just a form that silently did nothing.
             appState.lastConnectionError = error.localizedDescription
@@ -196,10 +223,11 @@ final class WebSocketClient {
         }
     }
 
-    private func receiveLoop(task: URLSessionWebSocketTask) async {
+    private func receiveLoop(task: any WebSocketTransport) async {
         while shouldReconnectHolder.get() {
             do {
                 let message = try await task.receive()
+                guard webSocketHolder.get() === task else { return }
                 let data: Data
                 switch message {
                 case .data(let d):
@@ -214,8 +242,8 @@ final class WebSocketClient {
                 await handleFrame(frame)
 
             } catch {
-                if shouldReconnectHolder.get() {
-                    await handleDisconnect()
+                if shouldReconnectHolder.get(), webSocketHolder.get() === task {
+                    await handleDisconnect(error: error, task: task)
                 }
                 return
             }
@@ -350,6 +378,7 @@ final class WebSocketClient {
             conversation.finalizeStreamingMessage(usage: messageUsage)
 
         case "done":
+            conversation?.applyTurnOutcome(payload)
             conversation?.isStreaming = false
             conversation?.streamingMessageId = nil
             if matchesCurrentSession {
@@ -418,8 +447,32 @@ final class WebSocketClient {
         }
     }
 
-    private func handleDisconnect() async {
+    static func isOversizedMessage(_ error: Error, closeCode: URLSessionWebSocketTask.CloseCode) -> Bool {
+        let error = error as NSError
+        return closeCode == .messageTooBig
+            || (error.domain == NSPOSIXErrorDomain && error.code == Int(EMSGSIZE))
+    }
+
+    private func handleDisconnect(error: Error, task: any WebSocketTransport) async {
+        let generation = connectionGeneration
+        let oversized = Self.isOversizedMessage(error, closeCode: task.closeCode)
         webSocketHolder.set(nil)
+        task.cancel(with: .goingAway, reason: nil)
+        let failure: Error = oversized ? FrameError.messageTooLarge : error
+        pendingRequests.failAll(with: failure)
+        appState.lastConnectionError = failure.localizedDescription
+
+        // Retrying the same history cannot fix a size limit. Keep the error
+        // visible and let the user choose when to reconnect.
+        if oversized {
+            shouldReconnectHolder.set(false)
+            appState.connectionStatus = .disconnected
+            if appState.currentSessionId != nil {
+                appState.historyLoadError = failure.localizedDescription
+                appState.isLoadingHistory = false
+            }
+            return
+        }
         appState.connectionStatus = .reconnecting
 
         let attempts = reconnectAttemptsHolder.increment()
@@ -427,6 +480,8 @@ final class WebSocketClient {
 
         try? await Task.sleep(for: .milliseconds(Int(delay * 1000)))
 
+        // A foreground reconnect or explicit disconnect supersedes this retry.
+        guard connectionGeneration == generation else { return }
         guard shouldReconnectHolder.get(), let url = appState.serverURL, let agent = appState.currentAgent else {
             appState.connectionStatus = .disconnected
             return
@@ -439,7 +494,7 @@ final class WebSocketClient {
 
 // MARK: - Thread-safe helpers
 
-private final class PendingRequestStore: Sendable {
+final class PendingRequestStore: Sendable {
     private let lock = NSLock()
     private nonisolated(unsafe) var store: [String: CheckedContinuation<[String: JSONValue]?, Error>] = [:]
 
@@ -455,19 +510,29 @@ private final class PendingRequestStore: Sendable {
         lock.unlock()
         return cont
     }
+
+    func failAll(with error: Error) {
+        lock.lock()
+        let pending = Array(store.values)
+        store.removeAll()
+        lock.unlock()
+        for continuation in pending {
+            continuation.resume(throwing: error)
+        }
+    }
 }
 
 private final class WebSocketTaskHolder: Sendable {
     private let lock = NSLock()
-    private nonisolated(unsafe) var task: URLSessionWebSocketTask?
+    private nonisolated(unsafe) var task: (any WebSocketTransport)?
 
-    func set(_ newTask: URLSessionWebSocketTask?) {
+    func set(_ newTask: (any WebSocketTransport)?) {
         lock.lock()
         task = newTask
         lock.unlock()
     }
 
-    func get() -> URLSessionWebSocketTask? {
+    func get() -> (any WebSocketTransport)? {
         lock.lock()
         let t = task
         lock.unlock()

@@ -9,3 +9,5 @@ LLM provider abstraction + OpenRouter implementation. Depended on by `Achates.Ag
 - Content types: `CompletionContent` base, subtypes for text, image, audio, thinking, tool calls, files. `CompletionImageContent` has optional `Url` for lightweight references (empty `Data` + URL).
 - `CompletionUserContent` — input-only base. `CompletionAudioContent` is output-only (extends `CompletionContent`), `CompletionAudioInputContent` is input-only (extends `CompletionUserContent`). This asymmetry is intentional.
 - Event streaming via `CompletionEventStream` using `System.Threading.Channels`
+
+- `CompletionActivity.Observe` binds a turn-scoped progress callback via AsyncLocal. `CompletionEventStream` captures it at creation and reports nonempty content deltas/image output only. Nested model calls inherit it; lifecycle events, usage, and SSE keepalives do not count as progress.

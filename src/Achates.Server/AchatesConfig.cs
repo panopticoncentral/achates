@@ -7,6 +7,13 @@ public sealed class AchatesConfig
     public ToolsConfig? Tools { get; set; }
     public CronConfig? Cron { get; set; }
     public MemoryConfig? Memory { get; set; }
+    public InteractiveConfig? Interactive { get; set; }
+}
+
+public sealed class InteractiveConfig
+{
+    public int? IdleTimeoutSeconds { get; set; }
+    public int? MaxDurationSeconds { get; set; }
 }
 
 public sealed class ModelsConfig

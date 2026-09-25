@@ -182,6 +182,7 @@ enum FrameError: Error, LocalizedError {
     case unknownType(String)
     case timeout
     case notConnected
+    case messageTooLarge
     case serverError(String)
 
     var errorDescription: String? {
@@ -190,6 +191,7 @@ enum FrameError: Error, LocalizedError {
         case .unknownType(let t): return "Unknown frame type: \(t)"
         case .timeout: return "Request timed out"
         case .notConnected: return "Not connected to server"
+        case .messageTooLarge: return "The server response exceeds the 64 MiB limit. Automatic reconnect stopped to avoid repeatedly loading it."
         case .serverError(let msg): return msg
         }
     }

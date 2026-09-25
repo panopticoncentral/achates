@@ -162,6 +162,25 @@ struct ChatView: View {
                 failedSendBanner
             }
 
+            if let notice = appState.currentConversation.interruption, !appState.isStreaming {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(notice).font(.footnote)
+                    Spacer()
+                    if appState.currentConversation.canContinue {
+                        Button("Continue") {
+                            Task { await appState.continueResponse() }
+                        }
+                        .disabled(!appState.canSubmitMessage)
+                        .font(.footnote.weight(.semibold))
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.orange.opacity(0.12))
+            }
+
             ComposerView(
                 speechService: speechService,
                 draft: draft,

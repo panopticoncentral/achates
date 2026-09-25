@@ -40,6 +40,8 @@ internal static class AgentLoop
         {
             stream.Push(new AgentStartEvent());
 
+            CloseInterruptedToolCalls(messages);
+
             // Add initial prompt messages
             foreach (var prompt in prompts)
             {
@@ -108,6 +110,8 @@ internal static class AgentLoop
         {
             stream.Push(new AgentStartEvent());
 
+            CloseInterruptedToolCalls(messages);
+
             var hasMore = true;
             while (hasMore)
             {
@@ -149,6 +153,37 @@ internal static class AgentLoop
         catch (Exception ex)
         {
             stream.Fault(ex);
+        }
+    }
+
+    // A cancellation may leave a batch of tool calls only partly executed. Do not
+    // replay them: a side effect may have happened even when no result was saved.
+    // Close missing pairs explicitly so providers accept the resumed history.
+    internal static void CloseInterruptedToolCalls(List<AgentMessage> messages)
+    {
+        var lastAssistant = messages.FindLastIndex(m => m is AssistantMessage);
+        if (lastAssistant < 0) return;
+        var assistant = (AssistantMessage)messages[lastAssistant];
+        var results = messages.Skip(lastAssistant + 1).OfType<ToolResultMessage>()
+            .Select(m => m.ToolCallId).ToHashSet();
+        var insertAt = lastAssistant + 1;
+        while (insertAt < messages.Count && messages[insertAt] is ToolResultMessage or AgentSpeechMessage)
+            insertAt++;
+        foreach (var call in assistant.Content.OfType<CompletionToolCall>())
+        {
+            if (results.Contains(call.Id)) continue;
+            messages.Insert(insertAt++, new ToolResultMessage
+            {
+                ToolCallId = call.Id,
+                ToolName = call.Name,
+                IsError = true,
+                Content = [new CompletionTextContent
+                {
+                    Text = "The turn was interrupted before this tool result was recorded. " +
+                           "Its outcome is unknown; verify state before repeating any action. " +
+                           "Use completed tool results already in this conversation.",
+                }],
+            });
         }
     }
 

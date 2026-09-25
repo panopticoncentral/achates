@@ -141,4 +141,43 @@ final class ConversationStreamingTests: XCTestCase {
         XCTAssertNil(state.streamingMessageId)
         XCTAssertTrue(state.messages.isEmpty)
     }
+    func testTimeoutNoticeFollowsConversationAndSurvivesHistoryReload() {
+        let state = state()
+        let client = WebSocketClient(appState: state)
+        beginReply(state, id: "partial")
+        state.currentSessionId = "two"
+        let outcome: [String: JSONValue] = [
+            "status": .string("timed_out"),
+            "interruption": .string("The response timed out. Completed work was saved."),
+            "can_continue": .bool(true),
+        ]
+        client.handleEvent(event("done", extra: outcome))
+        XCTAssertNil(state.currentConversation.interruption)
+        state.currentSessionId = "one"
+        XCTAssertFalse(state.isStreaming)
+        XCTAssertTrue(state.currentConversation.canContinue)
+        XCTAssertTrue(state.currentConversation.interruption?.contains("timed out") == true)
+        let reloaded = ChatSessionState()
+        reloaded.isStreaming = true // done was missed while disconnected
+        reloaded.streamingMessageId = "stale"
+        var history = outcome
+        history["is_running"] = .bool(false)
+        reloaded.applyTurnOutcome(history)
+        XCTAssertFalse(reloaded.isStreaming)
+        XCTAssertNil(reloaded.streamingMessageId)
+        XCTAssertEqual(reloaded.interruption, state.currentConversation.interruption)
+        XCTAssertTrue(reloaded.canContinue)
+        client.handleEvent(event("done", extra: ["can_continue": .bool(false)]))
+        XCTAssertNil(state.currentConversation.interruption)
+        XCTAssertFalse(state.currentConversation.canContinue)
+    }
+
+    func testLegacyInterruptedHistoryOffersContinuationWithoutClaimingTimeout() {
+        let conversation = ChatSessionState()
+        conversation.applyTurnOutcome(["can_continue": .bool(true)])
+        XCTAssertTrue(conversation.canContinue)
+        XCTAssertTrue(conversation.interruption?.contains("interrupted") == true)
+        XCTAssertFalse(conversation.interruption?.contains("timed out") == true)
+    }
+
 }

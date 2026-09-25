@@ -10,6 +10,7 @@ namespace Achates.Providers.Completions.Events;
 /// </summary>
 public sealed class CompletionEventStream : IAsyncEnumerable<CompletionEvent>
 {
+    private readonly Action? _onProgress = CompletionActivity.Current;
     private readonly Channel<CompletionEvent> _channel = Channel.CreateUnbounded<CompletionEvent>(
         new UnboundedChannelOptions { SingleWriter = true });
     private readonly TaskCompletionSource<CompletionAssistantMessage> _resultTcs = new(
@@ -44,6 +45,14 @@ public sealed class CompletionEventStream : IAsyncEnumerable<CompletionEvent>
     /// </summary>
     public void Push(CompletionEvent evt)
     {
+        if (evt is CompletionTextDeltaEvent { Delta.Length: > 0 }
+            or CompletionThinkingDeltaEvent { Delta.Length: > 0 }
+            or CompletionToolCallDeltaEvent { Delta.Length: > 0 }
+            or CompletionAudioDeltaEvent { DataDelta.Length: > 0 }
+            or CompletionAudioDeltaEvent { TranscriptDelta.Length: > 0 }
+            or CompletionImageEvent)
+            _onProgress?.Invoke();
+
         switch (evt)
         {
             case CompletionDoneEvent done:

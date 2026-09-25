@@ -48,6 +48,24 @@ You are a helpful assistant.
 | `tools` | object | _(none)_ | Shared tool configuration (see below). |
 | `memory` | object | _(none)_ | Global memory settings (see below). |
 | `cron` | object | _(none)_ | Cron session retention policy (see below). |
+| `interactive` | object | _(defaults below)_ | Interactive response timeouts (see below). |
+
+### `interactive`
+
+Limits for interactive replies, including **Continue**. Restart the server after changing these settings. Cron jobs keep their separate limits.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `idle_timeout_seconds` | integer | `300` | Abort after this many seconds without model content or tool progress. Text, reasoning, tool arguments, audio/image output, and tool transitions count; HTTP/SSE keepalives do not. Nested model calls such as `think` also count. Tools that do not report progress must finish within this interval. |
+| `max_duration_seconds` | integer | `3600` | Overall ceiling for one interactive run, even if it keeps producing output. Continue starts a new run with fresh limits. |
+
+Omitted or nonpositive values use the defaults. A timeout saves completed conversation work and a notice, and the Apple client offers **Continue**. Continue preserves the original prompt, attachments and completed tool results. Interrupted tool calls without recorded results are marked as having an unknown outcome; the runtime does not replay them automatically.
+
+```yaml
+interactive:
+  idle_timeout_seconds: 300
+  max_duration_seconds: 3600
+```
 
 ### `models`
 

@@ -62,6 +62,8 @@ final class AppState {
     var costLoadErrors: [String: String] = [:]
     @ObservationIgnored private var historyRequestID = UUID()
     @ObservationIgnored private var sessionListRequestID = UUID()
+    @ObservationIgnored private var wasBackgrounded = false
+    @ObservationIgnored private var resyncRequestID = UUID()
     @ObservationIgnored private var drafts: [ConversationKey: ConversationDraft] = [:]
 
     @ObservationIgnored private var conversations: [ConversationKey: ChatSessionState] = [:]
@@ -339,6 +341,7 @@ final class AppState {
             guard historyRequestID == requestID, currentSessionId == sessionId else { return }
             guard let payload else { throw AgentEditError.invalidResponse }
             messages = parseSessionMessages(payload, serverURL: serverURL)
+            currentConversation.applyTurnOutcome(payload)
             markCurrentSessionAsRead()
         } catch {
             if historyRequestID == requestID {
@@ -724,10 +727,19 @@ final class AppState {
     }
 
     func handleScenePhaseChange(_ phase: ScenePhase) {
+        if phase == .background {
+            wasBackgrounded = true
+            return
+        }
         guard phase == .active, serverURL != nil else { return }
-        // iOS commonly suspends or kills the websocket on background; on foreground
-        // make sure we're connected and that the visible view reflects current server state.
-        if connectionStatus != .connected {
+        let needsFreshSocket = wasBackgrounded
+        wasBackgrounded = false
+        // A suspended socket can still report connected. Replace only the transport;
+        // AppState.disconnect() would discard the selected chat and live transcript.
+        if needsFreshSocket {
+            client?.disconnect()
+            connectToServer()
+        } else if connectionStatus != .connected {
             connectToServer()
         } else {
             Task { await resyncCurrentView() }
@@ -739,23 +751,35 @@ final class AppState {
     /// guarantees the UI matches the server.
     func resyncCurrentView() async {
         guard let agent = currentAgent else { return }
-        await loadSessions(for: agent)
-        if let sessionId = currentSessionId,
-           sessions.contains(where: { $0.id == sessionId }) {
+        // History must not depend on the first page of the list, or on its success.
+        // Fetch it first so a slow list request cannot delay foreground recovery.
+        if let sessionId = currentSessionId {
             await reloadCurrentSessionMessages(agent: agent, sessionId: sessionId)
         }
+        guard currentAgent?.id == agent.id else { return }
+        await loadSessions(for: agent)
     }
 
     private func reloadCurrentSessionMessages(agent: Agent, sessionId: String) async {
         guard let client else { return }
+        let conversation = currentConversation
+        let turnRevision = conversation.turnRevision
+        let wasStreaming = conversation.isStreaming
+        let requestID = UUID()
+        resyncRequestID = requestID
         do {
             let payload = try await client.sendRequest(method: "sessions.get", params: [
                 "agent": .string(agent.id),
                 "session_id": .string(sessionId),
             ])
-            if let payload, currentAgent?.id == agent.id,
-               currentSessionId == sessionId, !isStreaming {
+            if let payload, resyncRequestID == requestID, self.client === client,
+               currentAgent?.id == agent.id,
+               currentSessionId == sessionId, currentConversation === conversation,
+               conversation.turnRevision == turnRevision,
+               payload["is_running"]?.boolValue == false || (!wasStreaming && !isStreaming) {
                 messages = parseSessionMessages(payload, serverURL: serverURL)
+                currentConversation.applyTurnOutcome(payload)
+                historyLoadError = nil
             }
         } catch {
             // Best-effort resync; surface as transient error only if user is on the chat
@@ -779,6 +803,7 @@ final class AppState {
     func sendMessage(_ text: String, attachments: [DraftAttachment] = []) async {
         guard canSubmitMessage else { return }
         let conversation = currentConversation
+        conversation.clearInterruption()
         failedSend = nil
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -817,6 +842,30 @@ final class AppState {
         failedSend = nil
         messages.removeAll { $0.id == failed.messageId }
         await sendMessage(failed.text, attachments: failed.attachments)
+    }
+
+    /// Continue from completed work without rewinding or resending attachments.
+    func continueResponse() async {
+        guard canSubmitMessage, currentConversation.canContinue,
+              let client, let agent = currentAgent, let sessionId = currentSessionId else { return }
+        let conversation = currentConversation
+        let previousNotice = conversation.interruption
+        conversation.clearInterruption()
+        conversation.isStreaming = true
+        let id = UUID().uuidString
+        conversation.streamingMessageId = id
+        conversation.messages.append(ChatMessage(id: id, role: .assistant, blocks: []))
+        do {
+            _ = try await client.sendRequest(method: "chat.continue", params: [
+                "agent": .string(agent.id), "session_id": .string(sessionId),
+            ])
+        } catch {
+            conversation.isStreaming = false
+            conversation.streamingMessageId = nil
+            conversation.messages.removeAll { $0.id == id }
+            conversation.canContinue = true
+            conversation.interruption = "Couldn't continue: \(error.localizedDescription) \(previousNotice ?? "")"
+        }
     }
 
     /// The most recent user message in the open session, if any.
@@ -878,6 +927,7 @@ final class AppState {
     /// user-turn ordinal sent to the server (nil = latest turn).
     private func performResubmit(at index: Int, promptIndex: Int?, text: String?, attachments: [DraftAttachment]?) async {
         let conversation = currentConversation
+        conversation.clearInterruption()
         let original = messages[index]
         let trimmedNewText = text?.trimmingCharacters(in: .whitespacesAndNewlines)
         let effectiveText = trimmedNewText ?? original.textContent

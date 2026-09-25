@@ -202,6 +202,9 @@ public sealed class AgentRuntime
     /// </summary>
     public AgentEventStream ContinueAsync()
     {
+        if (IsRunning)
+            throw new InvalidOperationException("The agent is already running.");
+
         if (_model is null)
         {
             throw new InvalidOperationException("Model must be set before continuing.");

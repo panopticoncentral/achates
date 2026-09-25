@@ -37,20 +37,19 @@ public sealed class MobileTransport
     private readonly ConcurrentDictionary<string, AgentDefinition> _agents;
     private readonly ConcurrentDictionary<string, MobileConnection> _connections = new();
     private readonly ConcurrentDictionary<string, AgentRuntime> _runtimes = new();
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _chatCommandLocks = new();
+    private readonly ConcurrentDictionary<string, byte> _activeTurns = new();
     // Intentionally unpruned: one empty buffer per active agent:session; bounded by session count.
     private readonly ConcurrentDictionary<string, ChatTranscriptBuffer> _chatBuffers = new();
     private readonly ChatRoomManager _chatRoomManager;
     private IReadOnlyList<object>? _modelsCache;
 
-    /// <summary>
-    /// Absolute wall-clock cap for a single interactive turn. Backstop against a stalled
-    /// upstream that the SSE idle timeout can't catch — OpenRouter keepalive comments reset
-    /// that timer, so a keepalived-but-dead stream would otherwise hang forever (cron turns
-    /// have their own MaxJobDuration; interactive turns had none). Sized well above the
-    /// longest legitimately-slow turn so it never clips real work; on expiry the runtime is
-    /// aborted, which unwinds gracefully (StopReason.Aborted) and persists what was produced.
-    /// </summary>
-    private static readonly TimeSpan MaxInteractiveTurnDuration = TimeSpan.FromMinutes(12);
+    internal TimeProvider TurnTimeProvider { get; init; } = TimeProvider.System;
+
+    internal static bool CanContinue(MobileSession session) =>
+        session.Interruption is not null || session.Messages.LastOrDefault() is
+            ToolResultMessage or UserMessage or
+            AssistantMessage { StopReason: CompletionStopReason.ToolUse or CompletionStopReason.Aborted or CompletionStopReason.Error };
 
     public MobileTransport(
         IReadOnlyDictionary<string, AgentDefinition> initialAgents,
@@ -372,8 +371,7 @@ public sealed class MobileTransport
                 "sessions.delete" => await HandleSessionsDeleteAsync(request, ct),
                 "sessions.rename" => await HandleSessionsRenameAsync(request, ct),
                 "sessions.delete_all" => await HandleSessionsDeleteAllAsync(request, ct),
-                "chat.send" => await HandleChatSendAsync(connection, request, ct),
-                "chat.resubmit" => await HandleChatResubmitAsync(connection, request, ct),
+                "chat.send" or "chat.resubmit" or "chat.continue" => await HandleChatCommandAsync(connection, request, ct),
                 "chat.cancel" => HandleChatCancel(request),
                 "chat.read" => await HandleChatReadAsync(request, ct),
                 "agent.get" => await HandleAgentGetAsync(request),
@@ -602,6 +600,8 @@ public sealed class MobileTransport
         if (session is null)
             return ResponseFrame.Failure(request.Id, "not_found", $"Session '{sessionId}' not found.");
 
+        var running = _activeTurns.ContainsKey($"{agentName}:{sessionId}") ||
+            (_runtimes.TryGetValue($"{agentName}:{sessionId}", out var runtime) && runtime.IsRunning);
         var payload = JsonSerializer.SerializeToElement(new
         {
             id = session.Id,
@@ -609,6 +609,9 @@ public sealed class MobileTransport
             created = session.Created.ToUnixTimeMilliseconds(),
             updated = session.Updated.ToUnixTimeMilliseconds(),
             speech_enabled = session.SpeechEnabled,
+            interruption = running ? null : session.Interruption,
+            can_continue = !running && CanContinue(session),
+            is_running = running,
             messages = session.Messages,
         }, JsonOptions);
         return ResponseFrame.Success(request.Id, payload);
@@ -858,6 +861,28 @@ public sealed class MobileTransport
         return sessions.Sum(s => s.Unread);
     }
 
+    // Serialize admission across clients. The turn remains reserved through persistence,
+    // even after the runtime itself goes idle, so Continue cannot race an older save.
+    private async Task<ResponseFrame?> HandleChatCommandAsync(MobileConnection connection, RequestFrame request, CancellationToken ct)
+    {
+        var key = $"{GetStringParam(request.Params, "agent")}:{GetStringParam(request.Params, "session_id")}";
+        var gate = _chatCommandLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
+            if (_activeTurns.ContainsKey(key) &&
+                (request.Method != "chat.send" || !_runtimes.TryGetValue(key, out var runtime) || !runtime.IsRunning))
+                return ResponseFrame.Failure(request.Id, "runtime_busy", "The current response is still finishing. Try again shortly.");
+            return request.Method switch
+            {
+                "chat.send" => await HandleChatSendAsync(connection, request, ct),
+                "chat.resubmit" => await HandleChatResubmitAsync(connection, request, ct),
+                _ => await HandleChatContinueAsync(connection, request, ct),
+            };
+        }
+        finally { gate.Release(); }
+    }
+
     private async Task<ResponseFrame?> HandleChatSendAsync(MobileConnection connection, RequestFrame request, CancellationToken ct)
     {
         var agentName = GetStringParam(request.Params, "agent");
@@ -1030,6 +1055,35 @@ public sealed class MobileTransport
         // Stream the agent response — PromptAsync appends the user message to runtime.Messages itself.
         _ = StreamAgentResponseAsync(runtime, agentName, sessionId, replacement, ct);
 
+        return null;
+    }
+
+    private async Task<ResponseFrame?> HandleChatContinueAsync(MobileConnection connection, RequestFrame request, CancellationToken ct)
+    {
+        var agentName = GetStringParam(request.Params, "agent");
+        var sessionId = GetStringParam(request.Params, "session_id");
+        if (agentName is null || sessionId is null)
+            return ResponseFrame.Failure(request.Id, "invalid_params", "Missing 'agent' or 'session_id' parameter.");
+        if (!_agents.TryGetValue(agentName, out var agentDef))
+            return ResponseFrame.Failure(request.Id, "not_found", $"Agent '{agentName}' not found.");
+
+        var key = $"{agentName}:{sessionId}";
+        if (_runtimes.TryGetValue(key, out var runtime) && runtime.IsRunning)
+            return ResponseFrame.Failure(request.Id, "runtime_busy", "The response is still running.");
+        var existing = await sessionStore.LoadAsync(agentName, sessionId, ct);
+        if (existing is null || !CanContinue(existing))
+            return ResponseFrame.Failure(request.Id, "not_found", "There is no interrupted response to continue.");
+        if (runtime is null)
+        {
+            var extraTools = await BuildResumeExtraToolsAsync(agentName, agentDef, existing, ct);
+            runtime = CreateRuntime(agentDef, agentName, sessionId, existing.Messages, extraTools);
+            _runtimes[key] = runtime;
+        }
+
+        await connection.SendResponseAsync(ResponseFrame.Success(request.Id,
+            JsonSerializer.SerializeToElement(new { session_id = sessionId }, JsonOptions)), ct);
+        // ContinueAsync keeps the original prompt, attachments and completed tool results.
+        _ = StreamAgentResponseAsync(runtime, agentName, sessionId, null, ct);
         return null;
     }
 
@@ -1770,11 +1824,11 @@ public sealed class MobileTransport
     // --- Streaming ---
 
     internal async Task StreamAgentResponseAsync(
-        AgentRuntime runtime, string agentName, string sessionId, UserMessage userMessage, CancellationToken connectionCt)
+        AgentRuntime runtime, string agentName, string sessionId, UserMessage? userMessage, CancellationToken connectionCt)
     {
         // The turn's event consumption and — critically — its persistence are deliberately
         // INDEPENDENT of the initiating WebSocket connection. The agent runtime runs on its
-        // own cancellation token (cancelled only by chat.cancel -> runtime.Abort()), so it
+        // own cancellation token (cancelled by chat.cancel or the turn watchdog), so it
         // completes whether or not the client stays connected. Binding consumption/SaveAsync
         // to the connection token meant a client that dropped mid-turn (backgrounding,
         // navigation, a network blip) aborted the consuming loop before AgentEndEvent — and a
@@ -1783,31 +1837,62 @@ public sealed class MobileTransport
         // and still reach any client that is (re)connected. connectionCt is retained only for
         // diagnostics (logging whether the initiator was still connected at turn end).
         var ct = CancellationToken.None;
+        var turnKey = $"{agentName}:{sessionId}";
+        if (!_activeTurns.TryAdd(turnKey, 0))
+            throw new InvalidOperationException("A response is already running for this conversation.");
 
         var chatBuffer = _chatBuffers.GetOrAdd($"{agentName}:{sessionId}", _ => new ChatTranscriptBuffer());
+
+        using var watchdog = new InteractiveTurnWatchdog(
+            (_serviceProvider.GetService(typeof(AchatesConfig)) as AchatesConfig)?.Interactive,
+            reason =>
+            {
+                _logger.LogWarning("Interactive turn timed out ({Reason}) for {Agent}/{Session}", reason, agentName, sessionId);
+                runtime.Abort();
+            }, TurnTimeProvider);
+        using var activity = CompletionActivity.Observe(watchdog.Progress);
+        const string timeoutMessage = "The response timed out. Completed work was saved. Continue to finish the response.";
 
         // Backstop persistence for the error paths: a server-side-completed turn must never
         // be lost just because consumption/broadcast faulted. Connection-independent (ct=None).
         // Best-effort — a persist failure here must not mask the original error.
-        async Task TryPersistAsync()
+        async Task<MobileSession?> TryPersistAsync(string notice)
         {
             try
             {
                 var existing = await sessionStore.LoadAsync(agentName, sessionId, ct);
                 var persisted = MobileSession.WithMessages(existing, sessionId,
                     chatBuffer.Merge([.. runtime.Messages]));
+                persisted.Interruption = watchdog.TimeoutReason is not null ? timeoutMessage : notice;
                 await sessionStore.SaveAsync(agentName, persisted, ct);
                 await BroadcastSessionUpdatedAsync(agentName, persisted, ct);
                 _logger.LogInformation(
                     "Turn persisted via error-path backstop for {Agent}/{Session}: {Count} messages",
                     agentName, sessionId, persisted.Messages.Count);
+                return persisted;
             }
             catch (Exception persistEx)
             {
                 _logger.LogError(persistEx,
                     "Backstop persist failed for {Agent}/{Session}", agentName, sessionId);
+                return null;
             }
         }
+        async Task ReportFailureAsync(string notice)
+        {
+            var saved = await TryPersistAsync(notice);
+            chatBuffer.Clear();
+            stateCache.Invalidate(agentName);
+            await BroadcastEventAsync("done", new
+            {
+                agent = agentName,
+                session_id = sessionId,
+                status = watchdog.TimeoutReason is not null ? "timed_out" : "interrupted",
+                interruption = saved?.Interruption ?? "The response stopped, and saving the conversation failed. Reopen it to check what was retained.",
+                can_continue = saved is not null && CanContinue(saved),
+            }, CancellationToken.None);
+        }
+
         try
         {
             chatBuffer.Clear();
@@ -1838,35 +1923,26 @@ public sealed class MobileTransport
                 }
             }
 
-            var stream = runtime.PromptAsync(userMessage);
-
-            // Wall-clock backstop: abort a turn that runs past the cap (a stalled upstream
-            // the idle timeout can't catch). Abort unwinds the runtime gracefully, so the
-            // partial result is still persisted and the client gets a `done`. Disposed when
-            // the turn finishes, so a normal turn is never affected.
-            using var turnDeadline = new CancellationTokenSource(MaxInteractiveTurnDuration);
-            using var turnDeadlineReg = turnDeadline.Token.Register(() =>
-            {
-                _logger.LogWarning(
-                    "Interactive turn exceeded {Cap} for {Agent}/{Session} — aborting (likely a stalled upstream).",
-                    MaxInteractiveTurnDuration, agentName, sessionId);
-                runtime.Abort();
-            });
+            var stream = userMessage is null ? runtime.ContinueAsync() : runtime.PromptAsync(userMessage);
 
             // Eagerly persist the user's message so it survives a hard crash or any turn
             // that never reaches a terminal event. Built explicitly (not from runtime.Messages,
             // which the loop appends to asynchronously) so there's no race. The authoritative
             // save at AgentEndEvent overwrites this with the full message list.
+            if (userMessage is not null)
             {
                 var existingForUser = await sessionStore.LoadAsync(agentName, sessionId, ct);
                 var withUser = MobileSession.WithMessages(existingForUser, sessionId,
                     [.. existingForUser?.Messages ?? [], userMessage]);
+                withUser.Interruption = null;
                 await sessionStore.SaveAsync(agentName, withUser, ct);
                 await BroadcastSessionUpdatedAsync(agentName, withUser, ct);
             }
 
             await foreach (var evt in stream.WithCancellation(ct))
             {
+                if (evt is ToolStartEvent or ToolEndEvent or ToolProgressEvent or TurnStartEvent)
+                    watchdog.Progress();
                 switch (evt)
                 {
                     case MessageStreamEvent { Inner: CompletionTextDeltaEvent delta }:
@@ -1997,6 +2073,8 @@ public sealed class MobileTransport
                         break;
 
                     case AgentEndEvent:
+                        watchdog.Stop();
+                        await runtime.WaitForIdleAsync();
                         // WithMessages preserves every persistable field from the
                         // existing on-disk session (title, Created, JobId, chat-origin
                         // pairing, SpeechEnabled) and applies the new message list.
@@ -2006,6 +2084,10 @@ public sealed class MobileTransport
                         var existing = await sessionStore.LoadAsync(agentName, sessionId, ct);
                         var session = MobileSession.WithMessages(existing, sessionId,
                             chatBuffer.Merge([.. runtime.Messages]));
+                        session.Interruption = watchdog.TimeoutReason is not null ? timeoutMessage
+                            : session.Messages.LastOrDefault() is AssistantMessage { StopReason: CompletionStopReason.Error } failed
+                                ? $"The response failed: {failed.Error ?? "Unknown provider error"}. Completed work was saved."
+                                : null;
                         await sessionStore.SaveAsync(agentName, session, ct);
 
                         // The user who sent this prompt is present in this conversation, so
@@ -2044,6 +2126,10 @@ public sealed class MobileTransport
                         {
                             agent = agentName,
                             session_id = sessionId,
+                            status = watchdog.TimeoutReason is not null ? "timed_out"
+                                : CanContinue(session) ? "interrupted" : "completed",
+                            interruption = session.Interruption,
+                            can_continue = CanContinue(session),
                             last_message = preview.LastMessage,
                             last_activity = preview.LastActivity,
                             unread_count = preview.UnreadCount,
@@ -2054,46 +2140,19 @@ public sealed class MobileTransport
         }
         catch (OperationCanceledException)
         {
+            watchdog.Stop();
             _logger.LogDebug("Agent stream cancelled for {Agent}/{Session}", agentName, sessionId);
-            // Persist before clearing: the runtime may have produced messages we'd
-            // otherwise lose. AgentEndEvent normally handles this; this is the backstop
-            // for a stream that ended without one.
-            await TryPersistAsync();
-            chatBuffer.Clear();
-            stateCache.Invalidate(agentName);
-            try
-            {
-                await BroadcastEventAsync("done", new
-                {
-                    agent = agentName,
-                    session_id = sessionId,
-                }, CancellationToken.None);
-            }
-            catch { /* best effort */ }
+            await ReportFailureAsync("The response was interrupted. Completed work was saved.");
         }
         catch (Exception ex)
         {
+            watchdog.Stop();
             _logger.LogError(ex, "Error streaming agent response for {Agent}/{Session}", agentName, sessionId);
-            await TryPersistAsync();
-            chatBuffer.Clear();
-            stateCache.Invalidate(agentName);
-            try
-            {
-                await BroadcastEventAsync("error", new
-                {
-                    agent = agentName,
-                    session_id = sessionId,
-                    error = ex.Message,
-                }, CancellationToken.None);
-
-                // Always send done so the client exits the typing/streaming state
-                await BroadcastEventAsync("done", new
-                {
-                    agent = agentName,
-                    session_id = sessionId,
-                }, CancellationToken.None);
-            }
-            catch { /* best effort */ }
+            await ReportFailureAsync($"The response failed: {ex.Message}. Completed work was saved.");
+        }
+        finally
+        {
+            _activeTurns.TryRemove(turnKey, out _);
         }
     }
 

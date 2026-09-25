@@ -39,6 +39,11 @@ struct ConversationView: View {
         .onDisappear { controller?.end() }
         .onChange(of: appState.isStreaming) { _, streaming in
             guard !streaming else { return }
+            if let notice = appState.currentConversation.interruption {
+                controller?.banner = notice
+                controller?.pause()
+                return
+            }
             // Surface a one-time note if the just-finished turn produced no audio.
             // Gate on banner == nil so a multi-turn text-only session doesn't
             // re-set it on every turn.
