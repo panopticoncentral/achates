@@ -344,13 +344,15 @@ struct ChatView: View {
         .help(on ? "Stop reading replies aloud" : "Read replies aloud")
     }
 
-    /// Inline strip above the composer when a chat.send never reached the server.
+    /// Inline strip above the composer for transport failures or server rejections.
     private var failedSendBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
-            Text("Message failed to send.")
+            Text(appState.failedSend?.reason ?? "Message failed to send.")
                 .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
             Spacer()
             Button("Retry Sending") {
                 Task { await appState.retryFailedSend() }

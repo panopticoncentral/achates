@@ -117,7 +117,7 @@ struct ComposerView: View {
         #endif
         .fileImporter(
             isPresented: $showDocumentPicker,
-            allowedContentTypes: [.pdf, .text],
+            allowedContentTypes: DraftAttachment.documentTypes,
             allowsMultipleSelection: true
         ) { result in
             switch result {
@@ -376,7 +376,7 @@ struct ComposerView: View {
     }
 
     /// Route dropped file URLs: images through the resize path, the rest
-    /// through the document path (which enforces the PDF/text caps).
+    /// through the document path (which enforces document size caps).
     private func handleDroppedURLs(_ urls: [URL]) {
         for url in urls {
             if attachments.count >= maxAttachments {
@@ -403,9 +403,11 @@ struct ComposerView: View {
                 break
             }
             let fileType = UTType(filenameExtension: url.pathExtension)
+            let isWorkbook = url.pathExtension.lowercased() == "xlsx"
             guard fileType?.conforms(to: .pdf) == true || fileType?.conforms(to: .text) == true
+                || isWorkbook
                 || ["md", "markdown", "txt", "log", "json", "xml", "csv"].contains(url.pathExtension.lowercased()) else {
-                notice = "\(url.lastPathComponent) isn’t supported. Choose an image, PDF, or text file."
+                notice = "\(url.lastPathComponent) isn’t supported. Choose an image, PDF, Excel (.xlsx), or text file."
                 continue
             }
             let didStart = url.startAccessingSecurityScopedResource()
@@ -417,7 +419,17 @@ struct ComposerView: View {
 
             let type = UTType(filenameExtension: url.pathExtension)
             let isPdf = type?.conforms(to: .pdf) ?? (url.pathExtension.lowercased() == "pdf")
-            if isPdf {
+            if isWorkbook {
+                guard data.count <= DraftAttachment.maxWorkbookBytes else {
+                    notice = "\(url.lastPathComponent) exceeds the 8 MB workbook limit."
+                    continue
+                }
+                attachments.append(DraftAttachment(
+                    data: data,
+                    mime: DraftAttachment.workbookMime,
+                    displayName: url.lastPathComponent
+                ))
+            } else if isPdf {
                 guard data.count <= Self.maxPdfBytes else {
                     notice = "\(url.lastPathComponent) exceeds the 32 MB PDF limit."
                     continue
@@ -548,7 +560,7 @@ private struct AttachmentThumbnail: View {
 
     private var documentChip: some View {
         VStack(spacing: 4) {
-            Image(systemName: "doc.fill")
+            Image(systemName: DraftAttachment.documentSymbol(for: attachment.mime))
                 .font(.system(size: 22))
                 .foregroundStyle(.white)
             Text(attachment.displayName ?? "Document")

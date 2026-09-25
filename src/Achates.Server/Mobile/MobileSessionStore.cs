@@ -40,6 +40,8 @@ public sealed class MobileSessionStore(string basePath)
     {
         var path = FindPath(agentName, sessionId);
         if (path is not null) File.Delete(path);
+        var workbooks = GetWorkbookDirectory(agentName, sessionId);
+        if (Directory.Exists(workbooks)) Directory.Delete(workbooks, recursive: true);
         return Task.CompletedTask;
     }
 
@@ -174,6 +176,8 @@ public sealed class MobileSessionStore(string basePath)
 
         foreach (var file in Directory.GetFiles(dir, "*.json"))
             File.Delete(file);
+        var workbooks = Path.Combine(dir, "workbooks");
+        if (Directory.Exists(workbooks)) Directory.Delete(workbooks, recursive: true);
     }
 
     public async Task UpdateMetadataAsync(string agentName, string sessionId, string title, CancellationToken ct = default)
@@ -254,6 +258,15 @@ public sealed class MobileSessionStore(string basePath)
 
     private string GetDirectory(string agentName)
         => Path.Combine(basePath, "agents", agentName, "sessions");
+
+    internal string GetWorkbookDirectory(string agentName, string sessionId)
+    {
+        if (string.IsNullOrEmpty(agentName) || string.IsNullOrEmpty(sessionId) ||
+            agentName.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-' && c != '_') ||
+            sessionId.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-' && c != '_'))
+            throw new ArgumentException("Invalid agent or session identifier.");
+        return Path.Combine(GetDirectory(agentName), "workbooks", sessionId);
+    }
 
     private static string Slugify(string title)
     {

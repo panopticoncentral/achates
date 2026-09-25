@@ -77,8 +77,8 @@ func parseMessage(_ value: JSONValue, serverURL: URL?) -> ChatMessage? {
                     if let block = parseImageBlock(itemDict, serverURL: serverURL) {
                         blocks.append(block)
                     }
-                case "file":
-                    // PDF attachments persist as `file` content parts; show them
+                case "file", "workbook":
+                    // Original document bytes persist in content parts; show them
                     // as document chips instead of dropping them on reload.
                     if let b64 = itemDict["data"]?.stringValue,
                        let data = Data(base64Encoded: b64) {

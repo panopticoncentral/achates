@@ -177,6 +177,27 @@ final class ForegroundRecoveryTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(650))
         XCTAssertEqual(state.connectionStatus, .connecting)
     }
+
+    func testRejectedWorkbookSendPreservesServerReasonAndRetryAttachment() async {
+        let state = state()
+        let socket = SuspendedSocket()
+        server(socket, history: history())
+        socket.rejectSend = "Workbook exceeds the 8 MB limit."
+        let client = WebSocketClient(appState: state, makeSocket: { _ in socket })
+        state.client = client
+        defer { client.disconnect() }
+        state.connectToServer()
+        await eventually { state.canSubmitMessage }
+        let attachment = DraftAttachment(data: Data([0x50, 0x4b]), mime: DraftAttachment.workbookMime,
+                                         displayName: "sample.xlsx")
+        await state.sendMessage("Review workbook", attachments: [attachment])
+        XCTAssertEqual(state.failedSend?.reason, socket.rejectSend)
+        XCTAssertEqual(state.failedSend?.attachments, [attachment])
+        XCTAssertEqual(state.failedSend?.text, "Review workbook")
+        XCTAssertFalse(state.isStreaming)
+        XCTAssertNil(state.streamingMessageId)
+        XCTAssertEqual(state.messages.last?.role, .user)
+    }
 }
 
 /// Models a socket that can silently stop delivering frames while still held by the client.
@@ -187,6 +208,7 @@ private final class SuspendedSocket: WebSocketTransport {
     var cancelled = false
     var requests: [RequestFrame] = []
     var onRequest: ((RequestFrame) -> [String: JSONValue]?)?
+    var rejectSend: String?
     private var buffered: [URLSessionWebSocketTask.Message] = []
     private var receiver: CheckedContinuation<URLSessionWebSocketTask.Message, Error>?
 
@@ -209,8 +231,14 @@ private final class SuspendedSocket: WebSocketTransport {
         guard case .data(let data) = message else { return }
         let request = try JSONDecoder().decode(RequestFrame.self, from: data)
         requests.append(request)
-        guard let payload = onRequest?(request) else { return }
-        let response = ResponseFrame(id: request.id, ok: true, payload: payload)
+        let response: ResponseFrame
+        if request.method == "chat.send", let rejectSend {
+            response = ResponseFrame(id: request.id, ok: false,
+                                     error: ResponseError(code: "invalid_params", message: rejectSend))
+        } else {
+            guard let payload = onRequest?(request) else { return }
+            response = ResponseFrame(id: request.id, ok: true, payload: payload)
+        }
         let message = URLSessionWebSocketTask.Message.data(try JSONEncoder().encode(response))
         if let pending = receiver {
             receiver = nil

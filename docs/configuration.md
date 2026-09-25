@@ -317,6 +317,7 @@ To relocate existing data, stop the server, copy the contents of the old root in
 | `~/.achates/config.yaml` | Global configuration (provider, models, tools). |
 | `~/.achates/agents/{name}/AGENT.md` | Agent definition (markdown). |
 | `~/.achates/agents/{name}/sessions/{sessionId}.json` | Persisted conversation history. |
+| `~/.achates/agents/{name}/sessions/workbooks/{sessionId}/{sha256}.xlsx` | Original workbook uploads scoped to a conversation; retained through compaction/resubmission and deleted with the session. Adjacent `.json` files contain the filename and model preview. |
 | `~/.achates/memory.md` | Shared memory (universal user facts, all agents). |
 | `~/.achates/agents/{name}/memory.md` | Agent memory — core file (always loaded into context). |
 | `~/.achates/agents/{name}/working.md` | Agent memory — working tier (live threads, injected on every turn). |

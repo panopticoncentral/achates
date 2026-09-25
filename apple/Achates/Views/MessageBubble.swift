@@ -171,17 +171,17 @@ struct MessageBubble: View {
         }
     }
 
-    /// Chip for a non-image attachment (PDF, text file) on a user message —
+    /// Chip for a non-image attachment on a user message —
     /// mirrors the composer's document chip so the sent file stays visible.
     private func documentChip(name: String?, mime: String) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: mime == "application/pdf" ? "doc.richtext" : "doc.text")
+            Image(systemName: DraftAttachment.documentSymbol(for: mime))
                 .font(.title3)
             VStack(alignment: .leading, spacing: 1) {
                 Text(name ?? "Document")
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
-                Text(mime == "application/pdf" ? "PDF" : "Text")
+                Text(DraftAttachment.documentLabel(for: mime))
                     .font(.caption2)
                     .opacity(0.7)
             }

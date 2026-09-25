@@ -207,8 +207,8 @@ public sealed class InteractiveTurnTests
             _sent.Writer.TryWrite(doc.RootElement.Clone());
             return Task.CompletedTask;
         }
-        public void Request(string method, string id) => _requests.Writer.TryWrite(Encoding.UTF8.GetBytes(
-            JsonSerializer.Serialize(new { type = "req", id, method, @params = new { agent = "vivian", session_id = "session" } })));
+        public void Request(string method, string id, object? parameters = null) => _requests.Writer.TryWrite(Encoding.UTF8.GetBytes(
+            JsonSerializer.Serialize(new { type = "req", id, method, @params = parameters ?? new { agent = "vivian", session_id = "session" } })));
         public async Task<JsonElement> ReadUntil(Func<JsonElement, bool> predicate)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -288,6 +288,89 @@ public sealed class InteractiveTurnTests
             Assert.Contains(provider.ResumedContext.Messages, m => m is CompletionToolResultMessage);
             var original = Assert.Single(saved.Messages.OfType<UserMessage>());
             Assert.Equal("statement.pdf", Assert.IsType<CompletionFileContent>(Assert.Single(original.Content!)).FileName);
+        }
+        finally { directory.Delete(true); }
+    }
+
+    private sealed class WorkbookProvider(string workbookId) : IModelProvider
+    {
+        public string Id => "workbook-test";
+        public string EnvironmentKey => "UNUSED";
+        public string? Key { get; set; }
+        public HttpClient? HttpClient { get; set; }
+        public List<CompletionContext> Contexts { get; } = [];
+        public Task<IReadOnlyList<Model>> GetModelsAsync(ModelModalities? o = null, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<Model>>([]);
+        public CompletionEventStream GetCompletions(Model model, CompletionContext context,
+            CompletionOptions? options = null, CancellationToken ct = default) => CompletionEventStream.Create(stream =>
+        {
+            Contexts.Add(context);
+            var message = context.Messages.Last() is CompletionToolResultMessage
+                ? Message(model, new CompletionTextContent { Text = "Read the saved workbook value." })
+                : Message(model, new CompletionToolCall
+                {
+                    Id = Guid.NewGuid().ToString("N"), Name = "workbook",
+                    Arguments = new() { ["action"] = "read", ["workbook_id"] = workbookId, ["sheet"] = "Sales", ["range"] = "C2" },
+                }) with { CompletionStopReason = CompletionStopReason.ToolUse };
+            stream.Push(new CompletionDoneEvent { Reason = message.CompletionStopReason, CompletionMessage = message });
+            stream.End();
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task Workbook_upload_and_resubmit_work_with_text_only_model_and_restore_tool_after_restart()
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            var bytes = WorkbookTests.CreateWorkbook();
+            var attachment = WorkbookTests.Attachment(bytes);
+            var provider = new WorkbookProvider(attachment.WorkbookId);
+            var model = Model(provider) with { Input = ModelModalities.Text };
+            var store = new MobileSessionStore(directory.FullName);
+            var definition = new AgentDefinition
+            {
+                Model = model, SystemPrompt = "Test", Tools = [], CompletionOptions = null,
+                MemoryPath = Path.Combine(directory.FullName, "memory.md"),
+                WorkingMemoryPath = Path.Combine(directory.FullName, "working.md"),
+            };
+            await store.SaveAsync("vivian", new MobileSession { Id = "session", Title = "Workbook test" });
+            for (var run = 0; run < 2; run++)
+            {
+                var transport = new MobileTransport(new Dictionary<string, AgentDefinition> { ["vivian"] = definition }, store,
+                    new ReadStateStore(directory.FullName), new AgentStateCache(), NullLoggerFactory.Instance, new EmptyServices());
+                using var socket = new TestSocket();
+                using var connectionCts = new CancellationTokenSource();
+                var connection = transport.HandleConnectionAsync(socket, connectionCts.Token);
+                try
+                {
+                    if (run == 0)
+                        socket.Request("chat.send", "send", new { agent = "vivian", session_id = "session", text = "Read C2",
+                            attachments = new[] { new { mime = CompletionWorkbookContent.ExcelMime, data = attachment.Data, filename = attachment.FileName } } });
+                    else
+                        socket.Request("chat.resubmit", "send"); // preserve original upload after restart
+                    Assert.True((await socket.Response("send")).GetProperty("ok").GetBoolean());
+                    Assert.Equal("completed", (await socket.Done()).GetProperty("payload").GetProperty("status").GetString());
+                    var saved = (await store.LoadAsync("vivian", "session"))!;
+                    var original = Assert.Single(saved.Messages.OfType<UserMessage>());
+                    Assert.Equal(attachment.Data, Assert.IsType<CompletionWorkbookContent>(Assert.Single(original.Content!)).Data);
+                    var toolResult = Assert.Single(saved.Messages.OfType<ToolResultMessage>());
+                    Assert.Equal("workbook", toolResult.ToolName);
+                    Assert.Contains("99", Assert.IsType<CompletionTextContent>(Assert.Single(toolResult.Content)).Text);
+                    socket.Request("sessions.get", "history");
+                    var history = (await socket.Response("history")).GetProperty("payload").GetProperty("messages");
+                    var historyUser = history.EnumerateArray().Single(m => m.GetProperty("role").GetString() == "user");
+                    Assert.Equal(attachment.Data, historyUser.GetProperty("content")[0].GetProperty("data").GetString());
+                }
+                finally { connectionCts.Cancel(); await connection; }
+            }
+            Assert.All(provider.Contexts, context =>
+            {
+                Assert.Contains(context.Tools!, tool => tool.Name == "workbook");
+                Assert.DoesNotContain(context.Messages.OfType<CompletionUserContentMessage>().SelectMany(m => m.Content),
+                    block => block is CompletionWorkbookContent or CompletionFileContent);
+            });
         }
         finally { directory.Delete(true); }
     }

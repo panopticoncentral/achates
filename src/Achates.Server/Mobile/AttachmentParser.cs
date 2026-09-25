@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Achates.Providers.Completions.Content;
+using Achates.Server.Workbooks;
 
 namespace Achates.Server.Mobile;
 
@@ -82,8 +83,9 @@ internal static class AttachmentParser
             var mime = mimeProp.GetString()!;
             var isImage = AllowedImageMimes.Contains(mime);
             var isPdf = string.Equals(mime, PdfMime, StringComparison.OrdinalIgnoreCase);
+            var isWorkbook = string.Equals(mime, CompletionWorkbookContent.ExcelMime, StringComparison.OrdinalIgnoreCase);
             var isText = !isImage && !isPdf && IsTextMime(mime);
-            if (!isImage && !isPdf && !isText)
+            if (!isImage && !isPdf && !isText && !isWorkbook)
             {
                 error = $"Unsupported attachment mime type '{mime}'.";
                 return null;
@@ -101,7 +103,7 @@ internal static class AttachmentParser
                 return null;
             }
 
-            var maxBytes = isPdf ? MaxPdfBytes : isText ? MaxTextBytes : MaxImageBytes;
+            var maxBytes = isPdf ? MaxPdfBytes : isText ? MaxTextBytes : isWorkbook ? WorkbookReader.MaxBytes : MaxImageBytes;
             if (decoded.Length > maxBytes)
             {
                 var maxMb = maxBytes / (1024 * 1024);
@@ -116,7 +118,26 @@ internal static class AttachmentParser
                 fileName = fnProp.GetString();
             }
 
-            if (isPdf)
+            if (isWorkbook)
+            {
+                try
+                {
+                    using var reader = new WorkbookReader(decoded);
+                    var id = WorkbookStore.Id(decoded);
+                    var name = string.IsNullOrWhiteSpace(fileName) ? "workbook.xlsx" : Path.GetFileName(fileName);
+                    if (name.Length > 255) throw new InvalidDataException("Workbook filename is too long.");
+                    result.Add(new CompletionWorkbookContent
+                    {
+                        Data = data, FileName = name, WorkbookId = id, Preview = reader.Describe(id, name),
+                    });
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+                {
+                    error = $"Could not open Excel workbook. Use a valid, unencrypted .xlsx file. {ex.Message}";
+                    return null;
+                }
+            }
+            else if (isPdf)
             {
                 result.Add(new CompletionFileContent
                 {

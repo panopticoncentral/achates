@@ -13,6 +13,7 @@ using Achates.Providers.Models;
 using Achates.Server.Chat;
 using Achates.Server.Cron;
 using Achates.Server.Tools;
+using Achates.Server.Workbooks;
 
 namespace Achates.Server.Mobile;
 
@@ -931,6 +932,9 @@ public sealed class MobileTransport
             Content = attachments!.Count > 0 ? attachments : null,
         };
 
+        await new WorkbookStore(sessionStore.GetWorkbookDirectory(agentName, sessionId))
+            .SaveAsync(attachments!.OfType<CompletionWorkbookContent>(), ct);
+
         // If already running, queue as follow-up
         if (runtime.IsRunning)
         {
@@ -1037,6 +1041,9 @@ public sealed class MobileTransport
             return ResponseFrame.Failure(request.Id, "invalid_params", "Replacement message must have text or attachments.");
 
         // Persist the truncated history immediately so the rewind is durable even if the new run dies.
+        await new WorkbookStore(sessionStore.GetWorkbookDirectory(agentName, sessionId))
+            .SaveAsync(replacement.Content?.OfType<CompletionWorkbookContent>() ?? [], ct);
+
         // Uses WithMessages so SpeechEnabled and chat-origin pairing (Source/OriginSessionId/PeerAgentId)
         // survive the rewind — the previous hand-rolled construction silently dropped them.
         var existingSession = await sessionStore.LoadAsync(agentName, sessionId, ct);
@@ -2239,6 +2246,7 @@ public sealed class MobileTransport
         IReadOnlyList<AgentTool>? extraTools = null)
     {
         var tools = new List<AgentTool>(agentDef.Tools);
+        tools.Add(new WorkbookTool(new WorkbookStore(sessionStore.GetWorkbookDirectory(agentName, sessionId))));
 
         // Universal tools (memory + cost) — always available, never opt-in.
         // Cost ledgers are snapshotted per call so agent reloads / renames are reflected.

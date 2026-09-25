@@ -142,7 +142,7 @@ internal static class SessionCompactor
     {
         var chars = message switch
         {
-            UserMessage user => user.Text.Length,
+            UserMessage user => user.Text.Length + (user.Content?.Sum(ContentCharCount) ?? 0),
             AssistantMessage assistant => assistant.Content.Sum(ContentCharCount),
             ToolResultMessage tool => tool.Content.Sum(ContentCharCount),
             SummaryMessage summary => summary.Summary.Length,
@@ -164,6 +164,7 @@ internal static class SessionCompactor
     private static int ContentCharCount(CompletionUserContent content) =>
         content switch
         {
+            CompletionWorkbookContent workbook => workbook.Preview.Length,
             CompletionTextContent text => text.Text.Length,
             _ => 50,
         };
@@ -274,6 +275,8 @@ internal static class SessionCompactor
 
                 case UserMessage user:
                     parts.Add($"User: {user.Text}");
+                    foreach (var workbook in user.Content?.OfType<CompletionWorkbookContent>() ?? [])
+                        parts.Add($"[Workbook available via workbook tool: {workbook.FileName}, id={workbook.WorkbookId}]");
                     break;
 
                 case AssistantMessage assistant:

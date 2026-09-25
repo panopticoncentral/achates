@@ -10,4 +10,5 @@ namespace Achates.Providers.Completions.Content;
 [JsonDerivedType(typeof(CompletionImageContent), "image")]
 [JsonDerivedType(typeof(CompletionAudioInputContent), "audio_input")]
 [JsonDerivedType(typeof(CompletionFileContent), "file")]
+[JsonDerivedType(typeof(CompletionWorkbookContent), "workbook")]
 public abstract record CompletionUserContent : CompletionContent;

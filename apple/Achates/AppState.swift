@@ -788,11 +788,12 @@ final class AppState {
 
     // MARK: - Send message
 
-    /// A chat.send that never reached the server. Drives the retry banner in ChatView.
+    /// A failed chat.send, including server rejections. Drives the retry banner in ChatView.
     struct FailedSend: Equatable {
         let messageId: String
         let text: String
         let attachments: [DraftAttachment]
+        var reason: String = "Message failed to send."
     }
 
     var failedSend: FailedSend? {
@@ -826,12 +827,13 @@ final class AppState {
             guard let client else { throw FrameError.notConnected }
             try await client.sendMessage(trimmed, attachments: attachments)
         } catch {
-            // The send never reached the server: drop the placeholder (or it renders
-            // as a typing indicator forever), keep the user's bubble, offer retry.
+            // Preserve the transport or server rejection reason alongside the retry payload.
+            // Drop the empty assistant placeholder and keep the user's bubble.
             conversation.messages.removeAll { $0.id == assistantId }
             conversation.isStreaming = false
             conversation.streamingMessageId = nil
-            conversation.failedSend = FailedSend(messageId: userMessage.id, text: trimmed, attachments: attachments)
+            conversation.failedSend = FailedSend(messageId: userMessage.id, text: trimmed, attachments: attachments,
+                                                 reason: error.localizedDescription)
         }
     }
 

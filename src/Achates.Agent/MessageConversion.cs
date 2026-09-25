@@ -31,7 +31,9 @@ internal static class MessageConversion
                             blocks.Add(new CompletionTextContent { Text = user.Text });
                         }
 
-                        blocks.AddRange(user.Content);
+                        blocks.AddRange(user.Content.Select(block => block is CompletionWorkbookContent workbook
+                            ? new CompletionTextContent { Text = workbook.Preview }
+                            : block));
                         result.Add(new CompletionUserContentMessage
                         {
                             Content = blocks,

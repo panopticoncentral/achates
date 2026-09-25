@@ -2,6 +2,27 @@ import XCTest
 @testable import Achates
 
 final class MessagePresentationTests: XCTestCase {
+    func testWorkbookHistoryRestoresOriginalBytesAndExcelPresentation() {
+        let bytes = Data([0x50, 0x4b, 0x03, 0x04])
+        let message = parseMessage(.object([
+            "role": .string("user"), "text": .string("Review"),
+            "content": .array([.object([
+                "type": .string("workbook"), "data": .string(bytes.base64EncodedString()),
+                "file_name": .string("sample.xlsx"), "mime_type": .string(DraftAttachment.workbookMime),
+                "preview": .string("Model-only workbook preview")
+            ])])
+        ]), serverURL: nil)
+        XCTAssertEqual(message?.blocks.count, 2)
+        guard case .document(_, let data, let name, let mime) = message?.blocks.last else {
+            return XCTFail("Workbook must remain a document attachment after history reload")
+        }
+        XCTAssertEqual(data, bytes)
+        XCTAssertEqual(name, "sample.xlsx")
+        XCTAssertEqual(mime, DraftAttachment.workbookMime)
+        XCTAssertEqual(DraftAttachment.documentLabel(for: mime), "Excel workbook")
+        XCTAssertTrue(DraftAttachment.documentTypes.contains(DraftAttachment.workbookType))
+    }
+
     func testAlternatingThinkingAndToolsCollapseWithoutLosingDetails() {
         let blocks: [ContentBlock] = [
             .thinking(id: "thought-1", text: "First thought", collapsed: true),
