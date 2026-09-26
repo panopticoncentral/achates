@@ -83,10 +83,9 @@ struct MessageBubble: View {
                     .accessibilityLabel("Speech unavailable: \(err)")
                 }
 
-                // Only the actively-streaming message shows the indicator — a stale
-                // empty assistant message (failed/aborted turn reloaded from disk)
-                // must not animate "typing" forever.
-                if visibleBlocks.isEmpty && message.role == .assistant && isStreaming {
+                // Keep the indicator visible throughout the active turn, including
+                // tool calls and the gaps between them. Persisted messages stay idle.
+                if message.role == .assistant && isStreaming {
                     TypingIndicator()
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
@@ -95,7 +94,7 @@ struct MessageBubble: View {
                                 .fill(Color.messageSurface)
                         )
                         .accessibilityElement()
-                        .accessibilityLabel(agent.map { "\($0.displayName) is typing" } ?? "Assistant is typing")
+                        .accessibilityLabel(agent.map { "\($0.displayName) is working" } ?? "Assistant is working")
                 }
             }
 
