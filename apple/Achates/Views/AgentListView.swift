@@ -205,11 +205,8 @@ private struct AgentRow: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .subheadline) private var dotSize: CGFloat = 10
 
-    /// The most useful secondary line in the agent list: the last message
-    /// if we have one, otherwise the static agent description.
     private var subtitle: String {
-        if let last = agent.lastMessage, !last.isEmpty { return last }
-        return agent.description
+        agent.description
     }
 
     var body: some View {
