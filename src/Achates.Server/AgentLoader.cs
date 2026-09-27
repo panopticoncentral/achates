@@ -219,7 +219,7 @@ public static class AgentLoader
         if (sections.Count == 0)
             return null;
 
-        var config = new AgentConfig();
+        var config = new AgentConfig { DefinitionHash = Tools.MonetaAccess.ContentHash(content) };
 
         // Title from the H1 heading
         if (sections.TryGetValue("_title", out var title))

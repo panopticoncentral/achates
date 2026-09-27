@@ -20,7 +20,8 @@ namespace Achates.Server.Chat;
 /// </summary>
 public sealed class ChatRoomManager(
     MobileSessionStore sessionStore,
-    Func<string, AgentRuntimeFactory> runtimeFactoryFor)
+    Func<string, AgentRuntimeFactory> runtimeFactoryFor,
+    Func<string, string, bool>? canChat = null)
 {
     // Intentionally unpruned: one tiny SemaphoreSlim per (session,target) pair,
     // bounded by active sessions x agents; never disposed by design.
@@ -37,6 +38,10 @@ public sealed class ChatRoomManager(
         await gate.WaitAsync(ct);
         try
         {
+            // Check before loading history/core memory or emitting the initiating message.
+            if (canChat is not null && !canChat(initiatorAgentId, targetAgentId))
+                return "Error: this conversation requires owner-approved Moneta access for both agents.";
+
             var session = await sessionStore.LoadOrCreateChatSessionAsync(
                 targetAgentId, initiatorSessionId, initiatorAgentId, ct);
 

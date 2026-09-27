@@ -668,6 +668,11 @@ public sealed class GatewayService(
         {
             switch (toolName)
             {
+                case "moneta":
+                    var monetaAgentFile = Path.Combine(agentDir, "AGENT.md");
+                    tools.Add(new MonetaTool(agentName, monetaAgentFile,
+                        agentConfig.DefinitionHash ?? "", logger: logger));
+                    break;
                 case "session":
                     tools.Add(new SessionTool(model));
                     break;

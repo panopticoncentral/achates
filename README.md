@@ -373,6 +373,8 @@ Agents can speak their replies via a locally-hosted [Kokoro-FastAPI](https://git
 
 ## Tools Reference
 
+Moneta's read-only financial tool uses a locally installed `moneta-read` executable and owner-approved agent definitions. It supports accounts, transactions, actuals, budgets, assumptions, and formulas. See [Moneta setup](docs/moneta-setup.md) before enabling it; tool assignment alone does not grant access.
+
 | Tool | Description | Config required |
 |------|-------------|-----------------|
 | `session` | Current time, model info, timezone | None |
@@ -388,6 +390,7 @@ Agents can speak their replies via a locally-hosted [Kokoro-FastAPI](https://git
 | `cost` | Query usage costs (summary, recent, breakdown) | None |
 | `imessage` | Read iMessage conversations (macOS only) | Full Disk Access on published binary; `tools.graph` for contact names |
 | `health` | Query Withings health data (weight, BP, sleep, activity) | `tools.withings` client_id and client_secret |
+| `moneta` | Read Moneta accounts, transactions, spending, calculated budgets, assumptions, and formulas | `tools.moneta` executable, database, and approved agent fingerprints |
 | `chat` | Talk to other agents (discovery + ping-pong conversation) | At least 2 agents configured |
 | `cron` | Create and manage scheduled tasks | None |
 | `transcribe` | Transcribe an audio file via an audio-capable model | Optional `tools.transcribe.model` |

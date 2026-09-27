@@ -93,7 +93,7 @@ public sealed class MobileTransport
                     def.CostLedger,
                     universalTools,
                     def.MemoryPath);
-            });
+            }, (initiator, target) => MonetaAccess.CanChat(initiator, target, _agents));
     }
 
     public CronService? CronService { get; set; }

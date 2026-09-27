@@ -47,6 +47,8 @@ Config file format, `AGENT.md` capabilities keys, environment variables, and dat
 
 ## Data root
 
+Moneta financial access uses the local Swift `moneta-read` CLI from the Moneta repository. `MonetaTool` performs fixed JSON reads; `MonetaAccess` checks owner-managed definition fingerprints per request, and `MonetaProcess` bounds subprocess time/output. Setup and financial/privacy semantics are in `docs/moneta-setup.md`. Never use real financial data in committed tests; the optional cross-project integration creates an invented database.
+
 `ConfigLoader.DataDir` resolves `ACHATES_HOME` (default `~/.achates`). All configuration and persistent agent/shared data must use this root instead of constructing a home-directory path. `ACHATES_CONFIG_PATH` overrides only the YAML file location. Paths shown above use the default root.
 
 ## Apple client UI

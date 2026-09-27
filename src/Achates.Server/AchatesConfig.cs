@@ -66,6 +66,10 @@ public sealed class MemoryConfig
 
 public sealed class AgentConfig
 {
+    /// <summary>Fingerprint of the exact parsed definition, for owner-managed tool grants.</summary>
+    [YamlDotNet.Serialization.YamlIgnore]
+    public string? DefinitionHash { get; set; }
+
     /// <summary>
     /// Display name from the H1 title of AGENT.md. Set by <see cref="AgentLoader"/>.
     /// </summary>
@@ -162,6 +166,7 @@ public sealed class AgentConfig
 
 public sealed class ToolsConfig
 {
+    public MonetaConfig? Moneta { get; set; }
     public NotebookConfig? Notebook { get; set; }
     public LibraryConfig? Library { get; set; }
     public WebSearchConfig? WebSearch { get; set; }
@@ -172,6 +177,15 @@ public sealed class ToolsConfig
     public Dictionary<string, GraphConfig>? Graph { get; set; }
     public WithingsConfig? Withings { get; set; }
     public Achates.Server.Speech.SpeechConfig? Speech { get; set; }
+}
+
+/// <summary>Owner-managed grants, independent of agent-editable tool assignments.</summary>
+public sealed class MonetaConfig
+{
+    public string? Executable { get; set; }
+    public string? Database { get; set; }
+    /// <summary>Agent id to SHA-256 of the approved AGENT.md bytes. Empty denies all.</summary>
+    public Dictionary<string, string>? ApprovedAgents { get; set; }
 }
 
 public sealed class AvatarConfig

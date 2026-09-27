@@ -100,6 +100,18 @@ Shared tool configuration at the top level. Individual tools are enabled per-age
 |-----|------|---------|-------------|
 | `brave_api_key` | string | _(none)_ | Brave Search API key. Falls back to `BRAVE_API_KEY` env var. Required for `web_search`. |
 
+#### `tools.moneta`
+
+Owner-managed read-only financial access through Moneta's separately built Swift CLI. See [Moneta setup](moneta-setup.md).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `executable` | string | _(none)_ | Absolute local path to `moneta-read`; no shell or `~` expansion. |
+| `database` | string | _(none)_ | Absolute local SQLite path; no app preference or automatic discovery. |
+| `approved_agents` | map | _(deny all)_ | Exact agent directory IDs mapped to the SHA-256 of approved UTF-8 `AGENT.md` text (decoded BOM excluded). Must match the loaded definition and current file. |
+
+Settings are reread per request. Definition edits, renames, missing/malformed config, and removed grants fail closed. Tool assignment alone grants nothing. Chats involving a Moneta-configured agent require both agents to be approved before target history or memory loads; delegated runtimes cannot query Moneta. Returned data enters model context and may persist in sessions/memory. Grant changes need no restart; adding this implementation requires rebuilding/restarting the server.
+
 #### `tools.graph`
 
 Microsoft Graph API accounts for `mail` and `calendar` tools. Each entry is a named account. Multiple accounts supported.
@@ -208,7 +220,7 @@ Each capability is a `**Key:** value` line. List values (tools, allowed chats) u
 | `Provider` | string | _(global)_ | Override the provider for this agent. |
 | `Model` | string | _(`models.base`)_ | Base model id for this agent. Falls back to `models.base` in config.yaml. |
 | `Thinking Model` | string | _(`models.thinking`)_ | Thinking model id used by the `think` tool. Falls back to `models.thinking`. Only consulted when `think` is enabled. Setting it here (rather than relying on `models.thinking`) also makes nightly dreamtime consolidation run on this model instead of the agent's base model — consolidation is unattended and agentic, so a stronger model is worth it where the base model is weak. The global fallback deliberately does *not* trigger this. |
-| `Tools` | list | _(none)_ | Tool names to enable. Available: `session`, `notebook`, `library`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cron`, `imessage`, `transcribe`, `think`, `health`, `chat`, `location`, `camera`, `image`, `profile`, `agent_manager`. Note: `memory` and `cost` are always available to every agent; listing them here is accepted but ignored. |
+| `Tools` | list | _(none)_ | Tool names to enable. Available: `session`, `notebook`, `library`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `cron`, `imessage`, `transcribe`, `think`, `health`, `moneta`, `chat`, `location`, `camera`, `image`, `profile`, `agent_manager`. Note: `memory` and `cost` are always available to every agent; listing them here is accepted but ignored. |
 | `Allowed Chats` | list | _(all)_ | Allowlist of agent names this agent can chat with. Omit to allow all. Only relevant when `chat` is in tools. |
 | `Reasoning Effort` | string | `medium` | Reasoning effort level. Only sent if the model supports it. |
 | `Temperature` | number | _(none)_ | Sampling temperature. |

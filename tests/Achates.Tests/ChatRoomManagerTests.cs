@@ -14,6 +14,25 @@ namespace Achates.Tests;
 
 public sealed class ChatRoomManagerTests
 {
+    [Fact]
+    public async Task Authorization_runs_before_history_load_runtime_or_streaming()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"chat-auth-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var sink = new FakeSink();
+            var manager = new ChatRoomManager(new MobileSessionStore(dir),
+                _ => throw new InvalidOperationException("Must not start a runtime"), (_, _) => false);
+            var result = await manager.AskAsync("unapproved", "session", "finance", "request", "tool", sink, default);
+            Assert.Contains("owner-approved", result);
+            Assert.Empty(sink.Events);
+            Assert.Empty(sink.Buffered);
+            Assert.Empty(Directory.GetFiles(dir, "*", SearchOption.AllDirectories));
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
     private sealed class FakeSink : IChatSink
     {
         public List<string> Events { get; } = [];
