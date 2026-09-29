@@ -16,11 +16,12 @@ struct ComposerView: View {
     @State private var isPreparingDictation = false
     @State private var isLoadingPhotos = false
     @State private var recordingTask: Task<Void, Never>?
-    @FocusState private var isFocused: Bool
     #if os(macOS)
+    @FocusState private var isFocused: Bool
     @State private var composerHeight: CGFloat = 30
     #endif
     #if os(iOS)
+    @State private var isFocused = false
     @State private var showSourceDialog = false
     @State private var showCamera = false
     @State private var showLibrary = false
@@ -218,17 +219,13 @@ struct ComposerView: View {
             .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.quaternary, lineWidth: 1))
             .focused($isFocused)
             #else
-            TextField("Message", text: $draft.text, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...6)
+            IOSComposerTextView(text: $draft.text, isFocused: $isFocused, onSend: send)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
                         .fill(Color.messageSurface)
                 )
-                .focused($isFocused)
-                .onSubmit { send() }
             #endif
 
             trailingButton

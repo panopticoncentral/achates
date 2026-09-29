@@ -30,7 +30,8 @@ Open `apple/Achates.xcodeproj` and run the **Achates** scheme for iOS or macOS. 
 - Reply progress and the Stop button belong to each conversation. You can switch conversations during a reply and return while it streams or after it finishes. Returning from the background reconnects and reloads the open conversation so a reply completed while away replaces the stale progress state.
 - Search filters the conversations already loaded in the list; **Find in Conversation** searches the open transcript. On Mac, agent search is in the toolbar and conversation search is inside its column. Select the conversation header to edit its agent, or use the conversation actions menu to rename it.
 - Agent, memory, avatar, and default-model editors protect unsaved changes. Nested prompt/model choices remain provisional until the parent editor is saved.
-- On Mac, use **⌘N** for a new conversation, **⌘F** to find, **⌘S** to save an active editor, and **⌘,** for Settings. Return sends a message; Shift–Return inserts a newline. During a response, you can keep drafting; Escape stops generation.
+- With a hardware keyboard on iPad/iPhone or on Mac, Return sends a message; Shift–Return inserts a newline at the cursor. This includes an iPad using a keyboard shared from a Mac.
+- On Mac, use **⌘N** for a new conversation, **⌘F** to find, **⌘S** to save an active editor, and **⌘,** for Settings. During a response, you can keep drafting; Escape stops generation.
 - **Manage** on Mac and the **Manage** section in iOS Settings contain Memory, Scheduled Jobs, and Default Models. Costs includes daily spending and explicit rolling periods.
 - Open sent images and documents with native Quick Look. Attachment and dictation failures appear beside the composer.
 - Failed sends show the server or connection error beside **Retry Sending**, while preserving the message and attachments for retry.

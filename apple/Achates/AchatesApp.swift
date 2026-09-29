@@ -57,7 +57,15 @@ struct AchatesApp: App {
         if ProcessInfo.processInfo.arguments.contains("--ui-test-agent-navigation") {
             AgentNavigationFixtureView()
         } else {
+            #if os(iOS)
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-composer") {
+                ComposerKeyboardFixtureView()
+            } else {
+                liveContent
+            }
+            #else
             liveContent
+            #endif
         }
         #else
         liveContent
