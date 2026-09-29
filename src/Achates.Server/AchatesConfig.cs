@@ -91,6 +91,9 @@ public sealed class AgentConfig
     /// </summary>
     public string? ThinkingModel { get; set; }
 
+    /// <summary>Effort for the think tool. Null or "default" leaves effort to the model.</summary>
+    public string? ThinkingReasoningEffort { get; set; }
+
     /// <summary>
     /// Section headings found in AGENT.md that the loader does not understand. Almost always
     /// an <c>##</c> heading written inside the Prompt body, which silently truncates the

@@ -5,6 +5,7 @@ struct AgentEditModel: Equatable {
     var description: String
     var tools: [String]
     var reasoningEffort: String?
+    var thinkingReasoningEffort: String?
     var temperature: Double?
     var maxTokens: Int?
     var allowedChats: [String]
@@ -33,6 +34,7 @@ struct AgentEditModel: Equatable {
             description: payload["description"]?.stringValue ?? "",
             tools: payload["tools"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             reasoningEffort: payload["reasoning_effort"]?.stringValue,
+            thinkingReasoningEffort: payload["thinking_reasoning_effort"]?.stringValue,
             temperature: payload["temperature"]?.doubleValue,
             maxTokens: payload["max_tokens"]?.intValue,
             allowedChats: payload["allowed_chats"]?.arrayValue?.compactMap(\.stringValue) ?? [],
@@ -60,6 +62,7 @@ struct AgentEditModel: Equatable {
             // (empty string == revert to global default).
             "model": .string(model ?? ""),
             "thinking_model": .string(thinkingModel ?? ""),
+            "thinking_reasoning_effort": .string(thinkingReasoningEffort ?? "default"),
             // Always send voice so empty string clears it (makes agent voiceless).
             "voice": .string(voice ?? ""),
             // Always send speech_rate so 0 reverts to Kokoro's default. The

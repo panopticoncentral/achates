@@ -1176,7 +1176,8 @@ public sealed class MobileTransport
             display_name = config.Title ?? agentName,
             description = config.Description ?? "",
             tools = config.Tools ?? [],
-            reasoning_effort = config.Completion?.ReasoningEffort,
+            reasoning_effort = ReasoningEffortSettings.Regular(config.Completion),
+            thinking_reasoning_effort = config.ThinkingReasoningEffort ?? "default",
             temperature = config.Completion?.Temperature,
             max_tokens = config.Completion?.MaxTokens,
             allowed_chats = config.AllowChat ?? [],
@@ -1283,6 +1284,7 @@ public sealed class MobileTransport
             Title = existing?.Title,
             Provider = existing?.Provider,
             MemoryBudgetTokens = existing?.MemoryBudgetTokens,
+            ThinkingReasoningEffort = existing?.ThinkingReasoningEffort,
         };
 
         if (p.TryGetProperty("tools", out var toolsEl) && toolsEl.ValueKind == JsonValueKind.Array)
@@ -1302,6 +1304,17 @@ public sealed class MobileTransport
             config.Completion ??= new CompletionConfig();
             config.Completion.ReasoningEffort = reProp.GetString();
         }
+        else if (existing is not null)
+        {
+            // Older clients omit effort when it is unset. Preserve its effective
+            // value even if adding/removing other completion fields on this save.
+            config.Completion ??= new CompletionConfig();
+            config.Completion.ReasoningEffort = ReasoningEffortSettings.Regular(existing.Completion);
+        }
+
+        if (p.TryGetProperty("thinking_reasoning_effort", out var treProp)
+            && treProp.ValueKind == JsonValueKind.String)
+            config.ThinkingReasoningEffort = treProp.GetString();
 
         if (p.TryGetProperty("temperature", out var tempProp) && tempProp.ValueKind == JsonValueKind.Number)
         {

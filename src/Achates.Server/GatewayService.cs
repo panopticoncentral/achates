@@ -747,7 +747,8 @@ public sealed class GatewayService(
                 case "think":
                     if (thinkingModel is null)
                     { logger.LogWarning("Agent '{Agent}': think tool skipped — no thinking model configured", agentName); break; }
-                    tools.Add(new ThinkTool(thinkingModel, agentName, costLedger));
+                    tools.Add(new ThinkTool(thinkingModel, agentName, costLedger,
+                        agentConfig.ThinkingReasoningEffort));
                     break;
                 case "location":
                     tools.Add(new LocationTool(_deviceBridge));
@@ -804,7 +805,7 @@ public sealed class GatewayService(
             loggerFactory.CreateLogger<WithingsClient>());
     }
 
-    private static CompletionOptions? BuildCompletionOptions(CompletionConfig? completion, Model model)
+    internal static CompletionOptions? BuildCompletionOptions(CompletionConfig? completion, Model model)
     {
         if (completion is null)
             return null;
@@ -813,9 +814,7 @@ public sealed class GatewayService(
         {
             Temperature = completion.Temperature,
             MaxTokens = completion.MaxTokens,
-            ReasoningEffort = model.Parameters.HasFlag(ModelParameters.ReasoningEffort)
-                ? completion.ReasoningEffort ?? "medium"
-                : null,
+            ReasoningEffort = ReasoningEffortSettings.Resolve(ReasoningEffortSettings.Regular(completion), model),
         };
     }
 

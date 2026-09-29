@@ -61,6 +61,24 @@ public sealed class AgentManagerToolTests : IDisposable
     }
 
     [Fact]
+    public async Task Modify_UpdatesAndResetsThinkingEffortIndependently()
+    {
+        await SeedAgentAsync("Test Bot", "Test", "Test");
+        var tool = CreateTool();
+        await tool.ExecuteAsync("set", Args(("action", "modify"), ("agent", "test-bot"),
+            ("reasoning_effort", "low"), ("thinking_reasoning_effort", "high")));
+        var read = Text(await tool.ExecuteAsync("read", Args(("action", "read"), ("agent", "test-bot"))));
+        Assert.Contains("**Reasoning effort:** low", read);
+        Assert.Contains("**Thinking reasoning effort:** high", read);
+        await tool.ExecuteAsync("reset", Args(("action", "modify"), ("agent", "test-bot"),
+            ("thinking_reasoning_effort", "default")));
+        var config = Achates.Server.AgentLoader.Parse(await File.ReadAllTextAsync(
+            Path.Combine(_agentsDir, "test-bot", "AGENT.md")))!;
+        Assert.Equal("low", config.Completion?.ReasoningEffort);
+        Assert.Equal("default", config.ThinkingReasoningEffort);
+    }
+
+    [Fact]
     public async Task Create_WritesAgentFileAndCallsLoad()
     {
         var tool = CreateTool();

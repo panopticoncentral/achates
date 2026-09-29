@@ -30,7 +30,8 @@ internal sealed class AgentManagerTool(
             ["model"] = StringSchema("Base model id. Optional ('modify' only)."),
             ["thinking_model"] = StringSchema("Thinking model id. Optional ('modify' only)."),
             ["provider"] = StringSchema("Provider name. Optional ('modify' only)."),
-            ["reasoning_effort"] = StringSchema("Reasoning effort, e.g. 'low'/'medium'/'high'. Optional ('modify' only)."),
+            ["reasoning_effort"] = StringSchema("Regular model reasoning effort: 'default' (model default), 'low', 'medium', or 'high'. Optional ('modify' only)."),
+            ["thinking_reasoning_effort"] = StringSchema("Think tool reasoning effort: 'default' (model default), 'low', 'medium', or 'high'. Optional ('modify' only)."),
             ["temperature"] = NumberSchema("Sampling temperature. Optional ('modify' only)."),
             ["max_tokens"] = NumberSchema("Max output tokens. Optional ('modify' only)."),
             ["allowed_chats"] = ArraySchema(StringSchema("Agent id."), "Agents this agent may chat with. Optional ('modify' only); replaces the whole list."),
@@ -123,7 +124,8 @@ internal sealed class AgentManagerTool(
         sb.AppendLine($"**Thinking model:** {config.ThinkingModel ?? "(default)"}");
         sb.AppendLine($"**Tools:** {(config.Tools is { Count: > 0 } ? string.Join(", ", config.Tools) : "(none)")}");
         sb.AppendLine($"**Allowed chats:** {(config.AllowChat is { Count: > 0 } ? string.Join(", ", config.AllowChat) : "(all)")}");
-        sb.AppendLine($"**Reasoning effort:** {config.Completion?.ReasoningEffort ?? "(default)"}");
+        sb.AppendLine($"**Reasoning effort:** {ReasoningEffortSettings.Regular(config.Completion)}");
+        sb.AppendLine($"**Thinking reasoning effort:** {config.ThinkingReasoningEffort ?? "default"}");
         sb.AppendLine($"**Temperature:** {config.Completion?.Temperature?.ToString(CultureInfo.InvariantCulture) ?? "(default)"}");
         sb.AppendLine($"**Max tokens:** {config.Completion?.MaxTokens?.ToString(CultureInfo.InvariantCulture) ?? "(default)"}");
         sb.AppendLine($"**Dreamtime:** {config.Dreamtime?.ToString("h:mm tt", CultureInfo.InvariantCulture) ?? "(off)"}");
@@ -173,6 +175,7 @@ internal sealed class AgentManagerTool(
         var newThinkingModel = GetString(arguments, "thinking_model");
         var newProvider = GetString(arguments, "provider");
         var newReasoning = GetString(arguments, "reasoning_effort");
+        var newThinkingReasoning = GetString(arguments, "thinking_reasoning_effort");
         var newTemperature = GetDouble(arguments, "temperature");
         var newMaxTokens = GetInt(arguments, "max_tokens");
         var newAllowedChats = GetStringList(arguments, "allowed_chats");
@@ -188,7 +191,7 @@ internal sealed class AgentManagerTool(
 
         var anyField = newName is not null || newDescription is not null || newPrompt is not null
             || newTools is not null || newModel is not null || newThinkingModel is not null
-            || newProvider is not null || newReasoning is not null || newTemperature is not null
+            || newProvider is not null || newReasoning is not null || newThinkingReasoning is not null || newTemperature is not null
             || newMaxTokens is not null || newAllowedChats is not null || hasDreamtime
             || hasSharedMemory || hasVoice || hasSpeechRate
             || newAvatar is not null;
@@ -202,6 +205,7 @@ internal sealed class AgentManagerTool(
         if (newTools is not null) { config.Tools = newTools; changed.Add("tools"); }
         if (newModel is not null) { config.Model = newModel; changed.Add("model"); }
         if (newThinkingModel is not null) { config.ThinkingModel = newThinkingModel; changed.Add("thinking_model"); }
+        if (newThinkingReasoning is not null) { config.ThinkingReasoningEffort = newThinkingReasoning; changed.Add("thinking_reasoning_effort"); }
         if (newProvider is not null) { config.Provider = newProvider; changed.Add("provider"); }
         if (newAllowedChats is not null) { config.AllowChat = newAllowedChats; changed.Add("allowed_chats"); }
 

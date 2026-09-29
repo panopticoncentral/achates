@@ -78,6 +78,9 @@ public static class AgentLoader
         if (!string.IsNullOrWhiteSpace(config.ThinkingModel))
             sb.AppendLine($"**Thinking Model:** {config.ThinkingModel}");
 
+        if (!string.IsNullOrWhiteSpace(config.ThinkingReasoningEffort))
+            sb.AppendLine($"**Thinking Reasoning Effort:** {config.ThinkingReasoningEffort}");
+
         if (!string.IsNullOrWhiteSpace(config.Provider))
             sb.AppendLine($"**Provider:** {config.Provider}");
 
@@ -360,6 +363,9 @@ public static class AgentLoader
                 break;
             case "thinking model":
                 config.ThinkingModel = string.IsNullOrWhiteSpace(value) ? null : value;
+                break;
+            case "thinking reasoning effort":
+                config.ThinkingReasoningEffort = value;
                 break;
             case "tools":
                 config.Tools = ResolveList();

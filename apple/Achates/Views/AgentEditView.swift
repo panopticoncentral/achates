@@ -172,6 +172,7 @@ struct AgentEditView: View {
                 } label: {
                     modelRow(label: "Model", current: config?.model, fallback: config?.defaultModel)
                 }
+                reasoningEffortPicker("Regular Effort", keyPath: \.reasoningEffort, fallback: "medium")
 
                 if config?.tools.contains("think") == true {
                     NavigationLink {
@@ -183,9 +184,9 @@ struct AgentEditView: View {
                     } label: {
                         modelRow(label: "Thinking Model", current: config?.thinkingModel, fallback: config?.defaultThinkingModel)
                     }
+                    reasoningEffortPicker("Thinking Effort", keyPath: \.thinkingReasoningEffort, fallback: "default")
                 }
 
-                reasoningEffortPicker
                 if let numberError { Text(numberError).font(.callout).foregroundStyle(.red) }
 
                 HStack {
@@ -343,8 +344,11 @@ struct AgentEditView: View {
     }
 
     @ViewBuilder
-    private var reasoningEffortPicker: some View {
-        Picker("Reasoning", selection: reasoningBinding) {
+    private func reasoningEffortPicker(
+        _ title: String, keyPath: WritableKeyPath<AgentEditModel, String?>, fallback: String
+    ) -> some View {
+        Picker(title, selection: reasoningBinding(keyPath, fallback: fallback)) {
+            Text("Model default").tag("default")
             Text("Low").tag("low")
             Text("Medium").tag("medium")
             Text("High").tag("high")
@@ -352,12 +356,14 @@ struct AgentEditView: View {
         .pickerStyle(.menu)
     }
 
-    private var reasoningBinding: Binding<String> {
+    private func reasoningBinding(
+        _ keyPath: WritableKeyPath<AgentEditModel, String?>, fallback: String
+    ) -> Binding<String> {
         Binding(
-            get: { config?.reasoningEffort ?? "medium" },
+            get: { config?[keyPath: keyPath] ?? fallback },
             set: { newValue in
                 guard var c = config else { return }
-                c.reasoningEffort = newValue
+                c[keyPath: keyPath] = newValue
                 config = c
             }
         )

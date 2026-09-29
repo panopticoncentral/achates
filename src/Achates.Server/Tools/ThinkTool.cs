@@ -15,7 +15,8 @@ namespace Achates.Server.Tools;
 internal sealed class ThinkTool(
     Model model,
     string agentName,
-    CostLedger? costLedger = null) : AgentTool
+    CostLedger? costLedger = null,
+    string? reasoningEffort = null) : AgentTool
 {
     private static readonly JsonElement _schema = ObjectSchema(
         new Dictionary<string, JsonElement>
@@ -55,7 +56,9 @@ internal sealed class ThinkTool(
 
         try
         {
-            var stream = model.Provider.GetCompletions(model, context, null, cancellationToken);
+            var effort = ReasoningEffortSettings.Resolve(reasoningEffort, model);
+            var options = effort is null ? null : new CompletionOptions { ReasoningEffort = effort };
+            var stream = model.Provider.GetCompletions(model, context, options, cancellationToken);
 
             await foreach (var _ in stream.WithCancellation(cancellationToken)) { }
 
