@@ -691,7 +691,7 @@ public sealed class GatewayService(
                 case "mail":
                     if (graphClients.Count == 0)
                     { logger.LogWarning("Agent '{Agent}': mail tool skipped — no graph configuration", agentName); break; }
-                    tools.Add(new MailTool(graphClients));
+                    tools.Add(new MailTool(graphClients, model.Input));
                     break;
                 case "notes":
                     tools.Add(new NotesTool());

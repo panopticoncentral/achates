@@ -2258,8 +2258,9 @@ public sealed class MobileTransport
         IReadOnlyList<AgentMessage>? messages = null,
         IReadOnlyList<AgentTool>? extraTools = null)
     {
-        var tools = new List<AgentTool>(agentDef.Tools);
-        tools.Add(new WorkbookTool(new WorkbookStore(sessionStore.GetWorkbookDirectory(agentName, sessionId))));
+        var workbookStore = new WorkbookStore(sessionStore.GetWorkbookDirectory(agentName, sessionId));
+        var tools = agentDef.Tools.Select(tool => tool is MailTool mail ? mail.ForSession(workbookStore) : tool).ToList();
+        tools.Add(new WorkbookTool(workbookStore));
 
         // Universal tools (memory + cost) — always available, never opt-in.
         // Cost ledgers are snapshotted per call so agent reloads / renames are reflected.

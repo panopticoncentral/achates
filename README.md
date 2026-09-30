@@ -46,6 +46,8 @@ See [UI implementation notes](docs/ui-implementation-2026-09-17.md) for validati
 
 Achates can read your Outlook email and calendar via the Microsoft Graph API. There are two setup paths depending on your account type.
 
+Reading a message also lists its attachments, including inline images. The agent can use `mail` with `action=attachments` to list them separately, then `action=read_attachment` with the message and attachment IDs (and the same account) to load a selected file. PDFs require a model with file input; images require image input. Text files work with any model. In interactive conversations, Excel `.xlsx` files are archived with the session and available through the `workbook` tool for bounded sheet/range reads. Limits match uploads: PDF 32 MB, images and Excel 8 MB, text 1 MB. Other formats, cloud reference attachments, and attached Outlook items return an explanation instead of being loaded. The existing `Mail.Read` permission covers attachment access.
+
 ### Option A: Personal Microsoft Account (Outlook.com, Hotmail, Live)
 
 This uses **device code flow** — you sign in once in a browser, and Achates caches the token for future use. Only read-only access is requested.
@@ -386,7 +388,7 @@ Moneta's read-only financial tool uses a locally installed `moneta-read` executa
 | `notebook` | Read/write markdown files in a configured folder | `tools.notebook.root` path |
 | `library` | Read-only reference documents (.md, text, PDF) in a configured folder | `tools.library.root` path |
 | `notes` | Access Apple Notes (macOS only) — `folders`, `list`, `read`, `create` | Notes automation permission on first use |
-| `mail` | Read Outlook email | `tools.graph` account(s) |
+| `mail` | Read Outlook email and attachments | `tools.graph` account(s) |
 | `calendar` | View Outlook calendar and create events | `tools.graph` account(s) |
 | `web_search` | Search the web via Brave Search | `BRAVE_API_KEY` or `tools.web_search.brave_api_key` |
 | `web_fetch` | Fetch and extract web page content | None |

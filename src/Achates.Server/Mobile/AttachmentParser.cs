@@ -29,6 +29,12 @@ internal static class AttachmentParser
         string.Equals(mime, "application/json", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mime, "application/xml", StringComparison.OrdinalIgnoreCase);
 
+    internal static int? GetMaxBytes(string mime) =>
+        AllowedImageMimes.Contains(mime) ? MaxImageBytes :
+        string.Equals(mime, PdfMime, StringComparison.OrdinalIgnoreCase) ? MaxPdfBytes :
+        string.Equals(mime, CompletionWorkbookContent.ExcelMime, StringComparison.OrdinalIgnoreCase) ? WorkbookReader.MaxBytes :
+        IsTextMime(mime) ? MaxTextBytes : null;
+
     /// <summary>
     /// Parses the optional <c>attachments</c> array from a chat.send params object.
     /// Returns a (possibly empty) list of content blocks on success, or null with
@@ -103,7 +109,7 @@ internal static class AttachmentParser
                 return null;
             }
 
-            var maxBytes = isPdf ? MaxPdfBytes : isText ? MaxTextBytes : isWorkbook ? WorkbookReader.MaxBytes : MaxImageBytes;
+            var maxBytes = GetMaxBytes(mime)!.Value;
             if (decoded.Length > maxBytes)
             {
                 var maxMb = maxBytes / (1024 * 1024);

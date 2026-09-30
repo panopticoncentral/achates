@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Achates.Server.Graph;
 
 /// <summary>
@@ -6,6 +8,19 @@ namespace Achates.Server.Graph;
 internal sealed class GraphCollection<T>
 {
     public List<T> Value { get; set; } = [];
+    [JsonPropertyName("@odata.nextLink")]
+    public string? NextLink { get; set; }
+}
+
+internal sealed class GraphAttachment
+{
+    [JsonPropertyName("@odata.type")]
+    public string? Type { get; set; }
+    public string? Id { get; set; }
+    public string? Name { get; set; }
+    public string? ContentType { get; set; }
+    public long Size { get; set; }
+    public bool IsInline { get; set; }
 }
 
 internal sealed class GraphMessage
@@ -16,6 +31,7 @@ internal sealed class GraphMessage
     public List<GraphRecipient>? ToRecipients { get; set; }
     public DateTimeOffset? ReceivedDateTime { get; set; }
     public bool IsRead { get; set; }
+    public bool HasAttachments { get; set; }
     public string? BodyPreview { get; set; }
     public GraphBody? Body { get; set; }
 }

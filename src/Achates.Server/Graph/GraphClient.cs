@@ -33,6 +33,15 @@ public sealed class GraphClient
     private readonly string? _userEmail;
     private readonly ILogger _logger;
     private string? _resolvedEmail;
+    private readonly Func<CancellationToken, Task<string>>? _tokenProvider;
+
+    internal GraphClient(HttpClient httpClient, Func<CancellationToken, Task<string>> tokenProvider)
+    {
+        _httpClient = httpClient;
+        _tokenProvider = tokenProvider;
+        _basePath = "https://graph.microsoft.com/v1.0/me";
+        _logger = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+    }
 
     public GraphClient(GraphConfig config, HttpClient httpClient, ILogger logger, string? tokenCachePath = null)
     {
@@ -125,6 +134,30 @@ public sealed class GraphClient
             cancellationToken) ?? throw new InvalidOperationException("Empty Graph API response.");
     }
 
+    /// <summary>Download raw attachment bytes without buffering an unbounded response.</summary>
+    internal async Task<byte[]> GetBytesAsync(string path, int maxBytes, CancellationToken cancellationToken)
+    {
+        var token = await AcquireTokenAsync(cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{_basePath}/{path}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        if (response.Content.Headers.ContentLength > maxBytes)
+            throw new InvalidDataException($"Attachment too large (max {maxBytes / (1024 * 1024)} MB).");
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var output = new MemoryStream();
+        var buffer = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(buffer, cancellationToken)) > 0)
+        {
+            if (output.Length + read > maxBytes)
+                throw new InvalidDataException($"Attachment too large (max {maxBytes / (1024 * 1024)} MB).");
+            output.Write(buffer, 0, read);
+        }
+        return output.ToArray();
+    }
+
     /// <summary>
     /// POST to a Graph API resource with a JSON body.
     /// </summary>
@@ -155,6 +188,9 @@ public sealed class GraphClient
 
     private async Task<string> AcquireTokenAsync(CancellationToken cancellationToken)
     {
+        if (_tokenProvider is not null)
+            return await _tokenProvider(cancellationToken);
+
         if (_confidentialApp is not null)
         {
             var result = await _confidentialApp.AcquireTokenForClient(ClientCredentialScopes)
