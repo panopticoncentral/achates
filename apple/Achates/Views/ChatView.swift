@@ -120,6 +120,9 @@ struct ChatView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             }
+            #if os(macOS)
+            .background(Color.conversationCanvas)
+            #endif
             .scrollPosition($scrollPos)
             .defaultScrollAnchor(.bottom, for: .sizeChanges)
             .onChange(of: appState.messages.count) { _, _ in

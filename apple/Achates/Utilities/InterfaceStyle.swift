@@ -1,8 +1,38 @@
 import SwiftUI
 
 extension Color {
+    static var conversationCanvas: Color {
+        #if os(macOS)
+        Color(nsColor: .textBackgroundColor)
+        #else
+        Color(uiColor: .systemBackground)
+        #endif
+    }
+
+    static var conversationInputSurface: Color {
+        #if os(macOS)
+        Color.primary.opacity(0.04)
+        #else
+        .messageSurface
+        #endif
+    }
+
+    static var conversationReplySurface: Color {
+        #if os(macOS)
+        .clear
+        #else
+        .messageSurface
+        #endif
+    }
+
     /// Keep content readable for every system accent, including yellow and gray.
-    static var outgoingMessageSurface: Color { .accentColor.opacity(0.16) }
+    static var outgoingMessageSurface: Color {
+        #if os(macOS)
+        Color.primary.opacity(0.06)
+        #else
+        .accentColor.opacity(0.16)
+        #endif
+    }
 
     static var messageSurface: Color {
         #if os(macOS)
@@ -23,7 +53,13 @@ extension Color {
 
 enum InterfaceMetrics {
     static let readingWidth: CGFloat = 740
-    static let messageContentInset: CGFloat = 12
+    static var messageContentInset: CGFloat {
+        #if os(macOS)
+        16
+        #else
+        12
+        #endif
+    }
     static var actionSize: CGFloat {
         #if os(iOS)
         44

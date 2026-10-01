@@ -72,7 +72,11 @@ struct ComposerView: View {
         }
         .frame(maxWidth: InterfaceMetrics.readingWidth)
         .frame(maxWidth: .infinity)
+        #if os(macOS)
+        .background(Color.conversationCanvas)
+        #else
         .background(.bar)
+        #endif
         // Finder drags are the most natural way to attach on the Mac (and work
         // on iPad too). Images go through the normal resize path; PDFs/text
         // through the document path.
@@ -214,7 +218,7 @@ struct ComposerView: View {
             .padding(.vertical, 2)
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color.messageSurface)
+                    .fill(Color.conversationInputSurface)
             )
             .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.quaternary, lineWidth: 1))
             .focused($isFocused)
@@ -614,7 +618,7 @@ struct MacComposerTextView: NSViewRepresentable {
         textView.allowsUndo = true
         textView.isRichText = false
         textView.isEditable = true
-        textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textView.font = .systemFont(ofSize: ConversationTypography.macBodySize, weight: .regular)
         textView.drawsBackground = false
         textView.backgroundColor = .clear
         textView.textColor = .labelColor

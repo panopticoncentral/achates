@@ -8,7 +8,12 @@ enum BubblePosition {
 
     var topPadding: CGFloat {
         switch self {
-        case .alone, .first: return 8
+        case .alone, .first:
+            #if os(macOS)
+            return 16
+            #else
+            return 8
+            #endif
         case .middle, .last: return 2
         }
     }
@@ -30,7 +35,7 @@ struct MessageBubble: View {
     @State private var imageRetry = 0
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 6) {
+        HStack(alignment: messageAlignment, spacing: 6) {
             if message.role == .assistant {
                 if showAvatar, let agent {
                     AgentAvatar(agent: agent, size: 28)
@@ -117,7 +122,19 @@ struct MessageBubble: View {
     }
 
     private var showAvatar: Bool {
+        #if os(macOS)
+        position == .first || position == .alone
+        #else
         position == .last || position == .alone
+        #endif
+    }
+
+    private var messageAlignment: VerticalAlignment {
+        #if os(macOS)
+        .top
+        #else
+        .bottom
+        #endif
     }
 
     private var visibleBlocks: [ContentBlock] {
@@ -228,7 +245,7 @@ struct MessageBubble: View {
                 .conversationMarkdown()
         }
         .padding(.horizontal, InterfaceMetrics.messageContentInset)
-        .padding(.vertical, 8)
+        .padding(.vertical, textVerticalInset)
         .background(bubbleShape.fill(bubbleColor))
         .textSelection(.enabled)
         .contextMenu {
@@ -312,7 +329,15 @@ struct MessageBubble: View {
     }
 
     private var bubbleColor: Color {
-        message.role == .user ? .outgoingMessageSurface : .messageSurface
+        message.role == .user ? .outgoingMessageSurface : .conversationReplySurface
+    }
+
+    private var textVerticalInset: CGFloat {
+        #if os(macOS)
+        12
+        #else
+        8
+        #endif
     }
 
     /// Messenger-style rounded rect with variable corner radii for grouped bubbles.

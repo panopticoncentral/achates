@@ -28,6 +28,12 @@ final class MacUIAppearanceSmokeTests: XCTestCase {
                 NavigationStack { ChatView(agent: agent) }.environment(state)
                     .background(dark ? Color.black : Color.white)
                     .preferredColorScheme(dark ? .dark : .light))
+            // Exercise wrapping, inline styles and the composer at a narrow width.
+            state.messages.append(ChatMessage(role: .assistant, blocks: [.text(id: "detail", "Leave some space for the unexpected. A plan works better when it gives you room to pause, move things around, and pick up tomorrow where you left off.\n\nTry a `focus` block, then **take a break** before choosing the next task.")]))
+            state.draft(for: agent.id, sessionID: "preview").text = "Let's start with Monday.\nKeep the afternoon open."
+            try await capture("mac-conversation-narrow-\(dark ? "dark" : "light")", size: NSSize(width: 700, height: 700), view:
+                NavigationStack { ChatView(agent: agent) }.environment(state)
+                    .preferredColorScheme(dark ? .dark : .light))
         }
         let state = AppState()
         state.serverURL = nil

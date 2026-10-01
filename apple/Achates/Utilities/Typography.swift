@@ -1,5 +1,10 @@
 import SwiftUI
 
+enum ConversationTypography {
+    // Reading text needs more room than macOS's 13pt control default.
+    static let macBodySize: CGFloat = 15
+}
+
 extension Font {
     // List-row typography. iOS uses Dynamic Type text styles so rows scale with
     // the user's text-size setting. macOS's semantic styles run ~4pt smaller
