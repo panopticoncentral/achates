@@ -280,6 +280,14 @@ agents:
 - Uses Readability extraction for HTML, returns plain text
 - Params: `url` (required), `max_chars` (default 20,000, max 50,000)
 
+**feed_fetch** — Fetch RSS 2.0 or Atom 1.0 as structured JSON
+- Enable `feed_fetch` in the agent's `Tools` capability or select **Feed Fetch** in the agent editor. No API key or additional configuration is needed. Available to both interactive conversations and scheduled jobs for that agent.
+- Params: `url` (required), `limit` (1–50, default 20), `since` (optional ISO 8601 publication timestamp with timezone, e.g. `2026-10-01T00:00:00Z`), `include_content` (default false).
+- Returns feed title, website/feed URLs, description, fetch timestamp, and entries with IDs, titles, article URLs, publication/update dates, authors, categories, and plain-text summaries. `include_content` adds text embedded in the feed; it never downloads linked articles. Use `web_fetch` for those.
+- Preserves feed order. `since` is strictly after the supplied publication time; missing or invalid dates are `null`, and undated entries excluded by the filter are counted in `undated_items_skipped`. A feed is its current window, not a complete archive; there is no subscription or seen-item state.
+- Downloads are limited to 2 MiB and 30 seconds; JSON output is capped at 64,000 characters. Summaries are capped at 2,000 characters and embedded content at 8,000 per entry, with smaller bounds for metadata. `text_truncated` flags shortened fields/lists; `items_truncated` flags omitted matching entries. Counts report total, matching, and returned entries. Errors return an `error` object with `code` and `message`.
+- Feed content is labeled untrusted reference data. XML DTDs/external entities are disabled; only HTTP(S) article links are returned. Supply a direct feed URL; feed discovery from a website is not supported.
+
 ## iMessage Setup (macOS only)
 
 Achates can read your iMessage conversations directly from the local Messages database. This is read-only — it cannot send messages.
@@ -392,6 +400,7 @@ Moneta's read-only financial tool uses a locally installed `moneta-read` executa
 | `calendar` | View Outlook calendar and create events | `tools.graph` account(s) |
 | `web_search` | Search the web via Brave Search | `BRAVE_API_KEY` or `tools.web_search.brave_api_key` |
 | `web_fetch` | Fetch and extract web page content | None |
+| `feed_fetch` | Read structured RSS/Atom feed entries | None |
 | `cost` | Query usage costs (summary, recent, breakdown) | None |
 | `imessage` | Read iMessage conversations (macOS only) | Full Disk Access on published binary; `tools.graph` for contact names |
 | `health` | Query Withings health data (weight, BP, sleep, activity) | `tools.withings` client_id and client_secret |

@@ -728,6 +728,9 @@ public sealed class GatewayService(
                 case "web_fetch":
                     tools.Add(new WebFetchTool(httpClientFactory.CreateClient("web")));
                     break;
+                case "feed_fetch":
+                    tools.Add(new FeedFetchTool(httpClientFactory.CreateClient("web")));
+                    break;
                 case "imessage":
                     var messagesDb = Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),

@@ -23,5 +23,6 @@ public sealed class AllToolsTests
         // Sanity: opt-in tools are still surfaced.
         Assert.Contains("notebook", names);
         Assert.Contains("web_search", names);
+        Assert.Contains("feed_fetch", names);
     }
 }

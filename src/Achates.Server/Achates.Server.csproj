@@ -20,6 +20,7 @@
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.1.1" />
     <PackageReference Include="Markdig" Version="1.1.2" />
     <PackageReference Include="SkiaSharp" Version="3.119.2" />
+    <PackageReference Include="System.ServiceModel.Syndication" Version="10.0.0" />
     <PackageReference Include="YamlDotNet" Version="16.*" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.4" />
     <!-- Microsoft.Data.Sqlite 10.0.4 pulls SQLitePCLRaw 2.1.11, whose bundled

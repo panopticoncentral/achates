@@ -87,6 +87,7 @@ struct ToolCallView: View {
         switch tool {
         case "web_search": return "Searching the web..."
         case "web_fetch": return "Reading webpage..."
+        case "feed_fetch": return "Reading feed..."
         case "memory": return "Checking memory..."
         case "notebook": return "Checking notebook..."
         case "notes": return "Checking notes..."
@@ -115,6 +116,7 @@ struct ToolCallView: View {
         switch tool {
         case "web_search": return "Searched the web"
         case "web_fetch": return "Read webpage"
+        case "feed_fetch": return "Read feed"
         case "memory": return "Checked memory"
         case "notebook": return "Checked notebook"
         case "notes": return "Checked notes"
@@ -143,6 +145,7 @@ struct ToolCallView: View {
         switch tool {
         case "web_search": return "Web search failed"
         case "web_fetch": return "Failed to read webpage"
+        case "feed_fetch": return "Failed to read feed"
         case "memory": return "Memory check failed"
         case "notebook": return "Notebook access failed"
         case "notes": return "Notes access failed"
