@@ -585,8 +585,6 @@ public sealed class GatewayService(
             hasMail: hasTools.Contains("mail"),
             hasCalendar: hasTools.Contains("calendar"),
             graphAccountNames: graphAccountNames,
-            hasWebSearch: hasTools.Contains("web_search"),
-            hasWebFetch: hasTools.Contains("web_fetch"),
             hasIMessage: hasTools.Contains("imessage"),
             hasCron: hasTools.Contains("cron"),
             hasHealth: hasTools.Contains("health"),
@@ -673,8 +671,8 @@ public sealed class GatewayService(
                     tools.Add(new MonetaTool(agentName, monetaAgentFile,
                         agentConfig.DefinitionHash ?? "", logger: logger));
                     break;
-                case "session":
-                    tools.Add(new SessionTool(model));
+                case "status":
+                    tools.Add(new StatusTool(model));
                     break;
                 case "memory":
                 case "cost":
@@ -685,7 +683,7 @@ public sealed class GatewayService(
                     break;
                 case "cron":
                 case "chat":
-                case "sessions":
+                case "conversations":
                     // Per-session tools — added in MobileTransport.CreateRuntime
                     break;
                 case "mail":
@@ -718,15 +716,11 @@ public sealed class GatewayService(
                     { logger.LogWarning("Agent '{Agent}': contacts tool skipped — no graph configuration", agentName); break; }
                     tools.Add(new ContactsTool(graphClients, GetContactResolver()));
                     break;
-                case "web_search":
+                case "web":
                     var braveKey = toolsConfig?.WebSearch?.BraveApiKey
                         ?? Environment.GetEnvironmentVariable("BRAVE_API_KEY");
-                    if (braveKey is null)
-                    { logger.LogWarning("Agent '{Agent}': web_search tool skipped — no brave_api_key in config or BRAVE_API_KEY env var", agentName); break; }
-                    tools.Add(new WebSearchTool(braveKey, httpClientFactory.CreateClient("brave")));
-                    break;
-                case "web_fetch":
-                    tools.Add(new WebFetchTool(httpClientFactory.CreateClient("web")));
+                    tools.Add(new WebTool(braveKey, httpClientFactory.CreateClient("brave"),
+                        httpClientFactory.CreateClient("web")));
                     break;
                 case "feed_fetch":
                     tools.Add(new FeedFetchTool(httpClientFactory.CreateClient("web")));

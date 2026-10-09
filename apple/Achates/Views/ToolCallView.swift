@@ -5,6 +5,7 @@ struct ToolCallView: View {
     let name: String
     let status: ToolCallStatus
     let result: String?
+    var action: String? = nil
     @AppStorage("show_tool_activity") private var showToolActivity = false
     @State private var isExpanded = false
     @State private var showFullResult = false
@@ -76,15 +77,21 @@ struct ToolCallView: View {
 
     private var label: String {
         if status == .failed {
-            return Self.failedLabel(for: name)
+            return Self.failedLabel(for: name, action: action)
         }
         return status == .running
-            ? Self.runningLabel(for: name)
-            : Self.completedLabel(for: name)
+            ? Self.runningLabel(for: name, action: action)
+            : Self.completedLabel(for: name, action: action)
     }
 
-    static func runningLabel(for tool: String) -> String {
-        switch tool {
+    private static func activityName(for tool: String, action: String?) -> String {
+        guard tool == "web", let action, ["search", "fetch"].contains(action) else { return tool }
+        return "web_\(action)"
+    }
+
+    static func runningLabel(for tool: String, action: String? = nil) -> String {
+        switch activityName(for: tool, action: action) {
+        case "web": return "Accessing the web..."
         case "web_search": return "Searching the web..."
         case "web_fetch": return "Reading webpage..."
         case "feed_fetch": return "Reading feed..."
@@ -104,7 +111,8 @@ struct ToolCallView: View {
         case "camera": return "Taking photo..."
         case "image": return "Generating image..."
         case "health": return "Checking health data..."
-        case "session": return "Managing session..."
+        case "status", "session": return "Checking status..."
+        case "conversations", "sessions": return "Reading conversations..."
         case "profile": return "Updating profile..."
         case "agent_creator": return "Creating agent..."
         case "think": return "Thinking deeply..."
@@ -112,8 +120,9 @@ struct ToolCallView: View {
         }
     }
 
-    private static func completedLabel(for tool: String) -> String {
-        switch tool {
+    private static func completedLabel(for tool: String, action: String? = nil) -> String {
+        switch activityName(for: tool, action: action) {
+        case "web": return "Accessed the web"
         case "web_search": return "Searched the web"
         case "web_fetch": return "Read webpage"
         case "feed_fetch": return "Read feed"
@@ -133,7 +142,8 @@ struct ToolCallView: View {
         case "camera": return "Took photo"
         case "image": return "Generated image"
         case "health": return "Checked health data"
-        case "session": return "Managed session"
+        case "status", "session": return "Checked status"
+        case "conversations", "sessions": return "Read conversations"
         case "profile": return "Updated profile"
         case "agent_creator": return "Created agent"
         case "think": return "Thought deeply"
@@ -141,8 +151,11 @@ struct ToolCallView: View {
         }
     }
 
-    private static func failedLabel(for tool: String) -> String {
-        switch tool {
+    private static func failedLabel(for tool: String, action: String? = nil) -> String {
+        switch activityName(for: tool, action: action) {
+        case "status", "session": return "Status check failed"
+        case "conversations", "sessions": return "Conversation lookup failed"
+        case "web": return "Web access failed"
         case "web_search": return "Web search failed"
         case "web_fetch": return "Failed to read webpage"
         case "feed_fetch": return "Failed to read feed"

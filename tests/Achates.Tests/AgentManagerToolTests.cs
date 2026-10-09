@@ -109,10 +109,10 @@ public sealed class AgentManagerToolTests : IDisposable
             ("name", JE("Tooled Bot")),
             ("description", JE("Has tools.")),
             ("prompt", JE("You have tools.")),
-            ("tools", JEArray("session", "memory"))));
+            ("tools", JEArray("status", "memory"))));
 
         var content = await File.ReadAllTextAsync(Path.Combine(_agentsDir, "tooled-bot", "AGENT.md"));
-        Assert.Contains("session", content);
+        Assert.Contains("status", content);
         Assert.Contains("memory", content);
     }
 
@@ -178,7 +178,7 @@ public sealed class AgentManagerToolTests : IDisposable
     [Fact]
     public async Task Read_ReturnsDefinition()
     {
-        await SeedAgentAsync("Reader", "Reads things.", "You read.", ["session", "memory"]);
+        await SeedAgentAsync("Reader", "Reads things.", "You read.", ["status", "memory"]);
 
         var tool = CreateTool();
         var result = await tool.ExecuteAsync("r1", Args(
@@ -188,7 +188,7 @@ public sealed class AgentManagerToolTests : IDisposable
 
         Assert.Contains("Reads things.", text);
         Assert.Contains("You read.", text);
-        Assert.Contains("session", text);
+        Assert.Contains("status", text);
     }
 
     [Fact]
@@ -212,7 +212,7 @@ public sealed class AgentManagerToolTests : IDisposable
             ("action", JE("modify")),
             ("agent", JE("editable")),
             ("description", JE("New description.")),
-            ("tools", JEArray("session"))));
+            ("tools", JEArray("status"))));
 
         Assert.Contains("updated", Text(result), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("editable", _loadedAgents);
@@ -221,7 +221,7 @@ public sealed class AgentManagerToolTests : IDisposable
         var content = await File.ReadAllTextAsync(Path.Combine(_agentsDir, "editable", "AGENT.md"));
         Assert.Contains("New description.", content);
         Assert.DoesNotContain("Old description.", content);
-        Assert.Contains("session", content);
+        Assert.Contains("status", content);
     }
 
     [Fact]

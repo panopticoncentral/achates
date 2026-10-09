@@ -56,8 +56,8 @@ struct ActivityGroupView: View {
     }
 
     private func runningLabel(_ block: ContentBlock) -> String {
-        if case .toolCall(_, let name, _, _) = block {
-            return ToolCallView.runningLabel(for: name)
+        if case .toolCall(_, let name, _, _, let action) = block {
+            return ToolCallView.runningLabel(for: name, action: action)
         }
         return "Thinking..."
     }
@@ -67,8 +67,8 @@ struct ActivityGroupView: View {
         switch block {
         case .thinking(let id, let text, let collapsed):
             ThinkingView(thinkingId: id, text: text, collapsed: collapsed)
-        case .toolCall(let id, let name, let status, let result):
-            ToolCallView(toolId: id, name: name, status: status, result: result)
+        case .toolCall(let id, let name, let status, let result, let action):
+            ToolCallView(toolId: id, name: name, status: status, result: result, action: action)
         default:
             EmptyView()
         }

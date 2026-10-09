@@ -46,7 +46,7 @@ public sealed class ChatToolTests
             {
                 AgentDef = MakeAgentDef(desc),
                 Description = desc,
-                ToolNames = ["session", "memory"],
+                ToolNames = ["status", "memory"],
             };
         }
         return registry;
@@ -188,7 +188,7 @@ public sealed class ChatToolTests
             new Dictionary<string, object?> { ["action"] = JsonDocument.Parse("\"agents\"").RootElement });
 
         var text = GetText(result);
-        Assert.Contains("session", text);
+        Assert.Contains("status", text);
         Assert.Contains("memory", text);
     }
 

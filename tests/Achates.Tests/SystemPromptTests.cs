@@ -1,4 +1,5 @@
 using Achates.Server;
+using Achates.Server.Tools;
 
 namespace Achates.Tests;
 
@@ -228,20 +229,20 @@ public sealed class SystemPromptTests
         Assert.Contains("Available accounts: a, b", result);
     }
 
-    [Fact]
-    public void Web_search_section_included_when_enabled()
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("key", true)]
+    public void Web_guidance_matches_available_actions(string? key, bool searchAvailable)
     {
-        var result = SystemPrompt.Build(hasWebSearch: true);
-
-        Assert.Contains("## Web Search", result);
-    }
-
-    [Fact]
-    public void Web_fetch_section_included_when_enabled()
-    {
-        var result = SystemPrompt.Build(hasWebFetch: true);
-
-        Assert.Contains("## Web Fetch", result);
+        using var client = new HttpClient();
+        var result = SystemPrompt.Build(tools: [new WebTool(key, client, client)]);
+        Assert.Contains("## Web", result);
+        Assert.Contains("action 'fetch'", result);
+        Assert.Equal(searchAvailable, result.Contains("action 'search'"));
+        Assert.Equal(!searchAvailable, result.Contains("Web search is unavailable"));
+        Assert.DoesNotContain("web_fetch", result);
+        Assert.DoesNotContain("web_search", result);
     }
 
     [Fact]
@@ -307,8 +308,7 @@ public sealed class SystemPromptTests
         Assert.DoesNotContain("## Notes", result);
         Assert.DoesNotContain("## Mail", result);
         Assert.DoesNotContain("## Calendar", result);
-        Assert.DoesNotContain("## Web Search", result);
-        Assert.DoesNotContain("## Web Fetch", result);
+        Assert.DoesNotContain("## Web", result);
         Assert.DoesNotContain("## iMessage", result);
         Assert.DoesNotContain("## Health", result);
         Assert.DoesNotContain("## Scheduled Tasks", result);

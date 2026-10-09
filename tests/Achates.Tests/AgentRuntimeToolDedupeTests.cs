@@ -37,19 +37,19 @@ public class AgentRuntimeToolDedupeTests
     {
         var runtime = new AgentRuntime(new AgentOptions
         {
-            Tools = [new NamedTool("sessions"), new NamedTool("memory"), new NamedTool("sessions")],
+            Tools = [new NamedTool("conversations"), new NamedTool("memory"), new NamedTool("conversations")],
         });
 
         Assert.Equal(2, runtime.Tools.Count);
-        Assert.Single(runtime.Tools, t => t.Name == "sessions");
+        Assert.Single(runtime.Tools, t => t.Name == "conversations");
         Assert.Single(runtime.Tools, t => t.Name == "memory");
     }
 
     [Fact]
     public void Constructor_keeps_the_last_tool_for_a_duplicated_name()
     {
-        var first = new NamedTool("sessions");
-        var last = new NamedTool("sessions");
+        var first = new NamedTool("conversations");
+        var last = new NamedTool("conversations");
 
         var runtime = new AgentRuntime(new AgentOptions
         {
@@ -64,7 +64,7 @@ public class AgentRuntimeToolDedupeTests
     {
         var runtime = new AgentRuntime();
 
-        runtime.SetTools([new NamedTool("sessions"), new NamedTool("sessions")]);
+        runtime.SetTools([new NamedTool("conversations"), new NamedTool("conversations")]);
 
         Assert.Single(runtime.Tools);
     }

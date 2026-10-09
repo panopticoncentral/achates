@@ -63,10 +63,10 @@ final class ChatSessionState {
         messages[index].appendImage(data: data, mimeType: mimeType)
     }
 
-    func addToolCall(toolId: String, name: String) {
+    func addToolCall(toolId: String, name: String, action: String? = nil) {
         guard let id = streamingMessageId,
               let index = lastMessageIndex(id: id) else { return }
-        messages[index].addToolCall(toolId: toolId, name: name)
+        messages[index].addToolCall(toolId: toolId, name: name, action: action)
     }
 
     func completeToolCall(toolId: String, result: String?, success: Bool) {

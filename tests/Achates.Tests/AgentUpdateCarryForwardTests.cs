@@ -19,7 +19,7 @@ public sealed class AgentUpdateCarryForwardTests
         {
             "agent": "maya",
             "description": "Updated description",
-            "tools": ["session", "notebook"],
+            "tools": ["status", "notebook"],
             "allowed_chats": [],
             "prompt": "You are Maya.",
             "model": "anthropic/claude-sonnet-4.6",
@@ -64,7 +64,7 @@ public sealed class AgentUpdateCarryForwardTests
         Assert.Equal("anthropic/claude-sonnet-4.6", updated.Model);
         Assert.Null(updated.ThinkingModel); // empty string clears the override
         Assert.Equal("af_nicole", updated.Voice);
-        Assert.Equal(["session", "notebook"], updated.Tools);
+        Assert.Equal(["status", "notebook"], updated.Tools);
     }
 
     [Fact]

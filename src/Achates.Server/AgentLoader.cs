@@ -9,7 +9,7 @@ namespace Achates.Server;
 ///   ## Capabilities
 ///   - **Model:** anthropic/claude-sonnet-4.6
 ///   - **Thinking Model:** anthropic/claude-opus-4-7
-///   - **Tools:** session, memory, todo
+///   - **Tools:** status, memory, todo
 ///   - **Voice:** af_nicole
 ///   - **Allow chat:** val, claire
 ///   - **Reasoning effort:** medium
@@ -182,7 +182,7 @@ public static class AgentLoader
             ## Capabilities
 
             **Tools:**
-              - session
+              - status
               - memory
 
             **Reasoning Effort:** medium
@@ -246,6 +246,17 @@ public static class AgentLoader
         config.UnknownSections = [.. sections.Keys
             .Where(k => k is not ("_title" or "" or "capabilities" or "prompt"))];
 
+        // Legacy assignments remain readable; expose one canonical capability in the editor.
+        if (config.Tools is not null)
+            config.Tools = config.Tools.Select(t => t switch
+                {
+                    "web_search" or "web_fetch" => "web",
+                    "session" => "status",
+                    "sessions" => "conversations",
+                    _ => t,
+                })
+                .Distinct(StringComparer.Ordinal).ToList();
+
         return config;
     }
 
@@ -296,7 +307,7 @@ public static class AgentLoader
     /// Parses capabilities from a format like:
     ///   **Model:** anthropic/claude-sonnet-4
     ///   **Tools:**
-    ///     - session
+    ///     - status
     ///     - memory
     ///   **Reasoning Effort:** medium
     ///

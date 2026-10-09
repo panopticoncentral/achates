@@ -2011,6 +2011,8 @@ public sealed class MobileTransport
                             session_id = sessionId,
                             tool_call_id = toolStart.ToolCallId,
                             tool_name = toolStart.ToolName,
+                            action = toolStart.ToolName == "web" && toolStart.Arguments.TryGetValue("action", out var webAction)
+                                ? webAction?.ToString() : null,
                         }, ct);
                         break;
 
@@ -2273,8 +2275,8 @@ public sealed class MobileTransport
         if (agentDef.CronStore is { } cronStore && CronService is { } cron)
             tools.Add(new CronTool(cronStore, agentName, cron));
 
-        if (agentDef.ToolNames.Contains("sessions"))
-            tools.Add(new SessionsTool(sessionStore, agentName, currentSessionId: sessionId, since: null));
+        if (agentDef.ToolNames.Contains("conversations"))
+            tools.Add(new ConversationsTool(sessionStore, agentName, currentSessionId: sessionId, since: null));
 
         if (agentDef.ToolNames.Contains("chat"))
         {
@@ -2368,7 +2370,7 @@ public sealed class MobileTransport
     /// <summary>
     /// When resuming a session that originated from a cron job, restore any tools the
     /// original cron run had so the agent's tool list matches its own history. Today the
-    /// only such tool is <see cref="SessionsTool"/>, injected for dreamtime sessions.
+    /// only such tool is <see cref="ConversationsTool"/>, injected for dreamtime sessions.
     /// Without this, the agent looks at its prior tool calls, sees the tool isn't in its
     /// current list, and concludes (wrongly) that those calls were hallucinations.
     /// </summary>
@@ -2384,7 +2386,7 @@ public sealed class MobileTransport
 
         // No `since` filter on resume — the agent can re-list all sessions and reason
         // about what's relevant. The cron run's filter is only useful at fresh-fire time.
-        return [new SessionsTool(sessionStore, agentName, currentSessionId: existing.Id, since: null)];
+        return [new ConversationsTool(sessionStore, agentName, currentSessionId: existing.Id, since: null)];
     }
 
     private static string? GetStringParam(JsonElement element, string name)

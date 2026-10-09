@@ -28,7 +28,7 @@ A helpful assistant.
 ## Capabilities
 
 **Tools:**
-  - session
+  - status
 
 **Reasoning Effort:** medium
 
@@ -96,9 +96,11 @@ Shared tool configuration at the top level. Individual tools are enabled per-age
 
 #### `tools.web_search`
 
+Search provider settings for the combined **Web** tool. Legacy agent assignments `web_search` and `web_fetch` normalize to a single `web`; new definitions should use `web`.
+
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `brave_api_key` | string | _(none)_ | Brave Search API key. Falls back to `BRAVE_API_KEY` env var. Required for `web_search`. |
+| `brave_api_key` | string | _(none)_ | Brave Search API key. Falls back to `BRAVE_API_KEY` env var. Required for the `web` tool’s `search` action; `fetch` needs no key. The setting name is retained for compatibility. |
 
 #### `tools.moneta`
 
@@ -220,7 +222,7 @@ Each capability is a `**Key:** value` line. List values (tools, allowed chats) u
 | `Provider` | string | _(global)_ | Override the provider for this agent. |
 | `Model` | string | _(`models.base`)_ | Base model id for this agent. Falls back to `models.base` in config.yaml. |
 | `Thinking Model` | string | _(`models.thinking`)_ | Thinking model id used by the `think` tool. Falls back to `models.thinking`. Only consulted when `think` is enabled. Setting it here (rather than relying on `models.thinking`) also makes nightly dreamtime consolidation run on this model instead of the agent's base model — consolidation is unattended and agentic, so a stronger model is worth it where the base model is weak. The global fallback deliberately does *not* trigger this. |
-| `Tools` | list | _(none)_ | Tool names to enable. Available: `session`, `notebook`, `library`, `notes`, `mail`, `calendar`, `web_search`, `web_fetch`, `feed_fetch`, `cron`, `imessage`, `transcribe`, `think`, `health`, `moneta`, `chat`, `location`, `camera`, `image`, `profile`, `agent_manager`. Note: `memory` and `cost` are always available to every agent; listing them here is accepted but ignored. |
+| `Tools` | list | _(none)_ | Tool names to enable. Available: `status`, `conversations`, `notebook`, `library`, `notes`, `mail`, `calendar`, `web`, `feed_fetch`, `cron`, `imessage`, `transcribe`, `think`, `health`, `moneta`, `chat`, `location`, `camera`, `image`, `profile`, `agent_manager`. Legacy `session` and `sessions` assignments load as `status` and `conversations`, respectively. Note: `memory` and `cost` are always available to every agent; listing them here is accepted but ignored. |
 | `Allowed Chats` | list | _(all)_ | Allowlist of agent names this agent can chat with. Omit to allow all. Only relevant when `chat` is in tools. |
 | `Reasoning Effort` | string | _(legacy behavior)_ | Regular model effort: `low`, `medium`, `high`, or `default` to let the model choose. Only sent if the model supports effort. When omitted, existing behavior is preserved: `medium` if any completion setting (temperature or max tokens) exists; otherwise no effort is sent. |
 | `Thinking Reasoning Effort` | string | `default` | Independent effort for `think` calls: `low`, `medium`, `high`, or `default`. Omitted/`default` sends no effort; it never inherits regular effort. Only sent if the thinking model supports effort. |
@@ -284,13 +286,12 @@ Personal assistant.
 **Thinking Model:** anthropic/claude-opus-4.7
 
 **Tools:**
-  - session
+  - status
   - notebook
   - library
   - mail
   - calendar
-  - web_search
-  - web_fetch
+  - web
   - cron
   - imessage
   - health

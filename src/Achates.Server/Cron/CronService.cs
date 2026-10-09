@@ -59,7 +59,7 @@ public sealed class CronService : IAsyncDisposable
 
         Your job:
 
-        1. Use the sessions tool to list recent sessions; decide which contain anything worth
+        1. Use the conversations tool to list recent sessions; decide which contain anything worth
            remembering; read those in full.
         2. Core and working memory are already in your context above. Edit them with
            INCREMENTAL `edit`/`append` using the text you can already see — do not read
@@ -578,7 +578,7 @@ public sealed class CronService : IAsyncDisposable
     {
         var tools = new List<AgentTool>();
 
-        // Add shared tools (SessionTool, MailTool, etc.) — but not CronTool
+        // Add shared tools (StatusTool, MailTool, etc.) — but not CronTool
         foreach (var tool in agentDef.Tools)
         {
             tools.Add(tool);
@@ -603,7 +603,7 @@ public sealed class CronService : IAsyncDisposable
         {
             since = DateTimeOffset.UtcNow - MaxDreamtimeReviewWindow;
         }
-        tools.Add(new SessionsTool(_sessionStore, agentName, currentSessionId: null, since));
+        tools.Add(new ConversationsTool(_sessionStore, agentName, currentSessionId: null, since));
 
         var sharedMemoryPath = Path.Combine(ConfigLoader.DataDir, "memory.md");
         tools.AddRange(UniversalTools.Build(agentName, agentDef, sharedMemoryPath, BuildCostLedgerRegistry()));

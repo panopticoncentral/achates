@@ -114,7 +114,8 @@ func parseMessage(_ value: JSONValue, serverURL: URL?) -> ChatMessage? {
                 case "tool_call":
                     let toolId = itemDict["id"]?.stringValue ?? UUID().uuidString
                     let name = itemDict["name"]?.stringValue ?? "unknown"
-                    blocks.append(.toolCall(id: toolId, name: name, status: .completed, result: nil))
+                    blocks.append(.toolCall(id: toolId, name: name, status: .completed, result: nil,
+                                            action: itemDict["arguments"]?.objectValue?["action"]?.stringValue))
                 case "image":
                     if let block = parseImageBlock(itemDict, serverURL: serverURL) {
                         blocks.append(block)

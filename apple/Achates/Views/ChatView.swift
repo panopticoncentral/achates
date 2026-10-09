@@ -473,7 +473,7 @@ struct ChatView: View {
             }
             // Keep if message has any non-tool-call blocks, or any still-running tool calls
             return message.blocks.contains { block in
-                if case .toolCall(_, _, let status, _) = block {
+                if case .toolCall(_, _, let status, _, _) = block {
                     return status == .running || status == .failed
                 }
                 return true

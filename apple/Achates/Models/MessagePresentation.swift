@@ -20,13 +20,13 @@ struct MessageBlockGroup: Identifiable, Equatable {
     }
 
     var failureCount: Int {
-        blocks.filter { if case .toolCall(_, _, .failed, _) = $0 { return true }; return false }.count
+        blocks.filter { if case .toolCall(_, _, .failed, _, _) = $0 { return true }; return false }.count
     }
 
     var runningBlock: ContentBlock? {
         blocks.last {
             switch $0 {
-            case .toolCall(_, _, .running, _), .thinking(_, _, false): return true
+            case .toolCall(_, _, .running, _, _), .thinking(_, _, false): return true
             default: return false
             }
         }

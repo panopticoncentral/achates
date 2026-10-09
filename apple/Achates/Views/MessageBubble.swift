@@ -150,8 +150,8 @@ struct MessageBubble: View {
         case .thinking(let id, let text, let collapsed):
             ThinkingView(thinkingId: id, text: text, collapsed: collapsed)
 
-        case .toolCall(let id, let name, let status, let result):
-            ToolCallView(toolId: id, name: name, status: status, result: result)
+        case .toolCall(let id, let name, let status, let result, let action):
+            ToolCallView(toolId: id, name: name, status: status, result: result, action: action)
 
         case .image(_, let data, _):
             imageBubble(data)

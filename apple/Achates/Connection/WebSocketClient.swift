@@ -318,7 +318,7 @@ final class WebSocketClient {
             guard let conversation else { break }
             let toolId = payload["tool_call_id"]?.stringValue ?? UUID().uuidString
             let name = payload["tool_name"]?.stringValue ?? "unknown"
-            conversation.addToolCall(toolId: toolId, name: name)
+            conversation.addToolCall(toolId: toolId, name: name, action: payload["action"]?.stringValue)
 
         case "tool.end":
             guard let conversation else { break }

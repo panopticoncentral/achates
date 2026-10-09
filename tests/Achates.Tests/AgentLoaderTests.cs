@@ -5,6 +5,25 @@ namespace Achates.Tests;
 public sealed class AgentLoaderTests
 {
     [Theory]
+    [InlineData("web_search, web_fetch", "web")]
+    [InlineData("web_fetch", "web")]
+    [InlineData("web_search", "web")]
+    [InlineData("web, web_fetch, notebook, web_search", "web,notebook")]
+    [InlineData("session, sessions", "status,conversations")]
+    [InlineData("session, status, sessions, conversations", "status,conversations")]
+    public void Legacy_tool_assignments_normalize_and_serialize_once(string tools, string expected)
+    {
+        var markdown = $"# Test\n\n## Capabilities\n\n**Tools:** {tools}\n";
+        var config = AgentLoader.Parse(markdown)!;
+        Assert.Equal(expected.Split(','), config.Tools);
+        var saved = AgentLoader.Serialize("Test", config);
+        Assert.DoesNotContain("web_search", saved);
+        Assert.DoesNotContain("web_fetch", saved);
+        Assert.DoesNotContain("  - session", saved);
+        Assert.Equal(config.Tools, AgentLoader.Parse(saved)!.Tools);
+    }
+
+    [Theory]
     [InlineData("Paul", "paul")]
     [InlineData("Paul's Assistant", "pauls-assistant")]
     [InlineData("My Agent 2", "my-agent-2")]

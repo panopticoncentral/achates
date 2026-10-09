@@ -14,7 +14,7 @@ enum MessageRole: String, Sendable, Codable {
 enum ContentBlock: Identifiable, Sendable, Equatable {
     case text(id: String, String)
     case thinking(id: String, text: String, collapsed: Bool)
-    case toolCall(id: String, name: String, status: ToolCallStatus, result: String?)
+    case toolCall(id: String, name: String, status: ToolCallStatus, result: String?, action: String? = nil)
     case image(id: String, data: Data, mimeType: String)
     /// A non-image attachment (PDF, text file) on a user message. Carries the
     /// raw bytes so Edit & Resubmit can reconstruct the attachment.
@@ -26,7 +26,7 @@ enum ContentBlock: Identifiable, Sendable, Equatable {
         switch self {
         case .text(let id, _): return "text-\(id)"
         case .thinking(let id, _, _): return "thinking-\(id)"
-        case .toolCall(let id, _, _, _): return "tool-\(id)"
+        case .toolCall(let id, _, _, _, _): return "tool-\(id)"
         case .image(let id, _, _): return "image-\(id)"
         case .document(let id, _, _, _): return "document-\(id)"
         case .agentTurn(let id, _, _, _): return "agent-\(id)"
@@ -148,21 +148,22 @@ struct ChatMessage: Identifiable, Sendable, Equatable {
         }
     }
 
-    mutating func addToolCall(toolId: String, name: String) {
-        blocks.append(.toolCall(id: toolId, name: name, status: .running, result: nil))
+    mutating func addToolCall(toolId: String, name: String, action: String? = nil) {
+        blocks.append(.toolCall(id: toolId, name: name, status: .running, result: nil, action: action))
     }
 
     mutating func completeToolCall(toolId: String, result: String?, success: Bool) {
         if let index = blocks.firstIndex(where: {
-            if case .toolCall(let id, _, _, _) = $0 { return id == toolId }
+            if case .toolCall(let id, _, _, _, _) = $0 { return id == toolId }
             return false
         }) {
-            if case .toolCall(let id, let name, _, _) = blocks[index] {
+            if case .toolCall(let id, let name, _, _, let action) = blocks[index] {
                 blocks[index] = .toolCall(
                     id: id,
                     name: name,
                     status: success ? .completed : .failed,
-                    result: result
+                    result: result,
+                    action: action
                 )
             }
         }

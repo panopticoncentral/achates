@@ -6,23 +6,23 @@ using Achates.Server.Tools;
 
 namespace Achates.Tests;
 
-public sealed class SessionsToolTests : IDisposable
+public sealed class ConversationsToolTests : IDisposable
 {
     private const string Agent = "agent1";
     private readonly string _basePath = Path.Combine(Path.GetTempPath(), $"achates-test-{Guid.NewGuid():N}");
     private readonly MobileSessionStore _store;
 
-    public SessionsToolTests() => _store = new MobileSessionStore(_basePath);
+    public ConversationsToolTests() => _store = new MobileSessionStore(_basePath);
 
     public void Dispose()
     {
         if (Directory.Exists(_basePath)) Directory.Delete(_basePath, true);
     }
 
-    private SessionsTool Tool(string? currentSessionId = null, DateTimeOffset? since = null) =>
+    private ConversationsTool Tool(string? currentSessionId = null, DateTimeOffset? since = null) =>
         new(_store, Agent, currentSessionId, since);
 
-    private static async Task<string> Run(SessionsTool tool, Dictionary<string, object?> args)
+    private static async Task<string> Run(ConversationsTool tool, Dictionary<string, object?> args)
     {
         var result = await tool.ExecuteAsync("call-1", args);
         return ((CompletionTextContent)result.Content[0]).Text;

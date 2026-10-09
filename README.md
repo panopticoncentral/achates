@@ -86,7 +86,7 @@ tools:
 
 agents:
   myagent:
-    tools: [session, memory, mail, calendar]
+    tools: [status, memory, mail, calendar]
 ```
 
 That's it — no `client_secret`, `tenant_id`, or `user_email` needed. The name (`personal` here) is up to you.
@@ -159,7 +159,7 @@ tools:
 
 agents:
   myagent:
-    tools: [session, memory, mail, calendar]
+    tools: [status, memory, mail, calendar]
 ```
 
 To keep the secret out of the config file, set the `GRAPH_CLIENT_SECRET` environment variable instead and omit `client_secret` from the YAML.
@@ -189,7 +189,7 @@ tools:
 
 agents:
   myagent:
-    tools: [session, memory, mail, calendar]
+    tools: [status, memory, mail, calendar]
 ```
 
 When multiple accounts are configured, the mail and calendar tools gain an `account` parameter. The agent is told which accounts are available and will select the right one based on context, or you can ask explicitly (e.g. "check my work calendar").
@@ -204,7 +204,7 @@ Add `notes` to the agent's tools in `AGENT.md`:
 
 ```markdown
 **Tools:**
-  - session
+  - status
   - memory
   - notes
 ```
@@ -236,7 +236,7 @@ Then add `notebook` to the agent's tools in `AGENT.md`:
 
 ```markdown
 **Tools:**
-  - session
+  - status
   - memory
   - notebook
   - library
@@ -262,28 +262,28 @@ Set the `BRAVE_API_KEY` environment variable, or add it to your config:
 tools:
   web_search:
     brave_api_key: BSA...
-
-agents:
-  myagent:
-    tools: [session, memory, web_search, web_fetch]
 ```
 
-`web_fetch` works without an API key — it only needs `web_search` to have Brave configured.
+Enable `web` in the agent's `**Tools:**` list in `AGENT.md`, or select **Web** in the agent editor. Fetch works without an API key; search requires Brave. The existing `tools.web_search.brave_api_key` setting is unchanged.
+
+Legacy `web_search` and `web_fetch` assignments load as one `web` capability. Replace those entries with a single `web` in saved definitions and update prompt references to the appropriate action.
+
+The former `session` and `sessions` tools are now `status` and `conversations`. Legacy assignments remain readable; new definitions and the tool picker use the new names.
 
 ### Tools
 
-**web_search** — Search the web
+**web**, `action: "search"` — Search the web
 - Returns a numbered list of results with title, URL, and description
 - Params: `query` (required), `count` (1-20, default 5)
 
-**web_fetch** — Fetch and extract readable content from a URL
+**web**, `action: "fetch"` — Fetch and extract readable content from a URL
 - Uses Readability extraction for HTML, returns plain text
 - Params: `url` (required), `max_chars` (default 20,000, max 50,000)
 
 **feed_fetch** — Fetch RSS 2.0 or Atom 1.0 as structured JSON
 - Enable `feed_fetch` in the agent's `Tools` capability or select **Feed Fetch** in the agent editor. No API key or additional configuration is needed. Available to both interactive conversations and scheduled jobs for that agent.
 - Params: `url` (required), `limit` (1–50, default 20), `since` (optional ISO 8601 publication timestamp with timezone, e.g. `2026-10-01T00:00:00Z`), `include_content` (default false).
-- Returns feed title, website/feed URLs, description, fetch timestamp, and entries with IDs, titles, article URLs, publication/update dates, authors, categories, and plain-text summaries. `include_content` adds text embedded in the feed; it never downloads linked articles. Use `web_fetch` for those.
+- Returns feed title, website/feed URLs, description, fetch timestamp, and entries with IDs, titles, article URLs, publication/update dates, authors, categories, and plain-text summaries. `include_content` adds text embedded in the feed; it never downloads linked articles. Use `web` with `action: "fetch"` for those.
 - Preserves feed order. `since` is strictly after the supplied publication time; missing or invalid dates are `null`, and undated entries excluded by the filter are counted in `undated_items_skipped`. A feed is its current window, not a complete archive; there is no subscription or seen-item state.
 - Downloads are limited to 2 MiB and 30 seconds; JSON output is capped at 64,000 characters. Summaries are capped at 2,000 characters and embedded content at 8,000 per entry, with smaller bounds for metadata. `text_truncated` flags shortened fields/lists; `items_truncated` flags omitted matching entries. Counts report total, matching, and returned entries. Errors return an `error` object with `code` and `message`.
 - Feed content is labeled untrusted reference data. XML DTDs/external entities are disabled; only HTTP(S) article links are returned. Supply a direct feed URL; feed discovery from a website is not supported.
@@ -314,7 +314,7 @@ In `~/.achates/config.yaml`, add `imessage` to your agent's tools:
 ```yaml
 agents:
   myagent:
-    tools: [session, memory, imessage]
+    tools: [status, memory, imessage]
 ```
 
 ### 4. Run from the published binary
@@ -355,7 +355,7 @@ tools:
 
 agents:
   myagent:
-    tools: [session, memory, health]
+    tools: [status, memory, health]
 ```
 
 To keep the secret out of the config file, set the `WITHINGS_CLIENT_SECRET` environment variable instead and omit `client_secret` from the YAML.
@@ -392,16 +392,15 @@ Moneta's read-only financial tool uses a locally installed `moneta-read` executa
 
 | Tool | Description | Config required |
 |------|-------------|-----------------|
-| `session` | Current time, model info, timezone | None |
-| `sessions` | Browse the agent's own past sessions — `list`, `read`, `search` (excludes the current session) | None |
+| `status` | Current time, model info, timezone | None |
+| `conversations` | Browse the agent's own past sessions — `list`, `read`, `search` (excludes the current session) | None |
 | `memory` | Persistent agent memory across sessions | None |
 | `notebook` | Read/write markdown files in a configured folder | `tools.notebook.root` path |
 | `library` | Read-only reference documents (.md, text, PDF) in a configured folder | `tools.library.root` path |
 | `notes` | Access Apple Notes (macOS only) — `folders`, `list`, `read`, `create` | Notes automation permission on first use |
 | `mail` | Read Outlook email and attachments | `tools.graph` account(s) |
 | `calendar` | View Outlook calendar and create events | `tools.graph` account(s) |
-| `web_search` | Search the web via Brave Search | `BRAVE_API_KEY` or `tools.web_search.brave_api_key` |
-| `web_fetch` | Fetch and extract web page content | None |
+| `web` | Search via Brave (`search`) or read a URL (`fetch`) | Search only: `BRAVE_API_KEY` or `tools.web_search.brave_api_key` |
 | `feed_fetch` | Read structured RSS/Atom feed entries | None |
 | `cost` | Query usage costs (summary, recent, breakdown) | None |
 | `imessage` | Read iMessage conversations (macOS only) | Full Disk Access on published binary; `tools.graph` for contact names |

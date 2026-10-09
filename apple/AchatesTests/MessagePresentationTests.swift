@@ -2,6 +2,34 @@ import XCTest
 @testable import Achates
 
 final class MessagePresentationTests: XCTestCase {
+    func testWebActionSurvivesLiveCompletionAndHistory() {
+        var message = ChatMessage(id: "reply", role: .assistant, blocks: [], timestamp: Date())
+        message.addToolCall(toolId: "web-call", name: "web", action: "search")
+        message.completeToolCall(toolId: "web-call", result: "Results", success: true)
+        guard case .toolCall(_, let name, .completed, _, let action) = message.blocks.first else {
+            return XCTFail("Expected completed web call")
+        }
+        XCTAssertEqual(name, "web")
+        XCTAssertEqual(action, "search")
+        XCTAssertEqual(ToolCallView.runningLabel(for: name, action: action), "Searching the web...")
+
+        let restored = parseMessage(.object([
+            "role": .string("assistant"),
+            "content": .array([.object([
+                "type": .string("tool_call"), "id": .string("fetch-call"), "name": .string("web"),
+                "arguments": .object(["action": .string("fetch"), "url": .string("https://example.test")])
+            ])])
+        ]), serverURL: nil)
+        guard case .toolCall(_, let restoredName, _, _, let restoredAction) = restored?.blocks.first else {
+            return XCTFail("Expected restored web call")
+        }
+        XCTAssertEqual(restoredName, "web")
+        XCTAssertEqual(restoredAction, "fetch")
+        XCTAssertEqual(ToolCallView.runningLabel(for: restoredName, action: restoredAction), "Reading webpage...")
+        XCTAssertEqual(ToolCallView.runningLabel(for: "web_fetch"), "Reading webpage...")
+        XCTAssertEqual(ToolCallView.runningLabel(for: "web"), "Accessing the web...")
+    }
+
     func testWorkbookHistoryRestoresOriginalBytesAndExcelPresentation() {
         let bytes = Data([0x50, 0x4b, 0x03, 0x04])
         let message = parseMessage(.object([

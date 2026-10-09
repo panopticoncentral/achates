@@ -10,16 +10,16 @@ namespace Achates.Server.Tools;
 /// <summary>
 /// Returns a status card with session information: current time, model, provider, context window.
 /// </summary>
-internal sealed class SessionTool(Model model) : AgentTool
+internal sealed class StatusTool(Model model) : AgentTool
 {
     private static readonly JsonElement _schema = ObjectSchema(new Dictionary<string, JsonElement>
     {
         ["timezone"] = StringSchema("IANA timezone (e.g., 'America/New_York'). Defaults to local time."),
     });
 
-    public override string Name => "session";
+    public override string Name => "status";
     public override string Description => "Get current session status: time, model, and configuration.";
-    public override string Label => "Session";
+    public override string Label => "Status";
     public override JsonElement Parameters => _schema;
 
     public override Task<AgentToolResult> ExecuteAsync(

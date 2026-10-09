@@ -14,7 +14,7 @@ namespace Achates.Server.Tools;
 /// The current session is always excluded. When <paramref name="since"/> is set
 /// (dreamtime), listing/searching is scoped to sessions updated after that instant.
 /// </summary>
-internal sealed class SessionsTool(
+internal sealed class ConversationsTool(
     MobileSessionStore sessionStore,
     string agentName,
     string? currentSessionId,
@@ -35,10 +35,10 @@ internal sealed class SessionsTool(
         },
         required: ["action"]);
 
-    public override string Name => "sessions";
+    public override string Name => "conversations";
     public override string Description =>
-        "Browse your own past conversation sessions. 'list' recent sessions, 'read' a full transcript by id, 'search' by keyword. Includes prior chats with users, scheduled runs, and conversations with other agents. The current session is excluded.";
-    public override string Label => "Sessions";
+        "Browse your own past conversations. 'list' recent sessions, 'read' a full transcript by id, 'search' by keyword. Includes prior chats with users, scheduled runs, and conversations with other agents. The current session is excluded.";
+    public override string Label => "Conversations";
     public override JsonElement Parameters => _schema;
 
     public override async Task<AgentToolResult> ExecuteAsync(
