@@ -384,6 +384,8 @@ Agents can speak their replies via a locally-hosted [Kokoro-FastAPI](https://git
 
 ## Tools Reference
 
+The Apple agent editor lists available tools alphabetically by display name.
+
 The Apple agent editor has separate **Regular Effort** and **Thinking Effort** pickers beside their model selections. Each offers **Model default**, **Low**, **Medium**, and **High**. Thinking Effort appears when the `think` tool is enabled and controls its calls independently. In `AGENT.md`, use `**Reasoning Effort:**` and `**Thinking Reasoning Effort:**`; `default` leaves effort to the model. Existing regular settings are preserved, and thinking calls keep the model default until changed. Unsupported effort settings are omitted from model requests. See [configuration](docs/configuration.md#capabilities-keys).
 
 Moneta's read-only financial tool uses a locally installed `moneta-read` executable and owner-approved agent definitions. It supports accounts, transactions, actuals, budgets, assumptions, and formulas. See [Moneta setup](docs/moneta-setup.md) before enabling it; tool assignment alone does not grant access.

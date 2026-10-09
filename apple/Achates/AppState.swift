@@ -558,6 +558,8 @@ final class AppState {
                   let name = obj["name"]?.stringValue else { return nil }
             let label = obj["label"]?.stringValue ?? name
             return ToolInfo(name: name, label: label)
+        }.sorted {
+            $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending
         }
     }
 
